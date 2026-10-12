@@ -61,7 +61,7 @@ to know when a release changes behavior.
   "Thanksgiving in 2027") and in what order. The local model proposes the query once; code
   checks every part against what the source declares, drops what the ask never said, decides
   the columns, limits and counts itself, and reads dates and numbers from the ask with two
-  pinned language libraries rather than from the model. Each query also comes with a plain
+  pinned libraries rather than from the model. Each query also comes with a plain
   line saying how it was read ("Earthquakes · Magnitude > 4 · past 7 days · count") and a
   note when part of the ask could not be carried. This release ships the layer with its
   measurement tool and test data; cards keep their current behaviour until it is wired in.

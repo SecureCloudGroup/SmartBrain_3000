@@ -2983,15 +2983,31 @@ a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port,
   source's own name; `names` ≡ `contains` over "*" when compared. `order`: an order on the axis is
   implicit (dropped); a non-axis order survives only for kind `ranking`. A declared count value ≡
   its list + count when nothing narrows.
-- **Recognizer validators.** `recognize` merges ms-recognizers-text-suite 1.0.1 (DateTime, Number,
-  NumberWithUnit, Ordinal; en-us) and puckling 0.5.0 (time, duration, holidays with the asked year)
-  into one closed shape `{time, numbers, ordinals, comparators}`, under the bake-off's rules:
-  spans end on word boundaries (one that starts inside a word is cut at the next word — puckling
-  reads "Boston tomorrow" as "on tomorrow"); masked ranges drop spans; a time span needs BOTH
-  libraries (puckling alone read "the sun's" as Sunday; ms alone read "Cape May", model years and
-  "the first quarter" moon), except a holiday named in the built-in US table; seasons and places
-  puckling calls holidays are dropped; ms's rolling range wins ("past 12 months" → `past_days:365`,
-  backward); "4 in Alaska" keeps the 4 and drops the inch; comparators come from one adjacency
+- **Recognizer validators.** `recognize` reads the ask with ms-recognizers-text-suite 1.0.1
+  (DateTime, Number, NumberWithUnit, Ordinal; en-us) and dates its holidays with holidays 0.106
+  (MIT; the US calendar) into one closed shape `{time, numbers, ordinals, comparators}`, under the
+  bake-off's rules: spans end on word boundaries (one that starts inside a word is cut at the next
+  word — "cent" in "recent" leaves nothing); masked ranges drop spans; a time span is ms's, and
+  one ms cannot resolve is dropped ("later today", seasons, "Corpus Christi"); an ms date span
+  that names a holiday of the built-in US table (or carries ms's floating-holiday timex,
+  `XXXX-11-WXX-4-4`) is dated in the asked year — its own year phrase, else the ask's first ms year
+  ("in 2027", which ms alone ignores), else its next occurrence — by the US calendar's day of that
+  name or a closed rule (Easter by dateutil, Halloween, Valentine's, St. Patrick's, Mother's /
+  Father's Day); a year phrase ms read into the span stays a span of its own (`year:2027`); a
+  holiday span the table does not name exactly ("Christmas Eve", "Labor Day weekend") keeps ms's
+  day. puckling 0.5.0 (the Duckling port the bake-off paired with ms: a time span needed both
+  libraries) left before landing — no release of it installs on Python 3.12, the launcher's
+  Python (CI's 3.12 smoke legs failed with ResolutionImpossible). With ms alone 58 of the
+  bake-off's 4,737 asks change their explicit time: "today" beside a zip is read (6), and phrases
+  agreement had dropped are read ("the day" in "word of the day", written years in "2020 toyota
+  camry" or "election day 2026", "year over year"); "at the moment", which ms leaves unresolved,
+  is read by a closed now-phrase table (rule 10, the window parser's now words: currently, at
+  present, as of now, at the moment, as we speak, right this minute / second / moment / instant,
+  this instant; "rn" / "atm" only as the ask's last word) that reads `now` over any overlapping ms
+  span and newly reads 19 more asks ("rn", "currently"); the replay scores are unchanged. ms's
+  rolling range wins ("past 12 months" → `past_days:365`, backward; a quarter of no year — "the
+  first quarter" — is no stretch); "4 in Alaska" keeps the 4 and drops the inch; comparators come
+  from one adjacency
   table (above / over / more than / greater than / stronger / bigger / larger / higher than → `>`,
   at least → `>=`, below / under / less / fewer / smaller / lower / weaker than → `<`, at most and
   within → `<=`; at most one word between the phrase and the number). `explicit_time` reads the
@@ -3038,7 +3054,7 @@ a one-shot `fetch` subprocess — never `serve`, `mcp` or `scrape`, no CDP port,
   (raw replies 39/59). Code-owned clauses equal gold on select 103/109, limit 106/109 (the "when is
   …" lookups A38 / E14 / E39 want 1), agg 108/109 (noted C38).
   Recognizer: every explicit gold phrase yields the gold time except "over the last year" (B26,
-  E27) and "over the past month" (C27) — both libraries read the calendar year / month where the
+  E27) and "over the past month" (C27) — the recognizers read the calendar year / month where the
   label is rolling — and three noted rows.
   Live (`mlx/Qwen3.5-9B-MLX-4bit`, few-shot TEST, prompts byte-identical 79/79): v1 contract
   51/60, full contract 52/60, 53/60 with the floor; valid on the first try 68/79, after the

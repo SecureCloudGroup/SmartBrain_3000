@@ -43,6 +43,7 @@ The complete runtime set (94 packages) is exact-version pinned in [`app/requirem
 | grapheme | transitive dependency (ms-recognizers-text-choice) | MIT |
 | h11 | transitive dependency | MIT |
 | hf-xet | transitive dependency (huggingface_hub) | Apache-2.0 |
+| holidays | NI query layer: US holiday dates for the asked year | MIT |
 | htmldate | transitive dependency | Apache-2.0 |
 | httpcore | transitive dependency | BSD-3-Clause |
 | httptools | transitive dependency | MIT |
@@ -71,7 +72,6 @@ The complete runtime set (94 packages) is exact-version pinned in [`app/requirem
 | packaging | transitive dependency | Apache-2.0 OR BSD-2-Clause |
 | Pillow | transitive dependency (python-pptx image handling) | HPND (Pillow license) |
 | protobuf | transitive dependency (onnxruntime) | BSD-3-Clause |
-| puckling | NI query layer: time, holiday and duration recognizer (a Python port of Duckling) | Apache-2.0 |
 | pycparser | transitive dependency | BSD-2-Clause |
 | pydantic | Request validation | MIT |
 | pydantic_core | transitive dependency | MIT |

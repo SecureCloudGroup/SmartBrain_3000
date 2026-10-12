@@ -1,38 +1,40 @@
-"""RECOGNIZE (Round 20, Q3a): the ask's time, number, ordinal and comparator spans from two
-pinned recognizer libraries, merged into ONE closed shape. The query layer uses them as
-VALIDATORS of the model's clauses (an explicit time phrase decides ``time``; a ``where``
-number must be one the ask states) — never as a substitute for the model's reading.
+"""RECOGNIZE (Round 20, Q3a): the ask's time, number, ordinal and comparator spans from a pinned
+recognizer library and a pinned holiday calendar, merged into ONE closed shape. The query layer
+uses them as VALIDATORS of the model's clauses (an explicit time phrase decides ``time``; a
+``where`` number must be one the ask states) — never as a substitute for the model's reading.
 
 Libraries (imported lazily inside the calls — the app's import-time discipline, as
 ``stt_local`` imports faster-whisper):
 - ms-recognizers-text-suite 1.0.1 (MIT; the community fork of Microsoft Recognizers-Text,
   importable only as ``ms_recognizers_*``): DateTime, Number, NumberWithUnit (dimension,
   currency, temperature) and Ordinal, culture en-us, reference = ``now`` in ``zone``.
-- puckling 0.5.0 (Apache-2.0; a pure-Python port of Duckling): time + duration with
-  ``Context(reference_time=now, locale=EN/US)``; resolves holidays WITH the asked year.
+- holidays 0.106 (MIT; pure Python, python-dateutil its one dependency): the US calendar's
+  holiday dates for the asked year (rule 4). puckling 0.5.0, the Duckling port the bake-off
+  paired with ms, left in Round 20: no release of it installs on Python 3.12, the launcher's.
 
-Rules — each measured in the Q0 bake-off over 4,737 asks (scratch bakeoff/out/summary.md):
+Rules — each measured in the Q0 bake-off over 4,737 asks (scratch bakeoff/out/summary.md; rules
+3-4 re-measured on ms alone when puckling left):
 1. Word boundaries. A span that ENDS inside a word is dropped ("Sa" in "Salt Lake", "in 9810"
-   in a zip); one that STARTS inside a word is cut at the next word start, because puckling
-   absorbs a preposition that is the tail of the previous word ("Boston tomorrow" read as
-   "on tomorrow"); nothing left → dropped ("now" in "snow", "cent" in "recent").
+   in a zip); one that STARTS inside a word is cut at the next word start; nothing left →
+   dropped ("now" in "snow", "cent" in "recent").
 2. Mask. A span overlapping a ``masked`` range (parameter-consumed entities, zips, codes) is
    dropped.
-3. Agreement (time only). A time span is kept when the other library also found a time span
-   overlapping it: puckling-only spans were 10/10 false ("sun" in "the sun's UV" read as
-   Sunday), ms-only spans 71, nearly all false or tokenless ("the day", "may" in "Cape May",
-   model years in "2020 toyota camry", "the first quarter" moon). A holiday named in
-   ``_HOLIDAYS`` needs no partner. ms resolves the span; puckling only where ms cannot
-   ("at the moment", "later today").
-4. Holidays. puckling's holiday value (with the asked year) wins over ms's date for the same
-   words — ms ignores "in 2027"; a puckling phrase only that ms date confirmed stays ("this
-   year" in "Thanksgiving this year"). Seasons and places puckling labels holidays ("winter",
-   "fall", "Corpus Christi") are dropped: a holiday is kept only when its words name one in
-   ``_HOLIDAYS`` (a built-in table — the ``holidays`` package is a lookup table only).
-5. Range vs point. "this week / next week / this month / this year": ms's daterange wins over
-   puckling's grain-point (kind ``range``, ms bounds).
+3. One library. A time span is kept when ms yields it and rules 1-2 keep it; ms resolves it, and
+   a span ms cannot resolve is dropped ("later today", "fall", "Corpus Christi").
+4. Holidays. An ms date span with no open bound is a holiday when its words name one in
+   ``_HOLIDAYS`` or its timex is ms's floating-holiday pattern (``XXXX-11-WXX-4-4``). When its
+   words — less a trailing year phrase ("2027", "in 2027", "this / next / last year"), a leading
+   "the" and a trailing "day" — name a ``_HOLIDAYS`` entry exactly, its day is that holiday's in
+   the asked year (the span's own year phrase, else the ask's first ms year — "in 2027", which ms
+   alone ignores): the US calendar's day of that name or a closed rule (``_holiday_day``); with no
+   year, its next occurrence from today. Any other holiday span ("Christmas Eve", "Labor Day
+   weekend") keeps ms's own day, none outside the asked year. A year phrase ms read into the span
+   stays a span of its own (``year:2027``): the holiday is the subject, the year the stretch.
+5. Range vs point. "this week / next week / this month / this year": ms's daterange (kind
+   ``range``, ms bounds).
 6. Rolling ranges. "past 12 months" → ``past_days:365`` (backward), "next 6 hours" →
-   ``next_hours:6`` — ms's rolling bounds; every point-only library resolved them FORWARD.
+   ``next_hours:6`` — ms's rolling bounds; every point-only library resolved them FORWARD. A
+   period of no year ("the first quarter", "q2") is no stretch from now: no token.
 7. Units. A unit reading whose unit token is followed by a capitalized word ("magnitude 4 in
    Alaska") drops the unit and keeps the number.
 8. Comparators. No library reads them: a number preceded by a ``_CMP`` phrase with at most one
@@ -40,11 +42,18 @@ Rules — each measured in the Q0 bake-off over 4,737 asks (scratch bakeoff/out/
    beside the word-boundary check.
 9. A number or ordinal inside a kept time span belongs to the time phrase ("past 12 months",
    "every 30 minutes", "July 4th") and is dropped.
+10. Now phrases (Round 20 — the now words of the window parser, ``ni_flow._WINDOW_PATTERNS``): a
+   closed word table (``_NOW_PHRASES``: currently, at present, as of now, at the moment, as we
+   speak, right this minute / second / moment / instant, this instant; "rn" / "atm" only as the
+   ask's last word — "open atm near me" is a cash machine) is a point span with token ``now`` that
+   needs no library partner and wins over an overlapping library span ("this minute" alone is
+   tokenless).
 
 Output (closed): ``{"time": [{text, start, end, kind, from, to, grain, lib, token}],
 "numbers": [{text, start, end, value, unit, lib}], "ordinals": [{text, start, end, value, lib}],
 "comparators": [{text, start, end, op, value, unit}]}`` — offsets into the ask, ``end``
-exclusive; ``kind`` ∈ point | range | holiday | duration; ``from``/``to`` ISO-8601 in
+exclusive; ``kind`` ∈ point | range | holiday | duration; ``lib`` ∈ ms | holidays | table (rule
+10); ``from``/``to`` ISO-8601 in
 ``zone`` (None for a duration); ``token`` = the Query IR token the span implies, or None when
 no token fits (the bounds stand alone: "at noon", "since Monday", "every 30 minutes").
 """
@@ -65,15 +74,31 @@ _CMP: tuple[tuple[str, str], ...] = (
     ("less than", "<"), ("fewer than", "<"), ("smaller than", "<"), ("lower than", "<"),
     ("weaker than", "<"), ("at most", "<="),
     ("above", ">"), ("over", ">"), ("below", "<"), ("under", "<"), ("within", "<="))
-# US holidays a span must name to be kept as one (words, apostrophes removed, lowercase).
-_HOLIDAYS: tuple[tuple[str, ...], ...] = (
-    ("thanksgiving",), ("christmas",), ("xmas",), ("new", "years"), ("new", "year"),
-    ("independence", "day"), ("july", "4th"), ("fourth", "of", "july"), ("4th", "of", "july"),
-    ("labor", "day"), ("memorial", "day"), ("easter",), ("halloween",), ("veterans", "day"),
-    ("mlk", "day"), ("martin", "luther", "king"), ("presidents", "day"),
-    ("washingtons", "birthday"), ("columbus", "day"), ("juneteenth",), ("mothers", "day"),
-    ("fathers", "day"))
+# US holidays (words, apostrophes removed, lowercase) → the US calendar's name for the day (``holidays``;
+# matched case-insensitively, so an "(observed)" day is another name) or a closed rule (``_holiday_day``).
+_HOLIDAYS: dict[tuple[str, ...], str] = {
+    ("thanksgiving",): "Thanksgiving Day", ("christmas",): "Christmas Day", ("xmas",): "Christmas Day",
+    ("new", "years"): "New Year's Day", ("new", "year"): "New Year's Day",
+    ("independence", "day"): "Independence Day", ("july", "4th"): "Independence Day",
+    ("fourth", "of", "july"): "Independence Day", ("4th", "of", "july"): "Independence Day",
+    ("labor", "day"): "Labor Day", ("memorial", "day"): "Memorial Day", ("veterans", "day"): "Veterans Day",
+    ("mlk", "day"): "Martin Luther King Jr. Day", ("martin", "luther", "king"): "Martin Luther King Jr. Day",
+    ("presidents", "day"): "Washington's Birthday", ("washingtons", "birthday"): "Washington's Birthday",
+    ("columbus", "day"): "Columbus Day", ("juneteenth",): "Juneteenth National Independence Day",
+    ("easter",): "easter", ("easter", "sunday"): "easter", ("halloween",): "halloween",
+    ("valentines", "day"): "valentines", ("st", "patricks", "day"): "st patricks",
+    ("saint", "patricks", "day"): "st patricks", ("mothers", "day"): "mothers", ("fathers", "day"): "fathers"}
+_FIXED_DAYS: dict[str, tuple[int, int]] = {"halloween": (10, 31), "valentines": (2, 14), "st patricks": (3, 17)}
+_NTH_SUNDAYS: dict[str, tuple[int, int]] = {"mothers": (5, 2), "fathers": (6, 3)}   # (month, nth Sunday)
+_YEAR_WORDS = {"this": 0, "next": 1, "last": -1}   # "<word> year" ending a holiday span → years from now
+_YEARS = range(1000, 9999)                          # a written year a holiday is dated in
 _DOW = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+# rule 10: now phrases, longest first (an overlapping shorter one never doubles a span)
+_NOW_PHRASES: tuple[tuple[str, ...], ...] = (
+    ("right", "this", "minute"), ("right", "this", "second"), ("right", "this", "moment"),
+    ("right", "this", "instant"), ("as", "of", "now"), ("at", "the", "moment"), ("as", "we", "speak"),
+    ("at", "present"), ("this", "instant"), ("currently",), ("rn",), ("atm",))
+_LAST_WORD_ONLY = frozenset({("rn",), ("atm",)})
 _NIGHT_PARTS = frozenset({"EV", "NI"})     # ms part-of-day timex suffixes read as "tonight"
 _DAY_GRAINS = ("second", "minute", "hour", "day")
 
@@ -174,7 +199,8 @@ def _day_token(day: dt.date, today: dt.date) -> str:
 
 
 def _rolling(timex: str, start: dt.datetime, end: dt.datetime, now: dt.datetime) -> tuple[str | None, str]:
-    """Rule 6: "(start,end,PnX)" → (past_/next_ token, grain); None when the stretch has no token."""
+    """Rule 6: "(start,end,PnX)" → (past_/next_ token, grain); None when the stretch has no token — a
+    period of no year ("(XXXX-01-01,XXXX-04-01,P3M)": "the first quarter", "q2") is no stretch from now."""
     assert timex.startswith("("), "a rolling timex"
     assert start <= end, "start before end"
     period = timex.rstrip(")").rsplit(",", 1)[-1]
@@ -184,7 +210,7 @@ def _rolling(timex: str, start: dt.datetime, end: dt.datetime, now: dt.datetime)
         {"D": "day", "W": "week", "M": "month", "Y": "year"}.get(unit, "day")
     back = end <= now + dt.timedelta(minutes=1) if hours else end.date() <= now.date()
     n = int((end - start).total_seconds() // 3600) if hours else (end - start).days
-    if (hours and unit != "H") or not 1 <= n <= (999 if (back or hours) else 99):
+    if timex.startswith("(XXXX") or (hours and unit != "H") or not 1 <= n <= (999 if (back or hours) else 99):
         return None, grain
     return f"{'past' if back else 'next'}_{'hours' if hours else 'days'}:{n}", grain
 
@@ -207,25 +233,21 @@ def _range_token(timex: str, now: dt.datetime) -> tuple[str | None, str]:
     return None, "day"
 
 
-def _ms_value(values: list, partner_day: dt.date | None, today: dt.date) -> dict | None:
-    """The one ms resolution value to read: the one on puckling's partner day, else the first
-    not before today (ms lists last year's and this year's "July 4th"), else the last."""
+def _ms_value(values: list, today: dt.date) -> dict | None:
+    """The one ms resolution value to read: the first not before today (ms lists last year's
+    and this year's "July 4th"), else the last."""
     assert isinstance(values, list), "values must be a list"
     assert isinstance(today, dt.date), "today must be a date"
     vals = [v for v in values[:8] if isinstance(v, dict)]
     if len(vals) <= 1:
         return vals[0] if vals else None
     day = lambda v: str(v.get("value") or v.get("start") or "")[:10]
-    if partner_day is not None:
-        hit = next((v for v in vals if day(v) == partner_day.isoformat()), None)
-        if hit is not None:
-            return hit
     return next((v for v in vals if day(v) >= today.isoformat()), vals[-1])
 
 
 def _span(ask: str, raw: dict, lib: str, **fields: object) -> dict:
     """One closed time span."""
-    assert lib in ("ms", "puckling"), "lib must be ms or puckling"
+    assert lib in ("ms", "holidays"), "lib must be ms or holidays"
     assert fields.get("kind") in TIME_KINDS, "kind must be closed"
     out = {"text": ask[raw["start"]:raw["end"]], "start": raw["start"], "end": raw["end"], "kind": fields["kind"],
            "from": _iso(fields.get("lo")), "to": _iso(fields.get("hi")), "grain": fields.get("grain"),
@@ -233,14 +255,14 @@ def _span(ask: str, raw: dict, lib: str, **fields: object) -> dict:
     return out
 
 
-def _from_ms(ask: str, raw: dict, now: dt.datetime, partner_day: dt.date | None) -> dict | None:
-    """One ms DateTime result as a time span; None when ms could not resolve it (puckling then)."""
+def _from_ms(ask: str, raw: dict, now: dt.datetime) -> dict | None:
+    """One ms DateTime result as a time span; None when ms could not resolve it (rule 3: dropped)."""
     assert isinstance(raw, dict) and "type" in raw, "an ms raw span"
     assert now.tzinfo is not None, "now must be aware"
     tz, today, typ = now.tzinfo, now.date(), raw["type"]
     if typ in ("duration", "set"):  # a length or a cadence ("30 year", "every 30 minutes"): never a stretch
         return _span(ask, raw, "ms", kind="duration", grain=None)
-    v = _ms_value(list((raw.get("resolution") or {}).get("values") or []), partner_day, today)
+    v = _ms_value(list((raw.get("resolution") or {}).get("values") or []), today)
     if v is None or (v.get("value") == "not resolved" and not v.get("start")):
         return None
     timex = str(v.get("timex") or "")
@@ -289,61 +311,102 @@ def _from_ms_range(ask: str, raw: dict, v: dict, now: dt.datetime) -> dict | Non
     return _span(ask, raw, "ms", kind="range", lo=lo, hi=hi, grain=grain, token=token)
 
 
-def _month_after(day: dt.datetime) -> dt.datetime:
-    assert isinstance(day, dt.datetime), "day must be a datetime"
-    assert day.day == 1, "day must be a month start"
-    return day.replace(year=day.year + 1, month=1) if day.month == 12 else day.replace(month=day.month + 1)
+def _year_phrase(ws: list[tuple[str, int, int]], this_year: int) -> tuple[int, int, int | None]:
+    """Rule 4: the year phrase ending a span's words → (the words before it, its first word, its year);
+    (len, len, None) without one. An "in" before a written year belongs to neither part."""
+    assert isinstance(ws, list), "words must be a list"
+    assert isinstance(this_year, int), "this_year must be an int"
+    n = len(ws)
+    if n >= 3 and ws[-1][0] == "year" and ws[-2][0] in _YEAR_WORDS:
+        return n - 2, n - 2, this_year + _YEAR_WORDS[ws[-2][0]]
+    if n >= 2 and ws[-1][0].isdigit() and len(ws[-1][0]) == 4 and int(ws[-1][0]) in _YEARS:
+        return (n - 2 if ws[-2][0] == "in" else n - 1), n - 1, int(ws[-1][0])
+    return n, n, None
 
 
-def _from_pk(ask: str, raw: dict, now: dt.datetime) -> dict:
-    """One puckling entity as a time span (holidays, ms-unresolvable words, puckling-only grains)."""
-    assert isinstance(raw, dict) and "entity" in raw, "a puckling raw span"
+def _holiday_name(text: str) -> str | None:
+    """Rule 4: the ``_HOLIDAYS`` entry ``text`` names exactly (a leading "the", a trailing "day" aside)."""
+    assert isinstance(text, str), "text must be a str"
+    assert len(text) <= _MAX_ASK, "text bounded"
+    key = tuple(w for w, _, _ in words(text.replace("'", "").replace("’", "")))
+    key = key[1:] if key[:1] == ("the",) else key
+    return _HOLIDAYS.get(key) or (_HOLIDAYS.get(key[:-1]) if key[-1:] == ("day",) else None)
+
+
+def _holiday_day(name: str, year: int) -> dt.date | None:
+    """Rule 4: the named holiday's day in ``year`` — the closed rule for a name the US calendar lacks
+    (dateutil's Easter, a fixed day, the nth Sunday of a month), else the US calendar's day of that name."""
+    assert name in _HOLIDAYS.values(), "a closed holiday name"
+    assert year in _YEARS, "a written year"
+    # lazy: the app's import-time discipline
+    import holidays
+    from dateutil.easter import easter
+    from dateutil.relativedelta import SU, relativedelta
+
+    if name == "easter":
+        return easter(year)
+    if name in _FIXED_DAYS:
+        return dt.date(year, *_FIXED_DAYS[name])
+    if name in _NTH_SUNDAYS:
+        month, nth = _NTH_SUNDAYS[name]
+        return dt.date(year, month, 1) + relativedelta(weekday=SU(nth))
+    calendar = holidays.country_holidays("US", years=[year])
+    return next((day for day, named in sorted(calendar.items()) if named.lower() == name.lower()), None)
+
+
+def _named_day(name: str, year: int | None, today: dt.date) -> dt.date | None:
+    """Rule 4: a named holiday's day in the asked year, else its next occurrence from today."""
+    assert year is None or isinstance(year, int), "year must be an int"
+    assert isinstance(today, dt.date), "today must be a date"
+    if year is not None:
+        return _holiday_day(name, year)
+    day = _holiday_day(name, today.year)
+    return day if day is not None and day >= today else _holiday_day(name, today.year + 1)
+
+
+def _asked_year(ms_raw: list[dict]) -> int | None:
+    """Rule 4: the first year ms reads as a stretch of its own ("2027" in "in 2027", "next year")."""
+    assert isinstance(ms_raw, list), "a raw span list"
+    assert len(ms_raw) <= _MAX_SPANS, "raw spans bounded"
+    for m in ms_raw:  # bounded by _MAX_SPANS
+        values = list((m.get("resolution") or {}).get("values") or [])
+        timex = str(values[0].get("timex") or "") if values and isinstance(values[0], dict) else ""
+        if m["type"] == "daterange" and timex.isdigit() and len(timex) == 4 and int(timex) in _YEARS:
+            return int(timex)
+    return None
+
+
+def _holiday(ask: str, raw: dict, now: dt.datetime, asked: int | None) -> list[dict] | None:
+    """Rule 4: an ms date span that is a holiday → [its day, the year phrase ms read into it] (either may
+    be absent); None when the span is no holiday (``_from_ms`` reads it)."""
+    assert isinstance(raw, dict) and "type" in raw, "an ms raw span"
     assert now.tzinfo is not None, "now must be aware"
-    ent, today = raw["entity"], now.date()
-    if ent.dim == "duration":
-        return _span(ask, raw, "puckling", kind="duration", grain=ent.value.grain.value)
-    prim = ent.value.primary
-    kind_name = type(prim).__name__
-    if kind_name == "IntervalValue":
-        lo, hi = prim.start.value.astimezone(now.tzinfo), prim.end.value.astimezone(now.tzinfo)
-        weekend = lo.weekday() == 5 and (hi - lo).days == 2 and lo.isocalendar()[:2] == now.isocalendar()[:2]
-        return _span(ask, raw, "puckling", kind="range", lo=lo, hi=hi, grain=prim.start.grain.value,
-                     token="weekend" if weekend else None)
-    if kind_name != "InstantValue":  # an open interval ("since Monday"): bounds only
-        at = prim.instant.value.astimezone(now.tzinfo)
-        after = getattr(prim.direction, "value", "") == "after"
-        return _span(ask, raw, "puckling", kind="range", lo=at if after else None, hi=None if after else at,
-                     grain=prim.instant.grain.value)
-    at, grain = prim.value.astimezone(now.tzinfo), prim.grain.value
-    if raw["holiday"]:
-        day = at.replace(hour=0, minute=0, second=0, microsecond=0)
-        return _span(ask, raw, "puckling", kind="holiday", lo=day, hi=day + dt.timedelta(days=1), grain="day",
-                     token=f"date:{day.date().isoformat()}")
-    if grain in ("second", "minute"):
-        token = "now" if abs((at - now).total_seconds()) <= 120 else None
-        return _span(ask, raw, "puckling", kind="point", lo=at, hi=at, grain=grain, token=token)
-    if grain in ("hour", "day"):
-        hi = at + (dt.timedelta(hours=1) if grain == "hour" else dt.timedelta(days=1))
-        return _span(ask, raw, "puckling", kind="point", lo=at, hi=hi, grain=grain,
-                     token=_day_token(at.date(), today) if grain == "day" else None)
-    return _from_pk_calendar(ask, raw, at, grain, now)
-
-
-def _from_pk_calendar(ask: str, raw: dict, at: dt.datetime, grain: str, now: dt.datetime) -> dict:
-    """puckling's grain-point week / month / quarter / year as a range (rule 5)."""
-    assert grain in ("week", "month", "quarter", "year"), "a calendar grain"
-    assert now.tzinfo is not None, "now must be aware"
-    monday = (now - dt.timedelta(days=now.weekday())).date()
-    if grain == "week":
-        token = {monday: "this_week", monday + dt.timedelta(days=7): "next_week"}.get(at.date())
-        return _span(ask, raw, "puckling", kind="range", lo=at, hi=at + dt.timedelta(days=7), grain=grain, token=token)
-    if grain == "month":
-        token = "this_month" if (at.year, at.month) == (now.year, now.month) else f"month:{at.strftime('%Y-%m')}"
-        return _span(ask, raw, "puckling", kind="range", lo=at, hi=_month_after(at), grain=grain, token=token)
-    if grain == "year":
-        return _span(ask, raw, "puckling", kind="range", lo=at, hi=at.replace(year=at.year + 1), grain=grain,
-                     token=f"year:{at.year}")
-    return _span(ask, raw, "puckling", kind="range", lo=at, hi=None, grain=grain)
+    values = [v for v in list((raw.get("resolution") or {}).get("values") or [])[:8] if isinstance(v, dict)]
+    timex = str(values[0].get("timex") or "") if values else ""
+    floating = timex[4:5] == "-" and timex[7:12] == "-WXX-"
+    if raw["type"] != "date" or any(v.get("Mod") for v in values) or not (
+            floating or _holiday_named(ask[raw["start"]:raw["end"]])):
+        return None
+    ws = [w for w in words(ask[:raw["end"]]) if w[1] >= raw["start"]]
+    name_end, year_at, own = _year_phrase(ws, now.year)
+    assert 0 < name_end <= len(ws), "a holiday span keeps its name before its year"
+    name, year = _holiday_name(ask[raw["start"]:ws[name_end - 1][2]]), own if own is not None else asked
+    if name is not None:
+        day = _named_day(name, year, now.date())
+    else:  # "Christmas Eve", "Labor Day weekend": ms's own day, none outside the asked year
+        at = _local((_ms_value(values, now.date()) or {}).get("value"), now.tzinfo)
+        day = at.date() if at is not None and (year is None or at.year == year) else None
+    out = []
+    if day is not None:
+        lo = dt.datetime.combine(day, dt.time(0), tzinfo=now.tzinfo)
+        out.append(_span(ask, {"start": raw["start"], "end": ws[name_end - 1][2]}, "holidays" if name else "ms",
+                         kind="holiday", lo=lo, hi=lo + dt.timedelta(days=1), grain="day",
+                         token=f"date:{day.isoformat()}"))
+    if own is not None:  # the year phrase ms read into the span: the stretch, a span of its own
+        lo = dt.datetime(own, 1, 1, tzinfo=now.tzinfo)
+        out.append(_span(ask, {"start": ws[year_at][1], "end": raw["end"]}, "ms", kind="range", lo=lo,
+                         hi=lo.replace(year=own + 1), grain="year", token=f"year:{own}"))
+    return out
 
 
 def _ms_time(ask: str, now: dt.datetime, masked: tuple) -> list[dict]:
@@ -362,41 +425,18 @@ def _ms_time(ask: str, now: dt.datetime, masked: tuple) -> list[dict]:
     return out
 
 
-def _pk_time(ask: str, now: dt.datetime, masked: tuple) -> list[dict]:
-    """puckling time + duration entities, word-snapped and masked; a 'holiday' that names no
-    US holiday (a season, a place) is dropped whole (rules 1, 2, 4)."""
+def _merge_time(ask: str, ms_raw: list, now: dt.datetime) -> list[dict]:
+    """Rules 3-5: every kept ms span stands on its own; rule 4 dates a holiday, ms resolves the rest."""
+    assert isinstance(ms_raw, list), "a raw span list"
     assert now.tzinfo is not None, "now must be aware"
-    assert isinstance(masked, tuple), "masked must be a tuple"
-    import puckling  # lazy: the app's import-time discipline
-
-    ctx = puckling.Context(reference_time=now, locale=puckling.Locale(puckling.Lang.EN, puckling.Region.US))
-    out = []
-    for ent in puckling.parse(ask, ctx, puckling.Options(with_latent=False), dims=("time", "duration"))[:_MAX_SPANS]:
-        kept = _kept(ask, int(ent.start), int(ent.end), masked)
-        holiday = getattr(ent.value, "holiday", None) if ent.dim == "time" else None
-        if kept is None or (holiday and not _holiday_named(ask[kept[0]:kept[1]], str(holiday))):
-            continue
-        out.append({"start": kept[0], "end": kept[1], "entity": ent, "holiday": bool(holiday)})
-    return out
-
-
-def _merge_time(ask: str, ms_raw: list, pk_raw: list, now: dt.datetime) -> list[dict]:
-    """Rules 3-5: holidays from puckling; every other span needs both libraries; ms resolves."""
-    assert isinstance(ms_raw, list) and isinstance(pk_raw, list), "raw span lists"
-    assert now.tzinfo is not None, "now must be aware"
-    holidays = [p for p in pk_raw if p["holiday"]]
-    out = [_from_pk(ask, p, now) for p in holidays]
+    asked = _asked_year(ms_raw)
+    out: list[dict] = []
     for m in ms_raw:  # bounded by _MAX_SPANS
-        partners = [p for p in pk_raw if _overlaps(m, p)]
-        if not partners or (m["type"] == "date" and any(_overlaps(m, h) for h in holidays)):
-            continue
-        pk_day = next((p["entity"].value.primary.value.astimezone(now.tzinfo).date() for p in partners
-                       if p["entity"].dim == "time" and type(p["entity"].value.primary).__name__ == "InstantValue"),
-                      None)
-        out.append(_from_ms(ask, m, now, pk_day) or _from_pk(ask, partners[0], now))
-    for p in pk_raw:  # a puckling-resolved span the ms spans did not already cover ("this year" beside a holiday)
-        if not p["holiday"] and not any(_overlaps(p, o) for o in out) and any(_overlaps(p, m) for m in ms_raw):
-            out.append(_from_pk(ask, p, now))
+        spans = _holiday(ask, m, now, asked)
+        if spans is None:
+            span = _from_ms(ask, m, now)
+            spans = [] if span is None else [span]
+        out += spans
     return sorted(out, key=lambda s: (s["start"], s["end"]))[:_MAX_SPANS]
 
 
@@ -493,6 +533,26 @@ def _comparators(ask: str, numbers: list[dict]) -> list[dict]:
     return out
 
 
+def _now_phrases(ask: str, now: dt.datetime, masked: tuple) -> list[dict]:
+    """Rule 10: the closed now-phrase table as point spans with token ``now`` (word-boundary runs of the
+    ask's own words, masked like every span; "rn" / "atm" only as the last word)."""
+    assert now.tzinfo is not None, "now must be aware"
+    assert isinstance(masked, tuple), "masked must be a tuple"
+    ws = words(ask)[:_MAX_WORDS]
+    out: list[dict] = []
+    for phrase in _NOW_PHRASES:  # bounded table
+        n = len(phrase)
+        for i in range(len(ws) - n + 1):  # bounded by the ask's words
+            if tuple(w for w, _, _ in ws[i:i + n]) != phrase or (phrase in _LAST_WORD_ONLY and i + n != len(ws)):
+                continue
+            kept = _kept(ask, ws[i][1], ws[i + n - 1][2], masked)
+            span = None if kept is None else {"start": kept[0], "end": kept[1]}
+            if span is not None and not any(_overlaps(span, o) for o in out):
+                out.append({"text": ask[kept[0]:kept[1]], **span, "kind": "point", "from": _iso(now),
+                            "to": _iso(now), "grain": "second", "lib": "table", "token": "now"})
+    return out
+
+
 def recognize(ask: str, *, now: dt.datetime, zone: str, masked: list[tuple[int, int]] | tuple = ()) -> dict:
     """The ask's spans in the closed shape the module docstring states. ``now`` is the
     reference instant (aware); ``zone`` the card's IANA zone; ``masked`` the char ranges of
@@ -502,7 +562,10 @@ def recognize(ask: str, *, now: dt.datetime, zone: str, masked: list[tuple[int, 
     text = ask[:_MAX_ASK]
     local = now.astimezone(ZoneInfo(zone))
     mask = tuple((int(a), int(b)) for a, b in list(masked)[:_MAX_SPANS])
-    time = _merge_time(text, _ms_time(text, local, mask), _pk_time(text, local, mask), local)
+    time = _merge_time(text, _ms_time(text, local, mask), local)
+    table = _now_phrases(text, local, mask)
+    time = sorted([s for s in time if not any(_overlaps(s, n) for n in table)] + table,
+                  key=lambda s: (s["start"], s["end"]))[:_MAX_SPANS]
     numbers = _numbers(text, mask, time)
     return {"time": time, "numbers": numbers, "ordinals": _ordinals(text, mask, time),
             "comparators": _comparators(text, numbers)}

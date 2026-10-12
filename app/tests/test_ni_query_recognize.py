@@ -22,20 +22,22 @@ from smartbrain_3000.ni_query.recognize import words
 _FIX = pathlib.Path(__file__).parent / "fixtures" / "ni_query"
 _ZONE = "America/New_York"
 _THU = dt.datetime(2026, 10, 8, 9, 0, tzinfo=ZoneInfo(_ZONE))
+_FRI = dt.datetime(2026, 10, 9, 9, 0, tzinfo=ZoneInfo(_ZONE))   # the bake-off's reference day
 # label variance and out-of-scope rows: the recognizer reads the phrase one way, the gold label another
 EXCEPTIONS = {
-    "B26": "'over the last year': both libraries read calendar 2025 (year:2025); gold labels it rolling past_days:365",
+    "B26": "'over the last year': ms reads calendar 2025 (year:2025); gold labels it rolling past_days:365",
     "E27": "'over the last year': calendar 2025 vs the gold's rolling past_days:365 (same class as B26)",
-    "C27": "'over the past month': both libraries read calendar September (month:2026-09); gold rolling past_days:30",
+    "C27": "'over the past month': ms reads calendar September (month:2026-09); gold rolling past_days:30",
     "D45": "noted row (source_wrong: people-in-space has no position) — gold leaves time null despite 'right now'",
     "E36": "noted row (source_wrong: a point alert feed) — gold leaves time null despite 'right now'",
     "E44": "noted row (compare: 'now versus a year ago' is two points; out of IR scope)",
 }
-# asks with no explicit time phrase: no token, the model's reading stands
+# asks with no explicit time phrase: no token, the model's reading stands (Round 20: E38 left the list —
+# "currently" is a now phrase of the recognizers' closed table, rule 10, and reads the gold's {now, now})
 NO_PHRASE = frozenset({
     "A3", "A6", "A8", "A10", "A18", "A22", "A25", "A29", "A30", "A34", "A49", "B2", "B22", "B29", "B32", "B44", "B45",
     "C6", "C9", "C21", "C31", "C34", "C45", "D3", "D7", "D12", "D13", "D14", "D18", "D21", "D22", "D24", "D25", "D33",
-    "D36", "E3", "E12", "E13", "E22", "E26", "E31", "E33", "E38"})
+    "D36", "E3", "E12", "E13", "E22", "E26", "E31", "E33"})
 
 
 def _gold() -> list[dict]:
@@ -63,10 +65,10 @@ def test_gold_time_phrases(row):
 
 
 def test_exception_list_is_exact():
-    """Exactly 60 explicit rows match; the exception list names every other explicit row."""
+    """Exactly 61 explicit rows match; the exception list names every other explicit row."""
     rows = _gold()
     explicit = [r for r in rows if r["id"] not in NO_PHRASE]
-    assert len(explicit) == 66 and len(NO_PHRASE) == 43, "66 explicit rows, 43 without a phrase"
+    assert len(explicit) == 67 and len(NO_PHRASE) == 42, "67 explicit rows, 42 without a phrase"
     assert set(EXCEPTIONS) <= {r["id"] for r in explicit}, "exceptions are explicit rows"
 
 
@@ -97,13 +99,51 @@ def test_holiday_with_the_asked_year():
     """'Thanksgiving in 2027' → the 2027 holiday (ms alone says 2026) and the year phrase."""
     spans = recognize("when is Thanksgiving in 2027", now=_THU, zone=_ZONE)
     kinds = {s["kind"]: s for s in spans["time"]}
-    assert kinds["holiday"]["from"].startswith("2027-11-25") and kinds["holiday"]["lib"] == "puckling"
+    assert kinds["holiday"]["from"].startswith("2027-11-25") and kinds["holiday"]["lib"] == "holidays"
     assert kinds["range"]["token"] == "year:2027", kinds
     assert explicit_time(spans, "lookup") == {"from": "year:2027", "to": "year:2027"}
 
 
+@pytest.mark.parametrize(("ask", "day", "year"), [
+    ("when is Thanksgiving in 2027", "2027-11-25", "year:2027"),   # ms alone says 2026-11-26
+    ("when is Thanksgiving this year", "2026-11-26", "year:2026"),
+    ("what date is Easter in 2027", "2027-03-28", "year:2027"),    # a closed rule: dateutil's Easter
+    ("which day is Easter next year", "2027-03-28", "year:2027"),
+    ("Thanksgiving 2027", "2027-11-25", "year:2027"),              # the year ms reads into the span
+    ("when is Mother's Day 2027", "2027-05-09", "year:2027"),      # the 2nd Sunday of May
+    ("St. Patrick's Day parade", "2027-03-17", None),              # no year: the next one
+    ("when is Labor Day", "2027-09-06", None),                     # 2026-09-07 is past
+])
+def test_holidays_are_dated_in_the_asked_year(ask, day, year):
+    """A holiday the table names takes its day in the asked year, else its next occurrence; a year
+    phrase stays its own span (the stretch)."""
+    spans = recognize(ask, now=_FRI, zone=_ZONE)["time"]
+    (holiday,) = [s for s in spans if s["kind"] == "holiday"]
+    assert (holiday["token"], holiday["lib"]) == (f"date:{day}", "holidays"), spans
+    assert [s["token"] for s in spans if s["kind"] == "range"] == ([year] if year else []), spans
+
+
+def test_a_holiday_the_table_does_not_name_keeps_ms_day():
+    """'Christmas Eve' is no Christmas Day, 'Easter Monday' no Easter Sunday, 'Day after Thanksgiving' an
+    open stretch from the holiday — never the named holiday's own date."""
+    eve = recognize("Christmas Eve", now=_THU, zone=_ZONE)["time"]
+    assert [(s["kind"], s["token"], s["lib"]) for s in eve] == [("holiday", "date:2026-12-24", "ms")], eve
+    assert recognize("Easter Monday", now=_THU, zone=_ZONE)["time"] == []
+    after = recognize("Day after Thanksgiving", now=_THU, zone=_ZONE)["time"]
+    assert [(s["kind"], s["token"], s["from"][:10]) for s in after] == [("range", None, "2026-11-26")], after
+
+
+def test_every_holiday_name_has_a_day():
+    """Every name of the holiday table resolves in the US calendar or a closed rule (a renamed calendar
+    entry fails here, not at an ask)."""
+    from smartbrain_3000.ni_query.recognize import _HOLIDAYS, _holiday_day
+    days = {name: _holiday_day(name, 2027) for name in set(_HOLIDAYS.values())}
+    assert all(days.values()), days
+    assert (days["Thanksgiving Day"], days["mothers"]) == (dt.date(2027, 11, 25), dt.date(2027, 5, 9))
+
+
 def test_seasons_and_places_are_no_holidays():
-    """puckling labels seasons and 'Corpus Christi' holidays; they are dropped whole."""
+    """Seasons and 'Corpus Christi' are no holidays: ms leaves them unresolved, so they are dropped."""
     for ask in ("fall foliage forecast", "winter storm warnings in Colorado", "Corpus Christi weather"):
         assert recognize(ask, now=_THU, zone=_ZONE)["time"] == [], ask
 
@@ -139,16 +179,19 @@ def test_this_week_reads_by_direction():
     assert explicit_time(spans, "count") == {"from": "past_days:7", "to": "today"}
 
 
-def test_agreement_drops_one_library_spans():
-    """puckling-only 'sun' (Sunday) and ms-only 'the first quarter' (Q1) are not time."""
+def test_the_sun_and_a_quarter_of_no_year_state_no_time():
+    """'the sun's' is no Sunday; ms's 'the first quarter' / 'q2' (a quarter of no year) is kept tokenless,
+    never a rolling next_days, so 'this month' alone states the moon's time."""
     sun = recognize("how strong is the sun's UV in Honolulu at noon", now=_THU, zone=_ZONE)
     assert [s["text"] for s in sun["time"]] == ["noon"] and sun["time"][0]["token"] is None
     moon = recognize("when does the first quarter moon fall this month", now=_THU, zone=_ZONE)
-    assert [s["token"] for s in moon["time"]] == ["this_month"], moon["time"]
+    assert [s["token"] for s in moon["time"]] == [None, "this_month"], moon["time"]
+    assert explicit_time(moon, "next_event") == {"from": "this_month", "to": "this_month"}
+    assert [s["token"] for s in recognize("q2 gdp growth", now=_THU, zone=_ZONE)["time"]] == [None]
 
 
-def test_absorbed_preposition_is_cut():
-    """puckling reads 'Boston tomorrow' as 'on tomorrow'; the span is cut to the word."""
+def test_tomorrow_after_a_place_is_the_word_alone():
+    """'in Boston tomorrow': the one time phrase is 'tomorrow' (no preposition, no place)."""
     spans = recognize("what time is sunrise in Boston tomorrow", now=_THU, zone=_ZONE)
     assert [(s["text"], s["token"]) for s in spans["time"]] == [("tomorrow", "tomorrow")]
 
@@ -174,3 +217,10 @@ def test_comparator_table():
 def test_words_tokenizer():
     assert [w for w, _, _ in words("O'Hare's 4.5+ temps")] == ["o", "hare", "s", "4", "5", "temps"]
     assert words("") == [], "empty text has no words"
+
+
+def test_the_now_phrase_table_reads_now_without_a_library_partner():
+    """Rule 10: a closed table of now phrases; "rn" / "atm" only as the last word."""
+    spans = recognize("temperature right this minute", now=_THU, zone=_ZONE)["time"]
+    assert [(s["text"], s["token"], s["lib"]) for s in spans] == [("right this minute", "now", "table")]
+    assert recognize("open atm near me", now=_THU, zone=_ZONE)["time"] == []

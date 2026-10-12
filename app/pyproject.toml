@@ -42,10 +42,11 @@ dependencies = [
     # NI query layer (Round 20): the ask's time / number / comparator spans that validate the
     # local model's Query IR. Pinned: the Q0 bake-off measured exactly these releases over
     # 4,737 asks. ms-recognizers-text-suite is the community fork of Microsoft
-    # Recognizers-Text (MIT; imports as ms_recognizers_*); puckling is a pure-Python port of
-    # Duckling (Apache-2.0). Both are lazily imported by ni_query.recognize.
+    # Recognizers-Text (MIT; imports as ms_recognizers_*). Both are lazily imported by
+    # ni_query.recognize.
     "ms-recognizers-text-suite==1.0.1",
-    "puckling==0.5.0",
+    # US holiday dates for the asked year (MIT, pure Python, needs only python-dateutil); puckling has no 3.12 release.
+    "holidays==0.106",
 ]
 
 [project.optional-dependencies]
