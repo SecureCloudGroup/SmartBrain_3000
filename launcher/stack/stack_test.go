@@ -66,6 +66,17 @@ func TestComposeArgsPull(t *testing.T) {
 	}
 }
 
+func TestComposeArgsDown(t *testing.T) {
+	// Stop names the renderer's profile: a plain `down` passes over a profiled service, so a
+	// sidecar the launcher started would keep running after Stop (measured).
+	s := Stack{Dir: "/tmp/sb", Port: DefaultPort}
+	got := s.composeArgs(downArgs...)
+	want := []string{"compose", "-f", filepath.Join("/tmp/sb", composeName), "--profile", "render", "down"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("down args = %v, want %v", got, want)
+	}
+}
+
 func TestVersionFromEnv(t *testing.T) {
 	cases := []struct {
 		name string

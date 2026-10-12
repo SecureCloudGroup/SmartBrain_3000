@@ -349,6 +349,48 @@ export interface AppStatus {
   schedules?: { enabled: number; total: number };
   feeds?: { count: number; errors?: number };
   devices?: { paired: number };
+  // Page-browser engines (ni-format §35), one row per shipped engine, readable while locked.
+  browsers?: BrowserEngineStatus[];
+  // Round 20 (B3a): the page browser in the card flow (unlocked only).
+  browsers_flow?: BrowsersFlow;
+}
+
+// The page browser's install phases (browsers/install.py PHASES).
+export type BrowserPhase =
+  | "absent"
+  | "downloading"
+  | "verifying"
+  | "unpacking"
+  | "self-testing"
+  | "ready"
+  | "unavailable"
+  | "error"
+  | "stale"
+  | "disabled";
+
+// One page-browser engine's Status row (status_routes._browser_status). `eligible` only after a
+// sandbox check passed in this app run under the wall in use (`sandbox.verified_at` is that
+// pass); `reason` is a closed code ("" when none); `error` is the server's fixed sentence.
+export interface BrowserEngineStatus {
+  name: string;
+  phase: BrowserPhase;
+  pct: number;
+  version: string;
+  age_days: number;
+  eligible: boolean;
+  reason: string;
+  sandbox: { kind: string; verified_at: string | null };
+  last_self_test: string;
+  error?: string;
+  health?: "ok" | "unhealthy";
+}
+
+// Cards that read their page in the page browser, those still waiting for their Activate, and
+// whether a render runs right now.
+export interface BrowsersFlow {
+  rendered_cards: number;
+  drafts: number;
+  worker: "idle" | "busy";
 }
 
 export interface RememberedSite {
@@ -731,6 +773,11 @@ export interface NiItemFlow {
     key: { docs_url: string } | null;
     contact: boolean;
   };
+  // Round 20 (B3a): the source pick's paste. `render_notice` = a pasted page may be read in the
+  // page browser here, and that one visit may also load the sites it depends on (≤ site_cap).
+  tap?: { render_notice: boolean; site_cap: number };
+  // Round 20 (B3a): set while the build waits for the page browser's first install or check.
+  browser?: { phase: string; pct: number };
 }
 
 // G1 oversight plane: one watcher finding (ni_findings row, code-authored
@@ -824,6 +871,23 @@ export interface NiBoardItem {
   // server — the card then renders exactly as before (version-skew rule).
   interpretation?: string;
   query?: { coverage?: Record<string, NiCoverage> };
+  // Round 20 (B3a, ni-format §35): only rows of cards that read their page in the page browser
+  // carry these. `render.sites` = the sealed registrable domains, the page's own first;
+  // `render.unavailable` = the page browser was unavailable on this machine at the last update
+  // (never a failure). `draft` while the card waits for the Activate that lets every update load
+  // its other sites (niActivate; niCommission refuses it). `preview.feed_candidates` = the site's
+  // own data feeds the creation visit saw (niSwitchFeed). Absent → the card renders as before.
+  rendered?: boolean;
+  render?: { sites: string[]; unavailable: boolean } | null;
+  draft?: { reason: "render_sites"; sites: string[] } | null;
+  preview?: { feed_candidates: NiFeedCandidate[] | null } | null;
+}
+
+// One data feed the page browser saw the page request (≤ 5 per card): the exact https address
+// and the sealed site it is on.
+export interface NiFeedCandidate {
+  url: string;
+  site: string;
 }
 
 // ni library (ni-format §19/§20) — the Global Library subscription: one hosted
@@ -1772,13 +1836,16 @@ export const api = {
   niItem: (id: string) => req<NiItemDetail>(`/api/ni/items/${encodeURIComponent(id)}`),
   // F1 (2026-09-15): a "Looks right" verdict kicks the C3 proof run server-side;
   // `state` is the POST-run state (often "live" already) and `run` reports the
-  // kick's outcome ("ok" | "error" | "skipped" — verdict recorded regardless).
+  // kick's outcome ("ok" | "error" | "skipped" — verdict recorded regardless; "busy" when the
+  // page browser was busy — never a failure, the card's check runs on its next update).
+  // `code` ("render_busy" / "render_unavailable") names a page browser that didn't take the
+  // kick — read it with replyCapacity in $lib/ni/browser (`run: "busy"` is the fallback).
   // `repick` (NO on a card awaiting the user's YES): "repick" = the pick re-landed with the
   // other sources; "relocate" = looking again without the declined one.
   // `presentationId` (§34 C2 presentation_id): "second" re-seals the card under its sealed
   // runner-up design before the YES is stamped; omitted (every non-form caller) keeps the pick.
   niValidate: (id: string, ok: boolean, note?: string, presentationId?: "pick" | "second") =>
-    req<{ ok: boolean; state: NiState; run?: string; repick?: string }>(
+    req<{ ok: boolean; state: NiState; run?: string; code?: string; repick?: string }>(
       `/api/ni/items/${encodeURIComponent(id)}/validate`, {
         method: "POST",
         body: JSON.stringify({
@@ -1789,9 +1856,12 @@ export const api = {
       }),
   // Run once now. `status` is the outcome ("ok" or "error"); `kind` is the host-free
   // error class when status is "error" (e.g. "http_5xx", "contract"). 409 = draft /
-  // broken / disabled — the caller surfaces the detail.
+  // broken / disabled — the caller surfaces the detail — or the page browser is busy (a
+  // capacity answer, never a failure). The page browser's capacity answers carry `code`
+  // ("render_busy" / "render_unavailable") on the 409 or the reply: errorCapacity and
+  // replyCapacity in $lib/ni/browser read it first, the busy sentence and `kind` as fallbacks.
   niRun: (id: string) =>
-    req<{ status: "ok" | "error"; kind?: string; duration_ms: number }>(
+    req<{ status: "ok" | "error"; kind?: string; code?: string; duration_ms: number }>(
       `/api/ni/items/${encodeURIComponent(id)}/run`,
       { method: "POST" },
     ),
@@ -1802,6 +1872,23 @@ export const api = {
     req<{ state: "commissioning" }>(
       `/api/ni/items/${encodeURIComponent(id)}/commission`,
       { method: "POST" },
+    ),
+  // Round 20 (B3a): the Activate panel of a draft whose page also loads other sites — the user's
+  // OK for every update to load exactly the card's listed sites; the card then commissions (and
+  // waits for its YES like every page card). Desktop-only (server-checked: a paired phone gets a
+  // 403); 409 with the server's sentence when the card isn't waiting for its sites.
+  niActivate: (id: string) =>
+    req<{ state: "commissioning"; sites: string[] }>(
+      `/api/ni/items/${encodeURIComponent(id)}/activate`,
+      { method: "POST" },
+    ),
+  // Round 20 (B3a): rebuild the card from one of the site's data feeds the page browser saw —
+  // `url` exactly as the card showed it (the server accepts nothing else). Desktop-only; 409
+  // with the server's sentence otherwise. The card re-enters its build and waits for its YES.
+  niSwitchFeed: (id: string, url: string) =>
+    req<{ ok: boolean; started: boolean }>(
+      `/api/ni/items/${encodeURIComponent(id)}/switch-feed`,
+      { method: "POST", body: JSON.stringify({ url }) },
     ),
   niPatch: (id: string, body: { enabled?: boolean; position?: number; display?: NiDisplay;
                                  title?: string; interval_minutes?: number }) =>

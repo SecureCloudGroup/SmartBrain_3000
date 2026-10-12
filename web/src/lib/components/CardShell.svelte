@@ -6,6 +6,7 @@
   // every existing flow/commission branch keeps its own markup — see README-irpaint.md
   // "Board" for what the shell owns vs what a form's CLIR already carries).
   import type { Snippet } from "svelte";
+  import Chip from "$lib/components/Chip.svelte";
   import { formBoxChrome, type CardState } from "$lib/ni/shell";
 
   let {
@@ -18,6 +19,8 @@
     footerText = "",
     interpretation = "",
     reason = "",
+    rendered = false,
+    notice = "",
     chips,
     children,
     below,
@@ -40,6 +43,13 @@
     interpretation?: string;
     // The failing-state explanation line, shown above the dimmed body at full opacity.
     reason?: string;
+    // Round 20 (B3b, ni-format §35): the card reads its page in SmartBrain's page browser — a
+    // small muted "page browser" chip follows the page's own chips.
+    rendered?: boolean;
+    // A code-authored state line that is not a failure ($lib/ni/browser renderNotice: the page
+    // browser is unavailable on this machine). When set it takes the reason line's place, in any
+    // state, and keeps the legacy chrome (formBoxChrome).
+    notice?: string;
     chips?: Snippet;
     children?: Snippet;
     below?: Snippet;
@@ -51,7 +61,7 @@
   // the plane filling the box) vs the legacy 24px chrome with a normal head/foot flow.
   // The page calls the SAME function to shape what it passes as `actions`, so the two
   // never disagree about which chrome a given card gets.
-  const box = $derived(formBoxChrome(state, hasForm));
+  const box = $derived(formBoxChrome(state, hasForm, notice));
 </script>
 
 <div
@@ -70,13 +80,20 @@
     {:else}
       <strong class="ni-title">{title}</strong>
     {/if}
-    <span class="ni-chips">{@render chips?.()}</span>
+    <span class="ni-chips">
+      {@render chips?.()}
+      {#if rendered}
+        <Chip title="This card reads its page in SmartBrain's own local page browser">page browser</Chip>
+      {/if}
+    </span>
   </div>
 
   <div class="ni-body" class:ni-body-dim={state === "failing"}>
     {@render children?.()}
   </div>
-  {#if state === "failing" && reason}
+  {#if notice}
+    <p class="ni-state-note">{notice}</p>
+  {:else if state === "failing" && reason}
     <p class="ni-fail-reason">{reason}</p>
   {/if}
 
@@ -193,7 +210,8 @@
      outside this wrapper) stay at full opacity. Never combined with `.form` (see
      formBoxChrome), so this never dims an absolutely-positioned overlay body. */
   .ni-body-dim { opacity: 0.6; }
-  .ni-fail-reason {
+  .ni-fail-reason,
+  .ni-state-note {
     margin: var(--s-1) 0 0;
     font-size: var(--f-label);
     color: var(--muted);

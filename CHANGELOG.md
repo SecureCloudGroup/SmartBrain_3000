@@ -63,6 +63,19 @@ to know when a release changes behavior.
   the wall and when it last passed. Where no wall can be built (Windows, Ubuntu's default
   restriction on user namespaces, Docker without the renderer), the engine is listed as
   unavailable with the reason and nothing runs.
+- **On the Docker stack, the desktop app starts the page browser's renderer.** When a card first
+  needs the page browser and its renderer is missing, or left on an older image by an update,
+  the launcher starts the `render` container on the current image (only that one; the app's own
+  containers are never touched), and Stop now stops it too; `--no-render` keeps it off. Each
+  release now publishes its image, `ghcr.io/securecloudgroup/smartbrain_3000-render`, with the
+  same tags as the app's.
+- **The page browser on your cards and in Status.** Under the paste field a card says that
+  one visit in the page browser may also load the sites the page depends on (up to 12); while
+  the page browser gets ready the card shows *Preparing the page browser (43%)…*; a draft
+  whose page loads other sites lists them with an **Activate** that allows exactly those.
+  Cards read this way wear a *page browser* chip, say so when it can't run on this computer
+  instead of counting a failure, and offer the page's own data feed by its exact address.
+  Settings → Status gains a **Page browser** section.
 
 - **A query layer that reads what an ask actually asks for.** For a
   Library source, an ask can now be turned into one small, checked query over the source's

@@ -19,7 +19,7 @@ import (
 	"github.com/SecureCloudGroup/SmartBrain_3000/launcher/stack"
 )
 
-const usageText = `usage: smartbrain [command]
+const usageText = `usage: smartbrain [command] [--no-render]
 
   (none)   desktop tray — falls back to headless where no tray can be drawn
   run      run in the foreground without a tray (what a systemd unit runs)
@@ -27,6 +27,8 @@ const usageText = `usage: smartbrain [command]
   stop     stop SmartBrain (your data is kept)
   status   report whether SmartBrain is running (exit 0 yes, 1 no)
   version  print the launcher and app versions
+
+  --no-render  never start the page browser's renderer container (Docker stack only)
 `
 
 // runVerb executes one CLI verb and returns its exit code.
@@ -62,8 +64,8 @@ func runVerb(verb string) int {
 	}
 }
 
-// runHeadless is the tray-less persona: the same stack init and the exact four
-// goroutines onReady launches, minus the menus (whose seams no-op — see setStatus
+// runHeadless is the tray-less persona: the same stack init and the same goroutines
+// onReady launches, minus the menus (whose seams no-op — see setStatus
 // and friends in main.go). SIGTERM/SIGINT stops the stack and exits 0, so a
 // systemd unit's stop actually stops SmartBrain — unlike quitting the tray, which
 // deliberately leaves it running for the browser.
@@ -82,6 +84,9 @@ func runHeadless() {
 	go updateChecker() // then quietly watch for a newer image
 	go handshakeLoop() // and keep the app told about what is staged
 	go noticesLoop()   // and surface Neural Interface notices as toasts
+	if !noRender {
+		go renderLoop() // and start the page browser's sidecar when Docker runs without one
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)

@@ -2971,7 +2971,20 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
     `check` = a valid `ok` READY and a heartbeat from the same boot within 10 s, else
     `docker_no_sidecar`. Self-test = the READY facts + a `selftest` job (the relay reaches
     THIS egress child, no app data in the sidecar, DNS fails, the engine starts) + the
-    census. The launcher does not start the profile yet (B3).
+    census. The launcher starts the profile (B3): on its 30 s beat in Docker mode it reads
+    `/api/status/overview` with its local token; when `renderer.wanted` and `renderer.sidecar`
+    is `missing` or `stale` (an app before that field: a `browsers[]` row with reason
+    `docker_no_sidecar`; never while every row is `disabled`) it runs `docker compose -f <file>
+    --profile render up -d render`, whose `pull_policy: always` pulls the newer image and
+    recreates a stale sidecar (measured against a registry). At most one start per 10 minutes
+    (a sidecar still booting, a failed start, a stale one whose image is not out yet), re-armed
+    when the app stops answering; one log line per start; `--no-render` opts out. The service
+    is named: a bare `--profile render up -d` converges every service, and the app's
+    `pull_policy: always` then installs a staged update with no click (measured). Stop runs
+    `--profile render down` (a plain `down` leaves the sidecar running). The `release.yml` job
+    `render-image` publishes `ghcr.io/securecloudgroup/smartbrain_3000-render` with the app
+    image's tags, built with the same `SMARTBRAIN_VERSION` (the READY `build` the app compares),
+    and names its digest in the release notes.
   - **NullWall** (`walls/null.py`): for the test suite only, built ONLY when
     `SMARTBRAIN_BROWSER_TEST_NULLWALL=1` AND every executable in the engine dir is the fake
     engine fixture (a `#!` script carrying `# smartbrain-test-fake-engine`) — both checked
@@ -3227,6 +3240,60 @@ reason and the runner starts nothing (fail closed). The first engine is Obscura
   SIGKILLs every process of this user whose EXECUTABLE (Linux `/proc/<pid>/exe`, else `ps -o
   comm`) lies under the browsers dir — an engine an earlier run left behind (macOS has no
   PDEATHSIG); never by command line; the log names only the count.
+
+### Client (B3b)
+
+The web surfaces read the B3a fields; every one is optional, and a board row, flow field or
+Status payload without them renders as before (version-skew rule). The pure helpers are
+`web/src/lib/ni/browser.ts` and `web/src/lib/browserStatus.ts`. Every sentence is code-authored;
+the only server strings shown are the sealed sites and feed addresses (plain text — never
+`{@html}`, never a link) and the server's closed refusal sentences.
+
+- **Consent clause (the pick pause).** `flow.tap.render_notice` → one muted line between the
+  paste field and *Use this URL*: "If the page needs SmartBrain's page browser, that one visit may
+  also load the sites it depends on (up to `site_cap`)." (`tapClause`).
+- **Waiting state.** `flow.browser.phase` ∈ `downloading verifying unpacking self-testing` → the
+  card's stage line reads "Preparing the page browser (NN%)…" (`flowStageLabel` through
+  `browserWaitLabel`; never over a terminal flow); nothing else changes.
+- **Draft Activate panel.** `draft.reason == "render_sites"` → `RenderSitesPanel` in place of the
+  plain Activate: "This page also loads N other sites:", the sites after the page's own
+  (`draft.sites[1:]`, unique, ≤ 12) one per line, the consent line, one *Activate* → `POST
+  /activate` (`api.niActivate`). 200 → a toast and a board reload (the card commissions and waits
+  for its YES); 409 / 403 → the server's sentence on the panel (`describeError` passes 4xx
+  through). The `/commission` control never shows for such a draft.
+- **Rendered cards.** `rendered: true` → CardShell's `rendered` prop: a muted `page browser` chip
+  after the page's chips. `render.unavailable` → CardShell's `notice` (`renderNotice`): a muted
+  state line in any state, in the failing reason line's place, never dimmed; it keeps the legacy
+  chrome (`formBoxChrome(state, hasForm, notice)`), and an empty card drops "Waiting for the first
+  run…". The page browser's capacity answers are toasts, never the page's error line:
+  `errorCapacity` (a refused request) and `replyCapacity` (a run's or a C2 verdict's reply) read
+  the server's `code` first — `render_busy` / `render_unavailable`, beside `detail` on a 409 or in
+  the reply; any other code is another refusal — and only from a server that sends no code fall
+  back to the busy 409's sentence, a C2 reply's `run: "busy"` and a run's `kind:
+  "render_unavailable"`. A C2 YES the page browser didn't take toasts when the card checks its data
+  (`confirmedNote`). `ni/errors.ts` gives the seven failure classes (`ni._RENDER_FAILURES`) their
+  plain words for the failing reason line, the first-run line and History; the two capacity kinds
+  have none (never failures).
+- **Feed switch (R12).** `preview.feed_candidates` (https only, unique, ≤ 5 — `feedCandidates`)
+  → `FeedOffer` inside the held C2 panel, under Yes / No: "This page gets its data from a feed",
+  each exact address on one line (an ellipsis, the whole address in `title`), one *Use this feed
+  instead* each → `POST /switch-feed {url}` (`api.niSwitchFeed`). Success → a toast and a board
+  reload (the build's progress takes the panel's place); a refusal → the server's sentence on the
+  panel. Activate and the switch are Desktop-only on the server; like every NI write control the
+  client shows them everywhere and paints a phone's 403 sentence.
+- **Status.** `PageBrowserStatus` after the Voice card when `browsers[]` is non-empty: per engine
+  its name, `v<version>, released N days ago`, ONE phase chip (an eligible engine reads `ready`;
+  `downloading NN%`, `verifying`, `unpacking`, `checking`, `not checked yet`, `not downloaded`,
+  `update waiting`, `unavailable`, `failed`, `off`) and, only while `health` is `unhealthy` (the
+  breaker is open), a second warn chip `paused after repeated failures`; a native `<progress>`
+  while it installs or checks itself, the sandbox line (seatbelt / userns / sidecar / null in
+  words, `verified_at` as a local date and time or "not checked since SmartBrain started"), and
+  one sentence from the closed
+  `REASON_SENTENCES` table — keyed by `reason` (the `browsers.REASONS` codes), else by phase
+  through `browsers.available`'s own mapping, a failed install showing the installer's fixed
+  sentence, anything else "Not available right now." Then `browsers_flow`: rendered cards, drafts,
+  and the worker (`reading a page` / `idle`). No controls: the server exposes no page-browser
+  Retry / Turn off / Turn on route.
 
 ## 36. Query layer (Round 20 — `ni_query`: built and measured in Q3a, wired into the flow in Q3b)
 

@@ -20,9 +20,24 @@ older ones; on a Linux desktop the launcher relaunches itself after one.
 
 **Docker is the fallback** for platforms with no pinned runtime — Intel Macs and arm Linux. There the
 launcher writes **one** file, the release `docker-compose.release.yml`, into a per-user folder and
-shells out to `docker compose` exactly as you would by hand. That file also declares the page
-browser's renderer sidecar as the `render` profile; the launcher does not start it yet (open: start it
-with `--profile render` once the app reports that a renderer is wanted, and publish its image).
+shells out to `docker compose` exactly as you would by hand.
+
+That file also declares the page browser's renderer sidecar (ni-format §35) as the `render` profile,
+on the image `ghcr.io/securecloudgroup/smartbrain_3000-render` that every release publishes with the
+app image's tags. On the handshake's 30-second beat the launcher reads the app's
+`/api/status/overview` (with its local token; the app answers it while locked too). When a card first
+needs the page browser (`renderer.wanted`) and the sidecar is `missing` — or `stale`, left on another
+build by an update — it runs `docker compose -f docker-compose.release.yml --profile render up -d
+render`, with one log line; the service's `pull_policy: always` makes that same command recreate a
+stale sidecar on the newer image. An app from before the `renderer` field is read by its
+`browsers[]` rows instead (reason `docker_no_sidecar`), and a page browser switched off (every row
+`disabled`) is never started. The service is named on purpose: a bare `--profile render up -d`
+converges every service, and the app's `pull_policy: always` would then install a downloaded update
+without the click. After any start the launcher waits 10 minutes before another — for a sidecar
+still booting, a failed start, or a stale one whose newer image is not published yet — and the app
+going away re-arms it; a failure is logged and never touches the app. **Stop** runs `down` with the
+profile too (a plain `down` leaves the sidecar running), and `--no-render` (`smartbrain --no-render`,
+`smartbrain run --no-render`) keeps the launcher from ever starting it.
 
 `resolveNativeMode` (`main.go`) picks between them: native where supported, Docker otherwise.
 `SMARTBRAIN_NATIVE=1` / `=0` forces it, which is for development rather than for users — which stack

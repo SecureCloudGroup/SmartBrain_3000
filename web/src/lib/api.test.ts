@@ -433,3 +433,86 @@ describe("self-improve cadence", () => {
     expect(state.last_run).toBe("2026-08-01 12:00:00.000000");
   });
 });
+
+// Round 20 (B3b, ni-format §35): the page browser's two write calls. The board's Activate panel
+// and feed offer are presentational (RenderSitesPanel / FeedOffer); these pin what the page's
+// handlers send and how a refusal comes back — the server's closed sentence, which describeError
+// passes through verbatim for the panel to show.
+describe("page browser calls", () => {
+  function captureFetch(status = 200, body: unknown = {}) {
+    const spy = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse(status, body),
+    );
+    globalThis.fetch = spy as unknown as typeof globalThis.fetch;
+    return spy;
+  }
+
+  it("niActivate posts to the card's /activate and returns its commissioning state and sites", async () => {
+    const spy = captureFetch(200, { state: "commissioning", sites: ["gasbuddy.com", "cloudfront.net"] });
+    const out = await api.niActivate("card 1");
+    expect(spy.mock.calls).toHaveLength(1);
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toBe("/api/ni/items/card%201/activate");
+    expect(init!.method).toBe("POST");
+    expect(init!.body).toBeUndefined();
+    expect(out).toEqual({ state: "commissioning", sites: ["gasbuddy.com", "cloudfront.net"] });
+  });
+
+  it("niActivate's 409 carries the server's closed sentence for the panel", async () => {
+    const detail = "activate refused: this card is not waiting for its sites";
+    captureFetch(409, { detail });
+    const err = await api.niActivate("c1").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 409, message: detail });
+    const { describeError } = await import("./errors");
+    expect(describeError(err)).toBe(detail);
+  });
+
+  it("niSwitchFeed posts the exact feed address as {url}", async () => {
+    const url = "https://api.gasbuddy.com/v2/prices?zip=27514&fuel=1&q=a%20b";
+    const spy = captureFetch(200, { ok: true, started: true });
+    const out = await api.niSwitchFeed("c1", url);
+    const [path, init] = spy.mock.calls[0];
+    expect(String(path)).toBe("/api/ni/items/c1/switch-feed");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(String(init!.body))).toEqual({ url });
+    expect(out).toEqual({ ok: true, started: true });
+  });
+
+  // The server's capacity codes ride beside `detail` (a refusal) or in the reply body; the board
+  // reads them with errorCapacity / replyCapacity, so they must survive req() untouched.
+  it("a busy or unavailable 409 from niRun keeps the server's code on the ApiError", async () => {
+    const { errorCapacity } = await import("./ni/browser");
+    captureFetch(409, { detail: "the local page browser is busy — try again in a moment", code: "render_busy" });
+    const busy = await api.niRun("c1").catch((e: unknown) => e);
+    expect(busy).toMatchObject({ name: "ApiError", status: 409, code: "render_busy" });
+    expect(errorCapacity(busy)).toBe("busy");
+    captureFetch(409, { detail: "the page browser is unavailable on this machine", code: "render_unavailable" });
+    const unavailable = await api.niRun("c1").catch((e: unknown) => e);
+    expect(unavailable).toMatchObject({ status: 409, code: "render_unavailable" });
+    expect(errorCapacity(unavailable)).toBe("unavailable");
+  });
+
+  it("niRun and niValidate replies keep the server's code for the board to read", async () => {
+    const { replyCapacity } = await import("./ni/browser");
+    captureFetch(200, { status: "error", kind: "render_unavailable", code: "render_unavailable", duration_ms: 3 });
+    expect(replyCapacity(await api.niRun("c1"))).toBe("unavailable");
+    captureFetch(200, { ok: true, state: "commissioning", run: "busy", code: "render_busy" });
+    const verdict = await api.niValidate("c1", true);
+    expect(verdict.code).toBe("render_busy");
+    expect(replyCapacity(verdict)).toBe("busy");
+    captureFetch(200, { ok: true, state: "live", run: "ok" });
+    expect(replyCapacity(await api.niValidate("c1", true))).toBe("");
+  });
+
+  it("niSwitchFeed's refusals come back as the server's sentence (409 not a feed, 403 a phone)", async () => {
+    captureFetch(409, { detail: "that address is not one of this card's data feeds" });
+    await expect(api.niSwitchFeed("c1", "https://a.com/x.json")).rejects.toMatchObject({
+      status: 409, message: "that address is not one of this card's data feeds",
+    });
+    captureFetch(403, { detail: "this endpoint is Desktop-local only" });
+    await expect(api.niSwitchFeed("c1", "https://a.com/x.json")).rejects.toMatchObject({
+      status: 403, message: "this endpoint is Desktop-local only",
+    });
+  });
+});

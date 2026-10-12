@@ -81,6 +81,16 @@ curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/m
 docker compose -f docker-compose.release.yml up -d
 ```
 
+In Docker, the page browser — which SmartBrain uses for pages that show their data only once
+their scripts run — runs in a container of its own with no network at all, from the image
+`ghcr.io/securecloudgroup/smartbrain_3000-render`. The desktop app starts it when a card first
+needs it (a few hundred megabytes to download the first time), and again on the newer image after
+an update; run the desktop app with `--no-render` to keep it off. With the compose file alone, add
+the `render` profile — `docker compose -f docker-compose.release.yml --profile render up -d` — and
+name it on every later `up` and `down` too: a plain `up` leaves the renderer on its old image, and
+a plain `down` leaves it running. Without it SmartBrain works as before, and Settings → Status lists
+the page browser as unavailable.
+
 On macOS the launcher starts by itself once Homebrew finishes; on Windows, open
 **SmartBrain** from the Start menu; on Linux, launch **SmartBrain** from the app menu or
 run `smartbrain start`. The menu-bar icon shows what it is doing. The first

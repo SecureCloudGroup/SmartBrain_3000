@@ -105,8 +105,13 @@ func (s Stack) Up(ctx context.Context) error {
 	return s.compose(ctx, "up", "-d")
 }
 
-// Down stops and removes the containers. The user's ./data is left untouched.
-func (s Stack) Down(ctx context.Context) error { return s.compose(ctx, "down") }
+// Down stops and removes the containers, the renderer sidecar's included: `down` passes
+// over a service whose profile is not named, so a plain one would leave a sidecar the
+// launcher started running on (measured). The user's ./data is left untouched.
+func (s Stack) Down(ctx context.Context) error { return s.compose(ctx, downArgs...) }
+
+// downArgs is Down's argument tail.
+var downArgs = []string{"--profile", RenderProfile, "down"}
 
 // --- update detection -------------------------------------------------------------------------
 //
