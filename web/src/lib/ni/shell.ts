@@ -134,11 +134,13 @@ export function bodyShowsPanel(item: NiBoardItem, hasForm: boolean): boolean {
  *  than any design) and "designing" shows flow/activate copy, and are excluded for
  *  that reason; "failing"/"broken"/commissioning-with-failures also keep the legacy
  *  chrome here because they can carry the reason line and the Fix affordance (`below`)
- *  alongside the body, which the tight, overlay-chip chrome has no safe room for. Both
+ *  alongside the body, which the tight, overlay-chip chrome has no safe room for. A card
+ *  carrying a state `notice` (Round 20, B3b: the page browser is unavailable on this
+ *  machine) keeps the legacy chrome for the same reason — the line sits under the body. Both
  *  CardShell (the CSS gate) and the page (the actions-overlay shape) call this so they
  *  never disagree about which chrome a given card gets. */
-export function formBoxChrome(state: CardState, hasForm: boolean): boolean {
+export function formBoxChrome(state: CardState, hasForm: boolean, notice = ""): boolean {
   console.assert(typeof hasForm === "boolean", "formBoxChrome: hasForm is boolean");
   console.assert(typeof state === "string", "formBoxChrome: state is string");
-  return hasForm && (state === "fresh" || state === "stale" || state === "paused");
+  return hasForm && notice === "" && (state === "fresh" || state === "stale" || state === "paused");
 }

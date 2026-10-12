@@ -496,6 +496,26 @@ side — *"my stock next to my spending"* — with zero network: they read only
 your own cards' recorded series, can't nest, and degrade gracefully if a card
 they reference goes away.
 
+**Pages that need a browser.** Some pages show their data only after their own
+scripts run. For a page whose link you paste, or a page card you press **Fix**
+on, SmartBrain first reads the data the page already carries, and only when that
+is not enough opens it once in its own local, locked-down **page browser** (never
+for a Library source, and never for a site that refuses automated readers). Below
+the paste field the card says what your paste covers: that one visit may also
+load the sites the page depends on, up to 12. A page that loads only its own site
+is held for your **Yes, that's it** like any page card; one that also loads other
+sites waits as a draft that lists them, one per line, and its **Activate** is your
+OK for every update to load exactly those sites. The first time it is needed, the
+card shows *"Preparing the page browser (43%)…"* while it downloads and checks
+itself. Cards read this way wear a **page browser** chip; on a computer where the
+page browser can't run, the card says so instead of counting a failure, and a busy
+page browser only asks you to try again in a moment. When the visit saw the page
+fetch its data from a feed, the panel that asks for your Yes shows the feed's exact
+address with **Use this feed instead**, which rebuilds the card from that feed.
+**Settings → Status** shows the page browser's version, its sandbox and when it
+last passed its check, why it can or can't read pages on this computer, and how
+many cards use it.
+
 **Your MCP servers as sources.** Cards can pull from MCP servers **you**
 configure on **Settings → Connections (MCP)** — which is how database cards
 work: your own Postgres/SQLite MCP server keeps its credentials in its own

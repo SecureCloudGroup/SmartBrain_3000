@@ -120,6 +120,7 @@ func main() {
 			log.Printf("local API token unavailable: %v", err)
 		}
 	}
+	noRender = noRenderFlag(os.Args[1:]) // the one flag; it rides a verb or a bare launch alike
 	if verb, ok := cliVerb(os.Args); ok {
 		os.Exit(runVerb(verb))
 	}
@@ -224,6 +225,9 @@ func onReady() {
 	go updateChecker() // then quietly watch for a newer image
 	go handshakeLoop() // and keep the app told about what is staged
 	go noticesLoop()   // and surface Neural Interface notices as toasts
+	if !noRender {
+		go renderLoop() // and start the page browser's sidecar when Docker runs without one
+	}
 
 	go func() {
 		for {

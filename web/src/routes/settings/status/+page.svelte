@@ -6,6 +6,7 @@
   // while open; nothing here fires probes that could block the page.
   import { onDestroy, onMount } from "svelte";
   import Chip from "$lib/components/Chip.svelte";
+  import PageBrowserStatus from "$lib/components/PageBrowserStatus.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
   import { account } from "$lib/account.svelte";
   import { api, ApiError, type AppStatus, type NiFinding } from "$lib/api";
@@ -418,6 +419,12 @@
         </div>
       </div>
     </div>
+
+    {#if status.browsers && status.browsers.length > 0}
+      <!-- Round 20 (B3b): the page browser — engines, sandbox, why it can or can't read pages
+           here, and the cards that use it. Absent on an older server (version skew). -->
+      <PageBrowserStatus engines={status.browsers} flow={status.browsers_flow} />
+    {/if}
 
     <div class="card">
       <h2 class="row"><span>Storage &amp; memory</span></h2>

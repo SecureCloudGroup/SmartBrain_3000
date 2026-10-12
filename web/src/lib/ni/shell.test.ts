@@ -225,4 +225,12 @@ describe("formBoxChrome", () => {
     expect(formBoxChrome("broken", true)).toBe(false);
     expect(formBoxChrome("empty", true)).toBe(false);
   });
+
+  it("is false while the card carries a state notice (Round 20: the page browser is unavailable)", () => {
+    const notice = "The page browser is unavailable on this machine.";
+    expect(formBoxChrome("fresh", true, notice)).toBe(false);
+    expect(formBoxChrome("stale", true, notice)).toBe(false);
+    expect(formBoxChrome("paused", true, notice)).toBe(false);
+    expect(formBoxChrome("fresh", true, "")).toBe(true);
+  });
 });

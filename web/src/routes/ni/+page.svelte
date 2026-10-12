@@ -11,10 +11,12 @@
   import CardShell from "$lib/components/CardShell.svelte";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import FeedOffer from "$lib/components/FeedOffer.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import IrPaint from "$lib/components/IrPaint.svelte";
   import NiScene from "$lib/components/NiScene.svelte";
+  import RenderSitesPanel from "$lib/components/RenderSitesPanel.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
   import VerifyPanel from "$lib/components/VerifyPanel.svelte";
   import { account } from "$lib/account.svelte";
@@ -28,6 +30,16 @@
   } from "$lib/api";
   import { confirmDialog } from "$lib/confirm.svelte";
   import { describeError } from "$lib/errors";
+  import {
+    capacityNote,
+    confirmedNote,
+    errorCapacity,
+    feedCandidates,
+    renderDraftSites,
+    renderNotice,
+    replyCapacity,
+    tapClause,
+  } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { awaitingYesSource, flowStageLabel, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
@@ -1001,13 +1013,24 @@
       // A 200 with status: "error" is a real failure — the payload didn't refresh,
       // and staying silent reads as "did nothing" to the operator. Kind is the
       // host-free error class (e.g. "http_5xx", "contract"); shown when present.
-      if (r.status === "error") {
+      // Round 20 (B3a): a page browser that is busy or unavailable here is not a failure — a note.
+      const capacity = replyCapacity(r);
+      if (capacity) {
+        toast(capacityNote(capacity));
+      } else if (r.status === "error") {
         error = r.kind ? `Run failed (${r.kind}).` : "Run failed.";
       }
       await load();
     } catch (err) {
-      const msg = describeError(err);
-      if (msg) error = msg;
+      // Round 20 (B3a): a busy (or unavailable) page browser refuses with a 409 — a transient
+      // note, never an error.
+      const capacity = errorCapacity(err);
+      if (capacity) {
+        toast(capacityNote(capacity));
+      } else {
+        const msg = describeError(err);
+        if (msg) error = msg;
+      }
     } finally {
       busyId = null;
     }
@@ -1069,6 +1092,46 @@
     }
   }
 
+  // Round 20 (B3a, R6): the Activate panel of a draft whose page also loads other sites — the
+  // user's OK for every update to load exactly the listed sites. The card then commissions and
+  // waits for its YES (the board's next row says so). A refusal shows on the panel, verbatim.
+  async function activateSites(item: NiBoardItem): Promise<void> {
+    console.assert(item.draft?.reason === "render_sites", "activateSites: a draft waiting for its sites");
+    console.assert(typeof item.id === "string", "activateSites: id is string");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      await api.niActivate(item.id);
+      toast("Activated — check the card's reading.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t go through — try again." };
+    } finally {
+      busyId = null;
+    }
+  }
+
+  // Round 20 (B3a, R12): rebuild the card from one of the site's own data feeds the page
+  // browser saw — the exact address the card shows. On success the card re-enters its build
+  // (the C2 panel gives way to its progress); a refusal shows on the panel, verbatim.
+  async function switchFeed(item: NiBoardItem, url: string): Promise<void> {
+    console.assert(feedCandidates(item).some((feed) => feed.url === url), "switchFeed: one of the card's feeds");
+    console.assert(typeof item.id === "string", "switchFeed: id is string");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      const out = await api.niSwitchFeed(item.id, url);
+      toast(out.started === false
+        ? "Switching to the feed — it starts as soon as a build slot frees up."
+        : "Switching to the feed — rebuilding the card from it.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t go through — try again." };
+    } finally {
+      busyId = null;
+    }
+  }
+
   async function validateLooksRight(item: NiBoardItem, presentationId?: "pick" | "second") {
     console.assert(item.state === "commissioning", "validateLooksRight: only commissioning");
     console.assert(typeof item.id === "string", "validateLooksRight: id is string");
@@ -1078,9 +1141,11 @@
       // every other caller omits it, which the server reads as "keep the pick".
       const res = await api.niValidate(item.id, true, undefined, presentationId);
       // F1: the verdict kicks the C3 proof run server-side — say what happened.
-      toast(res.state === "live"
+      // Round 20 (B3a): a page browser that didn't take the kick (busy, unavailable) is never a
+      // failure — the toast says when the card checks its data instead.
+      toast(confirmedNote(replyCapacity(res)) || (res.state === "live"
         ? "Confirmed — the card is live."
-        : "Confirmed — verifying with a fresh refresh.");
+        : "Confirmed — verifying with a fresh refresh."));
       await load();
     } catch (err) {
       const msg = describeError(err);
@@ -1232,6 +1297,8 @@
         {@const reason = state === "failing"
           ? `${friendlyErrorClass(item.last_status)} · last tried ${relTime(item.last_checked)}`
           : ""}
+        {@const notice = renderNotice(item)}
+        {@const draftSites = renderDraftSites(item)}
         <CardShell
           title={item.title}
           {state}
@@ -1242,6 +1309,8 @@
           footerText={footerText(item)}
           interpretation={interpretationOf(item)}
           {reason}
+          rendered={item.rendered === true}
+          {notice}
         >
           {#snippet chips()}
             {#if state !== "fresh"}
@@ -1387,6 +1456,7 @@
                 </p>
               {:else if item.flow.state === "source"}
                 {@const pick = pickRows(item.flow.suggestions)}
+                {@const clause = tapClause(item.flow)}
                 <!-- The source-pick pause renders its OWN affordances — SmartBrain
                      Library sources that declare their answers (a tap builds the card),
                      pages that may help as plain links (ruling 2026-10-05: "Library
@@ -1454,6 +1524,11 @@
                       disabled={busyId === item.id}
                       aria-label="Paste a source URL"
                     />
+                    {#if clause}
+                      <!-- Round 20 (B3a, R6): what the paste's consent covers when the page
+                           needs the page browser. -->
+                      <p class="muted ni-note">{clause}</p>
+                    {/if}
                     <button type="submit" class="secondary"
                       disabled={busyId === item.id || pickUrlText.trim().length < 8}
                     >Use this URL</button>
@@ -1539,7 +1614,9 @@
                   <span class="ni-status-class">{failure.friendly} ({failure.raw})</span>,
                   {failure.attempts} attempt{failure.attempts === 1 ? "" : "s"} · last tried {failure.tried}
                 </p>
-              {:else}
+              {:else if !notice}
+                <!-- With a notice (the page browser is unavailable here) CardShell's state
+                     line is the one truth this card tells. -->
                 <p class="muted ni-note">Waiting for the first run…</p>
               {/if}
             {/if}
@@ -1607,6 +1684,15 @@
             <p class="muted ni-note">
               Creation didn’t finish. Delete this card, or start again above.
             </p>
+          {:else if preview && !item.shell && !item.flow && draftSites}
+            <!-- Round 20 (B3a, R6): this page also loads other sites — the panel lists them and
+                 its Activate (POST /activate) is the consent; /commission refuses such a draft. -->
+            <RenderSitesPanel
+              sites={draftSites}
+              busy={busyId === item.id}
+              error={flowActionError[item.id] ?? ""}
+              onActivate={() => activateSites(item)}
+            />
           {:else if preview && !item.shell && !item.flow}
             <div class="ni-actions">
               <button
@@ -1618,6 +1704,7 @@
           {/if}
 
           {#if item.awaiting_yes && item.payload && !item.flow}
+            {@const feeds = feedCandidates(item)}
             <!-- Ruling 2026-10-04 ("hold open paths for a YES"): a card built from a web page
                  or a model-mapped dataset shows the reading it found (the scene above) and
                  where it came from, and goes live only on the user's YES. NO goes back to
@@ -1637,6 +1724,15 @@
                   onclick={() => declineReading(item)}
                 >No, try another source</button>
               </div>
+              {#if feeds.length > 0}
+                <!-- Round 20 (B3a, R12): the page's own data feed, by its exact address. -->
+                <FeedOffer
+                  candidates={feeds}
+                  busy={busyId === item.id}
+                  error={flowActionError[item.id] ?? ""}
+                  onSwitch={(url) => switchFeed(item, url)}
+                />
+              {/if}
             </div>
           {:else if item.state === "commissioning" && item.payload && item.payload_slot !== "preview"}
             <!-- F2 (2026-09-15): after "Looks right" the verdict is recorded but the
@@ -1679,7 +1775,7 @@
 
           {#snippet actions()}
             <span class="ni-actions">
-              {#if !formBoxChrome(state, !!formClir)}
+              {#if !formBoxChrome(state, !!formClir, notice)}
                 <button
                   class="linklike ni-history"
                   disabled={busyId === item.id || historyFor !== null}
@@ -1696,7 +1792,7 @@
               <details class="ni-more">
                 <summary title="More actions" aria-label="More actions">⋯</summary>
                 <div class="ni-more-menu">
-                  {#if formBoxChrome(state, !!formClir)}
+                  {#if formBoxChrome(state, !!formClir, notice)}
                     <!-- The tight form-card chrome (CardShell "formBoxChrome") has no
                          room for a visible History/Run now pair — they move into this
                          menu instead of disappearing. -->

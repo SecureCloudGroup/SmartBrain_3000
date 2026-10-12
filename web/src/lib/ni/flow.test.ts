@@ -39,6 +39,23 @@ describe("flowStageLabel", () => {
     expect(flowStageLabel(null)).toBe("");
     expect(flowStageLabel(undefined)).toBe("");
   });
+
+  // Round 20 (B3a/B3b): the waiting state — while a build waits for the page browser's first
+  // install or check, the card's one line is the preparing line with its percentage; nothing
+  // else about the card changes, and a settled phase leaves the stage label alone.
+  it("shows 'Preparing the page browser (NN%)…' while the page browser gets ready", () => {
+    expect(flowStageLabel({ state: "sampling", browser: { phase: "downloading", pct: 43 } }))
+      .toBe("Preparing the page browser (43%)…");
+    expect(flowStageLabel({ state: "sampling", browser: { phase: "self-testing", pct: 99 } }))
+      .toBe("Preparing the page browser (99%)…");
+    expect(flowStageLabel({ state: "sampling", browser: { phase: "ready", pct: 100 } }))
+      .toBe("Reading a sample…");
+  });
+
+  it("never lets a stale browser field mask a terminal state", () => {
+    expect(flowStageLabel({ state: "failed", error: "worker", browser: { phase: "downloading", pct: 5 } })).toBe("");
+    expect(flowStageLabel({ state: "unsupported", browser: { phase: "verifying", pct: 50 } })).toBe("");
+  });
 });
 
 describe("isFlowActive", () => {

@@ -89,11 +89,16 @@ MLX_DIR="$HOME/.smartbrain/mlx-embed"
 # no project prefix. Volume names DO carry the project prefix, which for a
 # launcher-managed install is "smartbrain" (compose derives it from the
 # directory basename, and the launcher runs compose from ~/Library/Application
-# Support/SmartBrain).
-DOCKER_CONTAINERS="smartbrain_3000 smartbrain_bifrost smartbrain_wireguard"
-DOCKER_VOLUMES="smartbrain_smartbrain_data smartbrain_bifrost_data"
+# Support/SmartBrain). smartbrain_render is the page browser's renderer sidecar,
+# declared under the compose profile "render": `compose down` passes over it
+# unless that profile is named, so every `down` below names it.
+DOCKER_CONTAINERS="smartbrain_3000 smartbrain_bifrost smartbrain_wireguard smartbrain_render"
+DOCKER_VOLUMES="smartbrain_smartbrain_data smartbrain_bifrost_data smartbrain_smartbrain_render"
 DOCKER_NETWORK="smartbrain_default"
 DOCKER_IMAGES="ghcr.io/securecloudgroup/smartbrain_3000:latest ghcr.io/securecloudgroup/bifrost:v1.6.4 smartbrain_3000:dev"
+# The renderer's images. Removed with the ones above, but never used to copy a
+# volume out (below): the renderer runs as a user that may not be able to read them.
+DOCKER_RENDER_IMAGES="ghcr.io/securecloudgroup/smartbrain_3000-render:latest smartbrain_3000-render:dev"
 
 # Homebrew.
 BREW_CASK="smartbrain"
@@ -613,8 +618,8 @@ say "      the compose file. The launcher writes a fresh one on every start."
 say "  * $SB_NATIVE_MARKER"
 say "      a one-line marker recording which stack mode this machine uses."
 say "  * Docker containers: $DOCKER_CONTAINERS"
-say "      stopped app and gateway containers. Recreated on install."
-say "  * Docker images: $DOCKER_IMAGES"
+say "      stopped app, gateway and page-browser containers. Recreated on install."
+say "  * Docker images: $DOCKER_IMAGES $DOCKER_RENDER_IMAGES"
 say "      cached images. Re-pulled on install. This is most of the download time."
 say "  * Homebrew cask '$BREW_CASK' (reinstalled in step 4)."
 say ""
@@ -628,6 +633,8 @@ say "Asked about separately, because it cannot be undone:"
 say "  * Docker volumes: $DOCKER_VOLUMES"
 say "      For a Docker-mode install this IS your data. Copied out first where"
 say "      possible, then removed, and only after you confirm a second time."
+say "      (smartbrain_smartbrain_render holds none of it: it is the page"
+say "      browser's in-memory scratch space.)"
 say ""
 say "Not touched by this script:"
 say "  * Your backup file, wherever you keep it."
@@ -678,15 +685,16 @@ if [ "$MODE" != "dry-run" ]; then
 fi
 
 # 2c. The Docker stack. `compose down` from the launcher's own directory, so the
-#     project name matches what the launcher used ("smartbrain"); then a direct
+#     project name matches what the launcher used ("smartbrain"), naming the
+#     renderer's "render" profile so its container goes too; then a direct
 #     container removal as a fallback for an install whose compose file is gone.
 if have docker && docker info >/dev/null 2>&1; then
   if [ -f "$SB_COMPOSE_FILE" ]; then
     say "  Stopping the Docker stack:"
     if [ "$MODE" = "dry-run" ]; then
-      show_cmd docker compose -f "$SB_COMPOSE_FILE" down
+      show_cmd docker compose -f "$SB_COMPOSE_FILE" --profile render down
     else
-      ( cd "$SB_HOME" && docker compose -f "$SB_COMPOSE_FILE" down ) || \
+      ( cd "$SB_HOME" && docker compose -f "$SB_COMPOSE_FILE" --profile render down ) || \
         warn "compose down reported a problem; continuing with direct removal."
     fi
   fi
@@ -821,7 +829,7 @@ if have docker && docker info >/dev/null 2>&1; then
 
   say ""
   say "  Removing the cached Docker images (these are re-pulled on install):"
-  for img in $DOCKER_IMAGES; do
+  for img in $DOCKER_IMAGES $DOCKER_RENDER_IMAGES; do
     if docker image inspect "$img" >/dev/null 2>&1; then
       run_ok docker rmi "$img"
     fi
@@ -1033,7 +1041,7 @@ else
   run_ok pkill -f "$APP_BUNDLE/Contents/MacOS/SmartBrain"
   run_ok pkill -f "$SB_NATIVE"
   if have docker && docker info >/dev/null 2>&1 && [ -f "$SB_COMPOSE_FILE" ]; then
-    ( cd "$SB_HOME" && docker compose -f "$SB_COMPOSE_FILE" down ) || true
+    ( cd "$SB_HOME" && docker compose -f "$SB_COMPOSE_FILE" --profile render down ) || true
   fi
   sleep 3
   run_ok open -a "$APP_BUNDLE"

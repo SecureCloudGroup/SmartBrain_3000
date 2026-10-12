@@ -109,6 +109,10 @@ curl -fsSLO https://raw.githubusercontent.com/SecureCloudGroup/SmartBrain_3000/m
 docker compose -f docker-compose.release.yml up -d
 ```
 
+The page browser is a separate container, the compose `render` profile, which the desktop app starts
+when a card first needs it; with the file alone, run `docker compose -f docker-compose.release.yml
+--profile render up -d` (and name the profile on later `up` and `down`).
+
 Then open **http://localhost:33000**.
 
 Homebrew and Scoop install a small **desktop launcher** — a menu-bar / tray app. On its

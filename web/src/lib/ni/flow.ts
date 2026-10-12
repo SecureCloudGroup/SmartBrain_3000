@@ -9,6 +9,7 @@
 // state. Every other state has a 1:1 label.
 
 import type { NiAwaitingYes, NiItemFlow, NiSuggestion } from "$lib/api";
+import { browserWaitLabel } from "$lib/ni/browser";
 
 // Marker the backend sets on flow.error when a `source` state is parked pending the
 // user picking between candidate sources (a resume_ni_flow approval will be parked
@@ -30,6 +31,10 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
   );
   if (!flow) return "";
   const s = flow.state;
+  // Round 20 (B3a): a build waiting for the page browser's first install or check says so,
+  // with its percentage, in place of its stage.
+  const wait = s === "failed" || s === "unsupported" ? "" : browserWaitLabel(flow);
+  if (wait) return wait;
   if (s === "intent") return "Understanding your request…";
   if (s === "source") {
     return flow.error === AWAITING_SOURCE_PICK

@@ -112,6 +112,16 @@ describe("theme contrast (WCAG AA)", () => {
         const r = ratio(vars["--text"], tint);
         expect(r, `--text ${vars["--text"]} on tint ${tint} = ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
       });
+      // Round 20 (B3b): RenderSitesPanel's consent line and FeedOffer's ghost controls are
+      // --muted text on the same accent tint over the card's --panel, and both panels paint the
+      // server's refusal sentence in --danger there — body-size text, so held to 4.5.
+      for (const tok of ["--muted", "--danger"] as const) {
+        it(`${tok} on the accent tint >= 4.5 (the page browser's Activate panel and feed offer)`, () => {
+          const tint = mix(vars["--accent"], vars["--panel"], name === "dark" ? 0.1 : 0.07);
+          const r = ratio(vars[tok], tint);
+          expect(r, `${tok} ${vars[tok]} on tint ${tint} = ${r.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+        });
+      }
     });
   }
 
