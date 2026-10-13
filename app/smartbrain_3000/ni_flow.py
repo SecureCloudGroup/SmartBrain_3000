@@ -1280,6 +1280,12 @@ _ANSWER_MEASURES = ("temperature", "feels_like", "precip_chance", "precip_amount
 _AXIS_STEPS = ("day", "hour", "period")
 _ANSWER_VALUE_TYPES = ("number", "text", "time", "date", "count")
 _ANSWER_CELL_TYPES = ("number", "text", "time", "date")
+# Library answers spec v1.5 (Round 20, Q3d): ``codes`` names the cell's code table — "wmo_weather" on a number (a
+# weather code the engine's ``label`` step turns into words, ni.LABEL_TABLES), or on a text value / row / column cell
+# a Library code table (taxonomy/codes/<name>.json, packed as ``library_codes``): the closed list of values the cell
+# holds, read as a row filter's evidence (ni_query.ground rule 3), never a pipeline step
+_NUMBER_CODES = ("wmo_weather",)
+_CODE_TABLE_RE = re.compile(r"[a-z][a-z0-9_]{0,39}")   # the Library's table slug (its answers._NAME)
 # a whole path segment naming one of the source's parameters: ``rates.{quote}``, ``{coin}.usd``
 _PARAM_SEGMENT_RE = re.compile(r"(?:^|\.)\{([a-z_][a-z0-9_]*)\}(?=$|\.|\[)")  # the dot goes too
 _MAX_ANSWERS = 20
@@ -1295,6 +1301,20 @@ _ANSWER_STOP = frozenset({
 def _utc_ok(decl: dict) -> bool:
     """``utc`` (zoneless times are UTC) is a boolean, on a time value / cell only."""
     return "utc" not in decl or (isinstance(decl["utc"], bool) and decl.get("type") == "time")
+
+
+def _codes_ok(decl: dict) -> bool:
+    """``codes`` sits on its cell type (spec v1.5): "wmo_weather" on a number, a Library code table on a text."""
+    assert isinstance(decl, dict), "a declaration"
+    codes = decl.get("codes")
+    if codes is None:
+        return True
+    if decl.get("type") == "number":
+        return codes in _NUMBER_CODES
+    ok = decl.get("type") == "text" and isinstance(codes, str) and codes not in _NUMBER_CODES \
+        and _CODE_TABLE_RE.fullmatch(codes) is not None
+    assert isinstance(ok, bool), "a verdict"
+    return ok
 
 
 def _clean_answer(raw: object) -> dict | None:
@@ -1314,7 +1334,7 @@ def _clean_answer(raw: object) -> dict | None:
            "primary": raw.get("primary") is True, "kind": kind}
     if kind == "value":
         if not isinstance(raw.get("path"), str) or raw.get("type") not in _ANSWER_VALUE_TYPES \
-                or raw.get("codes") not in (None, "wmo_weather") \
+                or not _codes_ok(raw) \
                 or (raw.get("unit") is not None and raw.get("unit_path") is not None) \
                 or not _utc_ok(raw) or raw.get("window") not in (None, *_ANSWER_WINDOWS) \
                 or raw.get("measure") not in (None, *_ANSWER_MEASURES) or not _tbd_ok(raw, row=False):
@@ -1354,7 +1374,7 @@ def _clean_answer(raw: object) -> dict | None:
         # a misfit.
         if not (isinstance(cell, dict) and set(cell) <= _ANSWER_CELL_KEYS
                 and isinstance(cell.get("path"), str) and cell.get("type") in _ANSWER_CELL_TYPES
-                and cell.get("codes") in (None, "wmo_weather")
+                and _codes_ok(cell)
                 and "{" not in _PARAM_SEGMENT_RE.sub("", cell["path"])
                 and "}" not in _PARAM_SEGMENT_RE.sub("", cell["path"])
                 and not (cell.get("unit") is not None and cell.get("unit_path") is not None)
@@ -1491,10 +1511,11 @@ _MEASURE_CUES: dict[str, re.Pattern] = {m: re.compile(rx, re.IGNORECASE) for m, 
 
 def _covers_measure(a: dict, measure: str) -> bool:
     """Does this answer report ``measure``? Its declared measure, a weather-code table for the sky's own
-    events (a thunderstorm, snow), or a label / cell label that names it."""
+    events (a thunderstorm, snow — ``wmo_weather`` only: a text cell's table, the NWS event names, reports
+    no sky), or a label / cell label that names it."""
     if a.get("measure") == measure:
         return True
-    coded = a.get("codes") or any(c.get("codes") for c in a.get("cells") or [])
+    coded = a.get("codes") in _NUMBER_CODES or any(c.get("codes") in _NUMBER_CODES for c in a.get("cells") or [])
     if measure in ("thunderstorm", "snow") and (a.get("measure") == "conditions" or coded):
         return True
     labels = [a["label"], *[c.get("label", "") for c in a.get("cells") or []]]
@@ -1572,7 +1593,7 @@ def _build_value_answers(chosen: list[dict], payload: dict, next_event: bool = F
             fields[name] = "number"
         else:
             paths[name] = a["path"]
-            if a.get("codes"):
+            if a.get("codes") in _NUMBER_CODES:  # a text value's Library table is evidence, never a step
                 ops.append({"fn": "label", "field": name, "table": a["codes"]})
                 fields[name] = "string"
             elif a["type"] == "number":
@@ -1621,8 +1642,9 @@ def _build_value_answers(chosen: list[dict], payload: dict, next_event: bool = F
 def _cell_ops(cell: dict, key: str, clock: bool = False, zone: str | None = None) -> list[dict]:
     """The per-row conversions one list / columns cell declares (``clock``: times as the clock only).
     R5-zone (2026-10-04): ``zone`` names the top-level output holding the source's zone — rides
-    onto a time cell so zoneless row times are anchored in the source's zone (open-meteo-sun)."""
-    if cell.get("codes"):
+    onto a time cell so zoneless row times are anchored in the source's zone (open-meteo-sun). A text cell's
+    Library code table (spec v1.5) adds no step: its values are the row filter's evidence (``_code_values``)."""
+    if cell.get("codes") in _NUMBER_CODES:
         return [{"fn": "label", "field": "rows", "table": cell["codes"], "key": key}]
     if cell["type"] == "number":
         return [{"fn": "number", "field": "rows", "key": key}]
@@ -2287,14 +2309,35 @@ def _asked_keywords(request: str, intent: dict) -> frozenset[str]:
     return out
 
 
+def _code_values(answers: list[dict]) -> dict[str, frozenset[str]]:
+    """{table: its values} for every Library code table a text value or text cell of ``answers`` declares (spec
+    v1.5, ``LibraryIndex.code_values``: the closed list of values the cell holds, "Flood Watch") — the evidence rule 3
+    of the grounded filter values reads (Round 20 Q3d, §36). {} without a Library or a table with values (an older
+    pack holds none)."""
+    assert isinstance(answers, list), "answers must be a list"
+    names = sorted({str(c["codes"]) for a in answers[:_MAX_ANSWERS] for c in [a, *(a.get("cells") or [])]
+                    if c.get("type") == "text" and c.get("codes")})
+    lib = _resolve_library()
+    if lib is None or not names:
+        return {}
+    try:
+        out = {n: lib.code_values(n) for n in names}
+    except Exception as exc:  # a Library without the reader (or a broken one): no code-table evidence
+        log.warning("ni_flow: library code tables unreadable: %s", type(exc).__name__)
+        return {}
+    assert all(isinstance(v, frozenset) for v in out.values()), "values are frozensets"
+    return {n: v for n, v in out.items() if v}
+
+
 def _query_plan(request: str, intent: dict, live: dict, answers: list[dict], now: datetime,
                 call_model: Callable[[str], str] | None, sample: object = None) -> ni_query.QueryPlan | None:
     """``ni_query.plan_query`` over the picked source's declared answers (the module docstring of
     ``ni_query.plan``): the Library record names the source and its parameter menu; the consumed spans
     are the ask words the address already took; the intent's proper names are masked for the recognizers
-    ("Saturday Night Live" is no Saturday); the asked subcategories' taxonomy keywords and the fetched
-    ``sample`` are the evidence a filter value stands on (Round 20, Q3c). A planner fault falls to the rules
-    floor; None only when even that fails (the build then reports the misfit)."""
+    ("Saturday Night Live" is no Saturday); the asked subcategories' taxonomy keywords, the fetched ``sample``
+    (Round 20, Q3c) and the values of the Library code tables the answers' text cells declare (Q3d) are the
+    evidence a filter value stands on. A planner fault falls to the rules floor; None only when even that fails
+    (the build then reports the misfit)."""
     assert isinstance(answers, list) and answers, "answers required"
     assert isinstance(now, datetime) and now.tzinfo is not None, "an aware now"
     sid = str(live.get("_library_source") or "")
@@ -2313,7 +2356,8 @@ def _query_plan(request: str, intent: dict, live: dict, answers: list[dict], now
             "source": source, "answers": answers, "params": params, "consumed": consumed, "now": now,
             "zone": ni.user_timezone_name(), "pool": list(_query_pool()),
             "masked": name_masks(request, list(intent.get("names") or [])[:_MAX_INTENT_NAMES]),
-            "grounds": ni_query.ground.Grounds(keywords=_asked_keywords(request, intent), sample=sample)}
+            "grounds": ni_query.ground.Grounds(keywords=_asked_keywords(request, intent), sample=sample,
+                                               codes=_code_values(answers))}
     for transport in (_query_transport(call_model), None):  # bounded: the model, then the rules floor
         try:
             return ni_query.plan_query(request, call_model=transport, **args)

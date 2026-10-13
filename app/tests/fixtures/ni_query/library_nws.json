@@ -1,0 +1,260 @@
+{
+"nws-alerts-point": {
+"name": "NWS active alerts for a location",
+"params": [
+{
+"example": "32.7765",
+"fill": {
+"field": "lat",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lat",
+"required": true
+},
+{
+"example": "-79.9311",
+"fill": {
+"field": "lon",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lon",
+"required": true
+}
+],
+"answers": [
+{
+"name": "alerts",
+"label": "Active weather alerts",
+"words": [
+"alerts",
+"warnings",
+"watches",
+"advisories",
+"severe weather",
+"any warnings",
+"near me",
+"tornado warning",
+"severe thunderstorm warning",
+"flood warning",
+"flash flood",
+"winter storm warning",
+"blizzard warning",
+"heat advisory",
+"red flag warning"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "properties.event",
+"label": "Alert",
+"type": "text",
+"codes": "nws_event"
+},
+{
+"path": "properties.severity",
+"label": "Severity",
+"type": "text"
+},
+{
+"path": "properties.areaDesc",
+"label": "Area",
+"type": "text"
+},
+{
+"path": "properties.expires",
+"label": "Expires",
+"type": "time"
+}
+],
+"filter": {
+"path": "properties.status",
+"equals": "Actual"
+},
+"may_be_empty": true
+},
+{
+"name": "alert_count",
+"label": "Active alerts",
+"words": [
+"how many",
+"count",
+"number of alerts",
+"how many warnings",
+"how many alerts"
+],
+"primary": false,
+"kind": "value",
+"path": "features",
+"type": "count",
+"window": "now",
+"measure": "alerts"
+}
+]
+},
+"nws-alerts-state": {
+"name": "NWS active alerts by state",
+"params": [
+{
+"example": "SC",
+"fill": {
+"field": "key",
+"from": "resolver",
+"resolver": "us_state"
+},
+"kind": "us_state",
+"name": "state",
+"required": true
+}
+],
+"answers": [
+{
+"name": "alerts",
+"label": "Active weather alerts",
+"words": [
+"alerts",
+"warnings",
+"watches",
+"advisories",
+"severe weather",
+"weather alerts",
+"statewide"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "properties.event",
+"label": "Alert",
+"type": "text",
+"codes": "nws_event"
+},
+{
+"path": "properties.severity",
+"label": "Severity",
+"type": "text"
+},
+{
+"path": "properties.areaDesc",
+"label": "Area",
+"type": "text"
+},
+{
+"path": "properties.expires",
+"label": "Expires",
+"type": "time"
+}
+],
+"filter": {
+"path": "properties.status",
+"equals": "Actual"
+},
+"may_be_empty": true
+},
+{
+"name": "alert_count",
+"label": "Active alerts",
+"words": [
+"how many",
+"count",
+"number of alerts",
+"how many warnings",
+"right now"
+],
+"primary": false,
+"kind": "value",
+"path": "features",
+"type": "count",
+"window": "now",
+"measure": "alerts"
+}
+]
+},
+"nws-tropical-alerts-point": {
+"name": "NWS hurricane and tropical storm alerts for a location",
+"params": [
+{
+"example": "27.9477",
+"fill": {
+"field": "lat",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lat",
+"required": true
+},
+{
+"example": "-82.4584",
+"fill": {
+"field": "lon",
+"from": "resolver",
+"resolver": "place"
+},
+"kind": "place",
+"name": "lon",
+"required": true
+}
+],
+"answers": [
+{
+"name": "warnings",
+"label": "Tropical watches and warnings",
+"words": [
+"hurricane",
+"hurricane warning",
+"hurricane watch",
+"tropical storm",
+"tropical storm warning",
+"storm surge",
+"surge",
+"headed for",
+"coming toward",
+"going to hit",
+"landfall",
+"threat",
+"in the path",
+"any hurricanes",
+"evacuate"
+],
+"primary": true,
+"kind": "list",
+"path": "features",
+"row": [
+{
+"path": "properties.event",
+"label": "Alert",
+"type": "text",
+"codes": "nws_event"
+},
+{
+"path": "properties.areaDesc",
+"label": "Area",
+"type": "text"
+},
+{
+"path": "properties.severity",
+"label": "Severity",
+"type": "text"
+},
+{
+"path": "properties.expires",
+"label": "Until",
+"type": "time"
+}
+],
+"filter": {
+"path": "properties.status",
+"equals": "Actual"
+},
+"may_be_empty": true
+}
+]
+}
+}

@@ -2331,6 +2331,20 @@ and the `recipe` born marker stays readable.
   time/date cells: the rows are indexed by time and can be cut); `tbd_if: {path, equals}`
   on a `time` value (path from the root) or a list row's `time` cell (row-relative) —
   `equals` is `true` or a flag word ("TBD", "TBA").
+- **Spec v1.5 — the values a text cell holds (Round 20, Q3d).** `codes` names a cell's code
+  table: `wmo_weather` on a `number` value or cell (the engine's `label` step, `ni.LABEL_TABLES`),
+  or, on a `text` value, list row cell or column, a Library code table
+  (`taxonomy/codes/<name>.json`, a slug `[a-z][a-z0-9_]{0,39}`) packed as
+  `library_codes(name, value)` — `nws_event` (the NWS alert event types, 112 values) on
+  `properties.event` of `nws-alerts-point`, `nws-alerts-state` and `nws-tropical-alerts-point`.
+  `_clean_answer` keeps a table on its cell type only (`_codes_ok`: a text table on a number, or
+  `wmo_weather` on a text, skips the answer as an unknown table always did — before v1.5 the
+  reader dropped those three NWS answers outright). A text table adds no pipeline step
+  (`_cell_ops`, `_build_value_answers`) and reports no sky (`_covers_measure` counts
+  `wmo_weather` only); its values are a row filter's evidence (§36).
+  `LibraryIndex.code_values(name)` reads them (at most 1,000, cached per installed pack); a pack
+  older than v1.5 has no `library_codes` and reads as empty, never an error — its answers carry
+  no text table either, so the build is unchanged on it.
 - **Seal.** A Library tap (`pick_flow_source` and `tools/ni-live-e2e.py`, both through
   `ni_flow.seal_library_pick`) seals `_library_source`, `_library_url` and
   `_library_params` (the values the URL was filled with — candidate rows now carry
@@ -3419,7 +3433,8 @@ the only server strings shown are the sealed sites and feed addresses (plain tex
   bound < recognizer < rules < approximated < unbound). Notes are closed codes: `query_rules
   model_off model_unavailable schema_invalid time_explicit where_dropped numbers_unstated
   order_dropped params_dropped count_list time_range_kept comparator_added comparator_corrected
-  order_default`, and two that carry their value (Q3c; ≤60 printable characters after the colon):
+  order_default filter_grounded:codes` (Q3d: one closed code — a Library code table grounded a filter
+  value), and two that carry their value (Q3c; ≤60 printable characters after the colon):
   `filter_ungrounded:<value>`, `entity_added:<phrase>`; the flow adds `quantity_unbound
   names_unbound bound_pushed clock_bound refetched` (below).
 - **The interpretation line.** `say` renders the final IR by code: `<answer label>[ (<selected
@@ -3669,6 +3684,29 @@ the only server strings shown are the sealed sites and feed addresses (plain tex
   regression risk (the zero-shot reply's "flood" — gold "Flood Warning" — grounds nothing: the same 0 rows on the
   sample, the line drops it, where `approximated`; on a day with other Houston alerts they would show), d25 a
   snapshot artifact (its intent has no place; with the live intent's "Pacific division" the card is unchanged).
+- **Code-table grounding (Q3d, Library answers spec v1.5, §32).** Rule 3 gains its second half, `codes`
+  (`ground.RULES`: proper → holiday → declared → codes → keyword → observed): a `contains` / `names` value stands
+  when a Library code table of a text cell the filter reads (its own column, or every text cell for "*") holds it —
+  one of the table's values (case ignored), or a whole-word run of one (`said_whole`), the value's last word folded
+  to its singular (as said, `fold`, an `-es` off). `ground.py` does no I/O: `ni_flow._query_plan` hands in
+  `Grounds(keywords, sample, codes)`, `codes = _code_values(answers)` = `{table: LibraryIndex.code_values(table)}`
+  for every text value or cell of the source's answers that declares one (`{}` without a Library, on a pack older
+  than v1.5, or when the read fails). A value the table grounds is noted `filter_grounded:codes`; coverage is
+  unchanged. On the NWS event names (`nws_event`): "coastal flood advisory", "high wind warning", "small craft
+  advisory" are values; "flood" (15 names), "flood watches", "flash flood", "warning(s)" whole words of them;
+  "anywhere", "active" or "flo" none — nor "flood" on the area cell, which declares no table. `contains` is a
+  case-folded substring, so a kept value the table holds only in the singular carries the table's spelling ("flood
+  watches" → "flood watch", "coastal flood advisories" → "coastal flood advisory"); a value as said is never
+  rewritten. That also mends the plurals rule 4 grounded and kept ("tornado warnings", "heat advisories": they
+  matched no row). Through `_try_answers_build` on recorded responses (`tests/test_ni_query_codes.py`): A30's
+  zero-shot reply on the Houston sample — "Active weather alerts · Alert contains flood", the honest empty (Q3c
+  had dropped "flood" and stood for every Houston alert); F33 the 3 flood watches of the national response (the live
+  reply and the said plural); F35 Vermont's honest empty, and the said plural keeps the 3 winter weather advisories;
+  F37's "warnings" counts 12 of the 49 actual alerts; "coastal flood advisories in California" the 5 of 20. The
+  86-card replay with the Q3c pack: 0 changed, query records identical; with the v1.5 pack: 6 alert cards, rows
+  identical — a30's "flood" stands, a31 / b32 / c34 / d33 add the note, and all six read the pack's status filter.
+  The pre-Q3d reader on the v1.5 pack loses those six alert lists (a34: no answer at all) — the pack pin moves with
+  this reader.
 - **Open (measured, not fixed).** The floor's kind filter (forecast / lookup kinds take rows only;
   text_brief values only) keeps B6, B40, C9 and C50 wrong with the model off. The client's coverage
   words need one for `recognizer` (the board row sends the value as sealed). The now table leaves
@@ -3686,7 +3724,14 @@ the only server strings shown are the sealed sites and feed addresses (plain tex
   tonight") is carried by no rule (the intent's `names_unbound` flag only), nor is a second entity on a
   resolver-filled address ("the Bruins' next game against the Canucks"); a list of ≤ 12 rows whose long
   titles repeat is still typed `category`, so its id column would still name it; the F21 address took
-  "posts rust" as its topic (a fill, not the query layer).
+  "posts rust" as its topic (a fill, not the query layer). Q3d: a generic word that is a word of an NWS name
+  stands on the table too — "current" (Rip Current Statement), "local", "weather" (7 names), "high", "special",
+  "extreme" — so a model filter on one would narrow the alerts (none in the recorded replies; a whole-word run
+  anchored at a name's start or end would refuse "current" and "weather", and "thunderstorm" or "fog" alone with
+  them); "alert" already stood on the cell label "Alert". A said `-ies` plural is no `-y` word to the v1 rule
+  (F35: "Winter Weather Advisory" is not said in "winter weather advisories", so the model's name is dropped before
+  any grounding). The answer menu shows `[nws_event]` on the alerts' event cell (the prompt of the three NWS
+  sources changes when the pin moves). `alert_count`, a value, still counts test alerts.
 
 ### Client
 

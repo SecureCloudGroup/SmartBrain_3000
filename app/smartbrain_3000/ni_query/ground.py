@@ -8,7 +8,18 @@ evidence grounds it (``grounded_by``):
      parameter consumed: "Washington Metro" is a name even when the pick's label took "Washington" — a value
      made only of consumed words never reaches this step, ``normalize.v1_where`` drops it);
   2. holiday  — a holiday span of the recognizers holds it;
-  3. declared — it is a cell label of the answer, or a label of a code table the answer declares;
+  3. declared — it is a cell label of the answer, or a label of a number code table the answer declares
+     (``wmo_weather``); codes (Q3d, Library answers spec v1.5) — a Library code table of a text cell the filter
+     reads (its own column, or every text cell for "*"; ``Grounds.codes``, the caller's values — this module does
+     no I/O) holds it: one of the table's values (case ignored), or a whole-word run of one (``said_whole``), the
+     value's last word folded to its singular — "coastal flood advisory", "flood", "flood watches" and "warning"
+     are held by the NWS event names ("Flood Watch", "Flood Warning", …); "anywhere" by none. A ONE-word value
+     must be the first or the last word of a table value (the subject or the kind of a name): "weather",
+     "current" and "local" sit inside "Winter Weather Advisory" / "Rip Current Statement" / "Tropical Cyclone
+     Local Statement" and would narrow every alert list that said them, so they stand on no table; "fog advisory"
+     (two words, inside "Dense Fog Advisory") stands. The kept filter
+     carries the table's spelling when only the singular is held ("flood watches" → "flood watch"): ``contains``
+     is a substring, so the plural would match no row. Note ``filter_grounded:codes``;
   4. keyword  — it is a taxonomy keyword of the asked subcategories (``Grounds.keywords``; plurals folded), or
      names a kind of one: its words end with a keyword of two words or more ("Flash Flood Watch" is a kind of
      "flood watch" — a one-word keyword is a topic, never a kind: "active wildfires" is no "wildfire");
@@ -35,7 +46,7 @@ ask: when more than half of the words after the first are capitalized (title cas
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .apply import cell_value, rows_of
 from .clauses import fold
@@ -51,7 +62,9 @@ _MAX_CELL_CHARS = 2000         # of a cell's text read for a whole-word match
 _NOTE_CHARS = 60
 _JOINERS = frozenset({" ", "'", "’", "-", ".", ". ", "&", " & "})   # what sits between one name's words
 _SENTENCE_ENDS = ("?", "!")    # "." also closes abbreviations ("St. Louis"): never a sentence end here
-RULES = ("proper", "holiday", "declared", "keyword", "observed")
+_MAX_CODE_VALUES = 1000        # a Library code table's values (spec v1.5)
+_MAX_VALUE_WORDS = 16          # of a filter value read against a code table
+RULES = ("proper", "holiday", "declared", "codes", "keyword", "observed")
 
 
 @dataclass(frozen=True)
@@ -60,6 +73,7 @@ class Grounds:
 
     keywords: frozenset = frozenset()   # casefolded taxonomy keywords of the asked subcategories
     sample: object = None               # the fetched payload the answer's rows are read from
+    codes: dict = field(default_factory=dict)   # {code table: its values} the answers' text cells declare (Q3d)
 
 
 def _starts_sentence(ask: str, ws: list[tuple[str, int, int]], i: int) -> bool:
@@ -101,7 +115,7 @@ def _keyed(text: str) -> tuple[str, ...]:
 
 
 def _declared(value: str, answer: dict | None) -> bool:
-    """Rule 3: a cell label of the answer, or a label of a code table it declares."""
+    """Rule 3: a cell label of the answer, or a label of a number code table it declares (``wmo_weather``)."""
     assert isinstance(value, str), "value must be a str"
     assert answer is None or isinstance(answer, dict), "answer must be a dict or None"
     cells = cells_of(answer)
@@ -111,6 +125,48 @@ def _declared(value: str, answer: dict | None) -> bool:
         from ..ni import LABEL_TABLES
         labels |= {str(x).casefold() for t in tables for x in (LABEL_TABLES.get(t) or {}).values()}
     return value.casefold() in labels - {""}
+
+
+def _singulars(value: str) -> list[str]:
+    """``value``'s words as said, then with the last word's plural folded ("watches" → "watch", "advisories" →
+    "advisory", "warnings" → "warning"): the spellings a code table's names are read under."""
+    assert isinstance(value, str), "value must be a str"
+    assert len(value) <= 400, "a filter value, not a text"
+    ws = [w for w, _, _ in words(value.casefold())][:_MAX_VALUE_WORDS]
+    if not ws:
+        return []
+    last = ws[-1]
+    tails = [last, fold(last), last[:-2] if len(last) > 4 and last.endswith("es") else last]
+    out = list(dict.fromkeys(" ".join([*ws[:-1], t]) for t in tails))
+    assert 1 <= len(out) <= 3, "at most three spellings"
+    return out
+
+
+def _coded(value: str, col: object, answer: dict | None, codes: dict) -> str | None:
+    """Rule 3, codes (module docstring): the spelling under which a Library code table of a text cell the filter
+    reads holds ``value`` — the said words, else the singular ("flood watches" → "flood watch") — or None."""
+    assert isinstance(value, str) and isinstance(codes, dict), "value + codes required"
+    assert answer is None or isinstance(answer, dict), "answer must be a dict or None"
+    tables = {str(c["codes"]) for c in cells_of(answer)
+              if c.get("type") == "text" and c.get("codes") and (col == "*" or c["path"] == col)}
+    held = [str(v) for t in sorted(tables) for v in list(codes.get(t) or ())[:_MAX_CODE_VALUES]]
+    if not held:
+        return None
+    for form in _singulars(value):  # bounded: three spellings
+        if any(said_whole(form, v) and (" " in form or _edge_word(form, v)) for v in held):
+            return form
+    return None
+
+
+def _edge_word(word: str, name: str) -> bool:
+    """Is the one-word ``word`` the first or the last word of the table value ``name`` (its subject or its kind)?
+    A lone middle word ("weather" in "Winter Weather Advisory") is a modifier and grounds nothing."""
+    assert isinstance(word, str) and isinstance(name, str), "word + name required"
+    ends = [w for w, _, _ in words(name.casefold())][:_MAX_VALUE_WORDS]
+    if not ends:
+        return False
+    w = fold(word)
+    return fold(ends[0]) == w or fold(ends[-1]) == w
 
 
 def _observed(value: str, col: object, answer: dict | None, sample: object) -> bool:
@@ -145,6 +201,8 @@ def grounded_by(value: str, col: object, answer: dict | None, *, phrases: list[s
         return "holiday"
     if _declared(v, answer):
         return "declared"
+    if _coded(v, col, answer, grounds.codes) is not None:
+        return "codes"
     key = _keyed(v)
     kinds = [_keyed(str(k)) for k in list(grounds.keywords)[:2000]]
     if key and any(k == key or (len(k) >= 2 and key[-len(k):] == k) for k in kinds):
@@ -153,20 +211,29 @@ def grounded_by(value: str, col: object, answer: dict | None, *, phrases: list[s
 
 
 def ground_where(where: list[dict], answer: dict | None, *, phrases: list[str], spans: dict,
-                 grounds: Grounds) -> tuple[list[dict], list[str]]:
-    """A (module docstring): (the filters that stand, the ungrounded values dropped — note-sized)."""
+                 grounds: Grounds) -> tuple[list[dict], list[str], bool]:
+    """A (module docstring): (the filters that stand — a plural a code table holds only in the singular carried in
+    the table's spelling —, the ungrounded values dropped — note-sized —, whether a code table grounded one)."""
     assert isinstance(where, list) and isinstance(spans, dict), "where + spans required"
     assert isinstance(grounds, Grounds), "grounds required"
     kept: list[dict] = []
     dropped: list[str] = []
+    coded = False
     for w in where[:_MAX_WHERE * 2]:  # bounded
         value = w.get("value")
-        if w.get("op") not in TEXT_OPS or not isinstance(value, str) or not value.strip() \
-                or grounded_by(value, w.get("col"), answer, phrases=phrases, spans=spans, grounds=grounds):
+        if w.get("op") not in TEXT_OPS or not isinstance(value, str) or not value.strip():
             kept.append(w)
-        else:
+            continue
+        rule = grounded_by(value, w.get("col"), answer, phrases=phrases, spans=spans, grounds=grounds)
+        if rule is None:
             dropped.append(" ".join(value.split())[:_NOTE_CHARS])
-    return kept, dropped
+            continue
+        coded = coded or rule == "codes"
+        v = " ".join(value.split())[:400]
+        form = _coded(v, w.get("col"), answer, grounds.codes)
+        said = " ".join(x for x, _, _ in words(v.casefold()))
+        kept.append({**w, "value": form} if form is not None and form != said else w)
+    return kept, dropped, coded
 
 
 def carry_entities(where: list[dict], answer: dict | None, phrases: list[str]) -> tuple[list[dict], list[str]]:
