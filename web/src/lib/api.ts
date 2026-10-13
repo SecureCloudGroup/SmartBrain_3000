@@ -797,6 +797,14 @@ export interface NiFinding {
 // coarser (a part of a day read as the day), "rules" = decided by the rules floor.
 export type NiCoverage = "bound" | "unbound" | "approximated" | "rules";
 
+// The fit advisory (operator ruling 2026-10-12): the code-built verdict that a card's design may
+// not answer the ask — "no" (it may not) or "partly" (it may not fully) — with at most 3
+// code-written labels of what it lacks. Advisory only: nothing blocks on it.
+export interface NiFit {
+  verdict: "no" | "partly";
+  missing: string[];
+}
+
 export interface NiAwaitingYes {
   from: "page" | "dataset";
   host: string;
@@ -871,6 +879,10 @@ export interface NiBoardItem {
   // server — the card then renders exactly as before (version-skew rule).
   interpretation?: string;
   query?: { coverage?: Record<string, NiCoverage> };
+  // The fit advisory (NiFit) — the card wears a "May not answer your question" chip and the C2
+  // panel says so in one line ($lib/ni/fit). Absent on a card that fits, one built before the
+  // ruling, or a row from an older server; an unknown shape reads as absent (version-skew rule).
+  fit?: NiFit | null;
   // Round 20 (B3a, ni-format §35): only rows of cards that read their page in the page browser
   // carry these. `render.sites` = the sealed registrable domains, the page's own first;
   // `render.unavailable` = the page browser was unavailable on this machine at the last update

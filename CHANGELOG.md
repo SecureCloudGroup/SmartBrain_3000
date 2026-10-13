@@ -103,6 +103,10 @@ to know when a release changes behavior.
   and a busy or switched-off page browser never counts as a failure. When the page's own data
   feed shows up, the card can offer its exact address to switch to. At startup SmartBrain also
   ends any page-browser process an earlier run left behind.
+- **A card now says when it may not answer your question.** After a card from a Library
+  source is built, SmartBrain quietly double-checks whether the chosen data actually answers
+  what you asked; when it doubts itself, the card shows a small advisory note naming what
+  seems to be missing — informational only, it never blocks or changes the card.
 
 
 ### Fixed

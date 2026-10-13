@@ -422,7 +422,9 @@ How a card comes to life:
 4. **It keeps itself honest.** Every refresh is checked against the shape of the
    data you validated. If the source changes or breaks, the card shows the last
    good result (dimmed, with a health chip) rather than something wrong — and a
-   broken card tells you in Chat.
+   broken card tells you in Chat. A card can also doubt itself: when it suspects
+   its data may not answer what you asked, it says so with a small note — advisory
+   only, it never blocks or changes the card.
 
 Cards render from a fixed set of safe building blocks (text, numbers, bars,
 chips, lists) — fetched content is displayed as plain text, never as links,

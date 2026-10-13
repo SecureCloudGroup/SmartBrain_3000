@@ -533,6 +533,57 @@ def test_a_valid_fit_reply_is_sealed_on_the_spec_and_logged(lib, monkeypatch) ->
     assert "declared answers" in journal
 
 
+def test_a_fit_doubt_is_shown_at_c2_and_on_the_board_until_a_rebuild(lib, monkeypatch) -> None:
+    """The visible FIT advisory (operator ruling 2026-10-12): a declared build whose FIT says "no" still
+    lands ready (advisory only) and shows the doubt — the C2 preview bind carries ``fit`` beside its
+    ``alternatives``; the board row carries it once the card has a reading and keeps it across refreshes
+    (spec-level; a run's own bind never carries it); a rebuild (the card's Fix) reseals the spec, so the
+    marker goes."""
+    from smartbrain_3000 import ni_routes
+    from smartbrain_3000.scheduler import ScheduleStore
+    from smartbrain_3000.secrets import SecretStore
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    key = gen_master_key()
+    store = nimod.NIStore(conn, key)
+    item_id = _picked(store, lib, monkeypatch)
+
+    def model(prompt: str) -> str:
+        if "whether the chosen answers actually answer" in prompt:
+            return '{"answers_ask": "no", "missing": ["humidity"], "wrong": [], "evidence": []}'
+        if _QUERY_MARK in prompt:
+            return _ir_reply("conditions")
+        return '{"intent": "now", "fits": [], "pick": "c0", "second": null, "primary_field": null, ' \
+               '"labels": {}, "uncovered_wants": [], "none_fits": false}'
+
+    out = ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["humidity"]},
+                                  WEATHER_URL, model, lambda _u: copy.deepcopy(OPEN_METEO))
+    assert out["state"] == "ready" and "fit: no (model)" in " | ".join(out["notes"])
+    marker = {"verdict": "no", "missing": ["Humidity"]}
+    assert store.read_snapshot(item_id, "preview")["payload"]["fit"] == marker
+    item = store.get_item(item_id)
+    assert item["state"] == "commissioning" and "fit" not in ni_routes._board_row(store, item)  # nothing bound
+    monkeypatch.setattr(nimod, "_fetch_http_json", lambda source, item_id, secrets: copy.deepcopy(OPEN_METEO))
+    for _ in range(2):  # the C1 run, then a refresh
+        run = nimod.run_item(store, item_id, gateway_mod=object(), secrets_store=SecretStore(conn, key),
+                             schedules_store=ScheduleStore(conn, key))
+        assert run["status"] == "ok", run
+        row = ni_routes._board_row(store, store.get_item(item_id))
+        assert row["payload_slot"] == "latest" and row["fit"] == marker
+        assert "fit" not in store.read_snapshot(item_id, "latest")["payload"]
+    record = ni_flow._flow_read(store, item_id)
+    record["_remap"] = True
+    ni_flow._flow_write(store, item_id, record)
+    frozen = store.get_item(item_id)["spec"]
+    out = ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
+                                  WEATHER_URL, _mapping_model([]), lambda _u: copy.deepcopy(OPEN_METEO),
+                                  remap=True, keep_source=frozen["source"], keep_params={})
+    assert out["state"] == "ready"
+    item = store.get_item(item_id)
+    assert "_fit" not in item["spec"] and "fit" not in ni_routes._board_row(store, item)
+    assert "fit" not in store.read_snapshot(item_id, "preview")["payload"]
+
+
 def _mapping_model(prompts: list[str], query: str = "{}"):
     def model(prompt: str) -> str:
         prompts.append(prompt)

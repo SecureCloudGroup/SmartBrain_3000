@@ -7,6 +7,7 @@
   // "Board" for what the shell owns vs what a form's CLIR already carries).
   import type { Snippet } from "svelte";
   import Chip from "$lib/components/Chip.svelte";
+  import type { FitText } from "$lib/ni/fit";
   import { formBoxChrome, type CardState } from "$lib/ni/shell";
 
   let {
@@ -21,6 +22,7 @@
     reason = "",
     rendered = false,
     notice = "",
+    fit = null,
     chips,
     children,
     below,
@@ -50,6 +52,13 @@
     // browser is unavailable on this machine). When set it takes the reason line's place, in any
     // state, and keeps the legacy chrome (formBoxChrome).
     notice?: string;
+    // The fit advisory (ruling 2026-10-12; $lib/ni/fit fitText; fix round 2026-10-13 after a
+    // rendered check found it covering painted content on tight-chrome cards): a warn chip, its
+    // title carrying the detail ("<chip>. Missing: a, b"). Legacy chrome: in the head's chip row,
+    // the detail also as the footer's second line on a phone. Form (tight) chrome: in the foot
+    // strip beside the ⋯ menu instead — never in the overlaid head row — the strip's one line
+    // folding in the detail on a phone, in place of a second line. null = none.
+    fit?: FitText | null;
     chips?: Snippet;
     children?: Snippet;
     below?: Snippet;
@@ -62,6 +71,11 @@
   // The page calls the SAME function to shape what it passes as `actions`, so the two
   // never disagree about which chrome a given card gets.
   const box = $derived(formBoxChrome(state, hasForm, notice));
+  // The fit chip's title is the whole advisory, so a chip cut short by a narrow card still reads in full.
+  const fitTitle = $derived(fit ? (fit.detail ? `${fit.chip}. ${fit.detail}` : fit.chip) : "");
+  // The foot strip's one phone-width line (form chrome only): the chip words, the detail folded
+  // in when there is one — there is no separate second line to carry it there (see fitTitle).
+  const fitStripPhone = $derived(fit ? (fit.detail ? `${fit.chip} · ${fit.detail}` : fit.chip) : "");
 </script>
 
 <div
@@ -73,7 +87,7 @@
   class:preview
   data-state={state}
 >
-  <div class="ni-head">
+  <div class="ni-head" class:has-fit={!!fit && !box}>
     {#if hasForm}
       <!-- One title per card: the CLIR paints its own (keep the one-title rule). -->
       <span class="ni-title" aria-hidden="true"></span>
@@ -81,6 +95,14 @@
       <strong class="ni-title">{title}</strong>
     {/if}
     <span class="ni-chips">
+      {#if fit && !box}
+        <!-- Legacy chrome only — a tight-chrome card wears it in the foot strip instead (below):
+             rendered checked (2026-10-13) and found the overlaid chip covering a 1x1 card's hero
+             or first row; the foot's own 32px reserved strip never has painted content to cover. -->
+        <span class="ni-fit">
+          <Chip kind="warn" title={fitTitle}><span class="ni-fit-text">{fit.chip}</span></Chip>
+        </span>
+      {/if}
       {@render chips?.()}
       {#if rendered}
         <Chip title="This card reads its page in SmartBrain's own local page browser">page browser</Chip>
@@ -99,7 +121,7 @@
 
   {@render below?.()}
 
-  <div class="ni-foot">
+  <div class="ni-foot" class:has-fit-line={!!fit?.detail && !box} class:has-fit-strip={!!fit && box}>
     {#if !hasForm && footerText}
       {#if interpretation}
         <!-- Plain text, never {@html}: one line cut with an ellipsis, the whole line in
@@ -112,7 +134,22 @@
         <span class="muted ni-fresh">{footerText}</span>
       {/if}
     {/if}
+    {#if fit && box}
+      <!-- Tight chrome: the CLIR's own reserved blank strip, left of the ⋯ — never over the
+           CLIR plane. The full sentence is the chip's title; a phone has no hover, so there the
+           one line folds the detail in instead (fitStripPhone) rather than a second line. -->
+      <span class="ni-fit-strip">
+        <Chip kind="warn" title={fitTitle}>
+          <span class="ni-fit-strip-text ni-fit-strip-short">{fit.chip}</span>
+          <span class="ni-fit-strip-text ni-fit-strip-phone">{fitStripPhone}</span>
+        </Chip>
+      </span>
+    {/if}
     {@render actions?.()}
+    {#if fit?.detail && !box}
+      <!-- Legacy chrome, a phone has no hover: there the detail is the footer's second line. -->
+      <span class="ni-fit-line">{fit.detail}</span>
+    {/if}
   </div>
 </div>
 
@@ -135,6 +172,11 @@
     gap: var(--s-3);
     margin: 0;
     position: relative;
+    /* A grid item's min-width defaults to auto (its content's min-content size) — paired with
+       .ni-grid2's minmax(0, 1fr) tracks (+page.svelte "Grid rhythm"), this is what actually lets
+       a card shrink to its track's share instead of forcing the whole row (every card in it)
+       wider than the viewport, caught in the same rendered phone check. */
+    min-width: 0;
   }
   .ni-card.cols-2 { grid-column: span 2; }
   .ni-card.rows-2.form { grid-row: span 2; }
@@ -178,6 +220,13 @@
     padding-top: 0;
     border-top: none;
     z-index: 2;
+  }
+  /* Carrying the fit strip: both left AND right set (not width:auto) — the strip + ⋯ row can
+     never grow past the card's own content box, at any width (the rendered check caught the
+     overlaid head row doing exactly that; the foot must not repeat it). */
+  .ni-card.form .ni-foot.has-fit-strip {
+    left: var(--s-2);
+    flex-wrap: nowrap;
   }
   .ni-head {
     display: flex;
@@ -243,6 +292,60 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* The fit chip (ruling 2026-10-12): Chip's warn kind on an opaque --panel backing — over a
+     form card's CLIR the warn tint alone is translucent and the CLIR's title would show through.
+     Its words ellipsize, never wrap (the title carries the whole advisory), and it gives up its
+     width before any other chip does: its shrink weight dwarfs theirs. */
+  .ni-fit {
+    display: inline-flex;
+    min-width: 0;
+    flex-shrink: 100;
+    border-radius: var(--r-full);
+    background: var(--panel);
+  }
+  .ni-fit-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ni-head.has-fit .ni-chips { min-width: 0; }
+  /* The fit strip (form/tight chrome only — fix round 2026-10-13: a rendered check found the
+     overlaid head-row chip covering a 1x1 card's painted hero/first row and a 3x1 card's plot).
+     Sits beside the ⋯ in the foot's own reserved 32px strip, which the CLIR never paints into —
+     never over the CLIR plane. An opaque --panel backing for the same reason as .ni-fit (Chip's
+     warn tint alone is translucent); its words ellipsize, never wrap. */
+  .ni-fit-strip {
+    display: inline-flex;
+    min-width: 0;
+    border-radius: var(--r-full);
+    background: var(--panel);
+  }
+  .ni-fit-strip-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Only one of the strip's two lines is ever in the flex row (the other is display:none), so
+     there is never a second, independent ellipsis fighting the first for the same space. */
+  .ni-fit-strip-phone { display: none; }
+  /* The fit detail line (legacy chrome only now) shows on a phone only (no hover there); above
+     the 560px phone-face breakpoint the chip's title carries it. */
+  .ni-fit-line { display: none; }
+  @media (max-width: 560px) {
+    .ni-fit-line {
+      display: block;
+      flex-basis: 100%;
+      font-size: var(--f-meta);
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    /* No hover on a phone: the strip's one line folds the detail in instead of naming the
+       chip alone (fitStripPhone) — there is no second line to carry it in the 32px strip. */
+    .ni-fit-strip-short { display: none; }
+    .ni-fit-strip-phone { display: block; }
   }
 
   /* Inline-style migration (Phase 1a-4): the card's flow/commission branches repeated
