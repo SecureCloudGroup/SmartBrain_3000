@@ -698,7 +698,8 @@ def _validate_fit(value: object) -> None:
     """Phase 3a (plan B3): the advisory FitVerdict sealed beside a declared build, or
     absent — ``{answers_ask: yes|partly|no, missing: [str] <= 6, wrong: [str] <= 4,
     evidence: [{answer, value}] <= 4}``. Written only by ``ni_flow._handoff``; never read by
-    any rule, never painted; stripped on export / template install like ``_c2_ok``."""
+    any rule, shown only as the closed advisory marker ``ni_forms.verdict.visible_fit`` builds
+    (ruling 2026-10-12); stripped on export / template install like ``_c2_ok``."""
     if value is None:
         return
     d = _require_dict(value, "spec._fit")

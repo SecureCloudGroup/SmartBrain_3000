@@ -8,7 +8,8 @@
   import { onDestroy, onMount } from "svelte";
   import Chip from "$lib/components/Chip.svelte";
   import IrPaint from "$lib/components/IrPaint.svelte";
-  import type { NiCoverage } from "$lib/api";
+  import type { NiCoverage, NiFit } from "$lib/api";
+  import { fitLine } from "$lib/ni/fit";
   import { coverageChips, optionMaxWidth, verifyOptions, type VerifyOption } from "$lib/ni/verify";
 
   let {
@@ -17,6 +18,7 @@
     busy = false,
     interpretation = "",
     coverage = undefined,
+    fit = null,
     onUse,
     onWrong,
   }: {
@@ -28,6 +30,10 @@
     // panel then shows exactly what it showed before.
     interpretation?: string;
     coverage?: Record<string, NiCoverage>;
+    // The fit advisory (ruling 2026-10-12; $lib/ni/fit fitLine): absent/null on a card that
+    // fits, one built before the ruling, or a row from an older server — the panel then
+    // shows exactly what it showed before.
+    fit?: NiFit | null;
     onUse: (id: "pick" | "second") => void;
     onWrong: () => void;
   } = $props();
@@ -36,6 +42,7 @@
   const pick = $derived(options.find((o) => o.id === "pick") ?? null);
   const second = $derived(options.find((o) => o.id === "second") ?? null);
   const chips = $derived(coverageChips(coverage));
+  const fitAdvisory = $derived(fitLine(fit));
 
   // --- Phone/desktop face toggle — local to this preview, never the automatic
   // (max-width: 560px) breakpoint IrPaint's caller otherwise uses. -------------------
@@ -125,6 +132,11 @@
       <p class="muted verify-why">{second.why}</p>
       <IrPaint clir={secondFace} {viewerTz} />
     </div>
+  {/if}
+
+  <!-- The fit advisory (ruling 2026-10-12): code-authored, so plain text — never {@html}. -->
+  {#if fitAdvisory}
+    <p class="ni-note verify-fit">{fitAdvisory}</p>
   {/if}
 
   <!-- The interpretation line is code-authored (§36), so it is shown as plain text —

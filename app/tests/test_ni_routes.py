@@ -8,11 +8,13 @@ app with a real DuckDB + migrations (mirrors test_schedule_routes.py).
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from test_ni_forms_verdict import _ALERTS, _ONE_ALERT, _QUAKES, _TWO_QUAKES
 
-from smartbrain_3000 import ni, tools
+from smartbrain_3000 import ni, ni_flow, ni_library, ni_routes, tools
 from smartbrain_3000.auth import relay_headers
 
 
@@ -132,6 +134,79 @@ def test_board_row_carries_the_interpretation_and_only_the_coverage(client: Test
     assert set(row) == _BOARD_ROW_KEYS | {"interpretation", "query"}
     assert row["interpretation"] == "Temperature · now"
     assert row["query"] == {"coverage": coverage}
+
+
+_FIT_DOUBT = {"answers_ask": "no", "missing": ["wind", "next_low_tide", "precip_prob"], "wrong": [], "evidence": []}
+
+
+@pytest.mark.parametrize(("verdict", "marker"), [
+    ("no", {"verdict": "no", "missing": ["Wind", "Chance of rain"]}),
+    ("partly", {"verdict": "partly", "missing": ["Wind", "Chance of rain"]}),
+    ("yes", None), (None, None)])
+def test_board_row_carries_the_fit_advisory_for_no_and_partly_only(client: TestClient, verdict, marker) -> None:
+    """The visible FIT advisory (ruling 2026-10-12): the sealed verdict reaches the board as the closed
+    ``{verdict, missing}`` marker — "no" / "partly" only, labels through the code lexicon (a snake_case id
+    with no label is dropped); omitted on "yes" and on a card with no verdict."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    store = client.app.state.ni
+    if verdict is not None:
+        spec = dict(store.get_item(iid)["spec"])
+        spec["_fit"] = {**_FIT_DOUBT, "answers_ask": verdict}
+        store.update_spec(iid, spec, origin="agent")
+    row = next(i for i in client.get("/api/ni/board").json()["items"] if i["id"] == iid)
+    assert set(row) == (_BOARD_ROW_KEYS if marker is None else _BOARD_ROW_KEYS | {"fit"})
+    assert row.get("fit") == marker
+
+
+def _declared_card(store: ni.NIStore, answer: dict, sample: dict, agg: str = "none") -> str:
+    """A real declared card (the flow's own builder), live, its FIT verdict sealed "no"."""
+    built = ni_flow.build_from_answers([ni_flow._clean_answer(answer)], sample, "card", agg=agg)
+    spec = ni_flow.build_final_spec("card", {"subject": "card"},
+                                    {"type": "http_json", "url": "https://example.org/x"}, 60,
+                                    built["pipeline"], built["scene"])
+    spec["_fit"] = {"answers_ask": "no", "missing": ["wind"], "wrong": [], "evidence": []}
+    iid = store.add_item(spec, built["preview_payload"])
+    store.set_state(iid, "live")
+    return iid
+
+
+def _refresh(store: ni.NIStore, iid: str, response: dict) -> None:
+    """The engine's refresh as the board sees it: the sealed pipeline over ``response``, bound, ``latest``."""
+    spec = store.get_item(iid)["spec"]
+    bound = ni.bind_scene(spec["scene"], ni.run_pipeline(spec["pipeline"], response),
+                          form_ctx=ni._form_bind_context(spec, datetime.now(UTC)))
+    store.write_snapshot(iid, "latest", bound, ok=True)
+
+
+def test_board_row_hides_the_fit_advisory_on_the_designed_empty_state(client: TestClient) -> None:
+    """Set G #32-#34: an empty may_be_empty list ("Nothing active right now") and a count card at 0 rows
+    ARE the answer — no marker on them although the sealed verdict says "no"; once the list holds a row
+    the doubt shows."""
+    _unlock(client)
+    store = client.app.state.ni
+    alerts = _declared_card(store, _ALERTS, {"features": []})
+    _refresh(store, alerts, {"features": []})
+    quakes = _declared_card(store, _QUAKES, _TWO_QUAKES, agg="count")
+    _refresh(store, quakes, {"features": []})
+    rows = {i["id"]: i for i in client.get("/api/ni/board").json()["items"]}
+    assert rows[alerts]["payload_slot"] == "latest" and "fit" not in rows[alerts]
+    assert rows[quakes]["payload_slot"] == "latest" and "fit" not in rows[quakes]
+    _refresh(store, alerts, _ONE_ALERT)
+    rows = {i["id"]: i for i in client.get("/api/ni/board").json()["items"]}
+    assert rows[alerts]["fit"] == {"verdict": "no", "missing": ["Wind"]}
+
+
+def test_export_still_strips_the_sealed_fit_and_carries_no_marker(client: TestClient) -> None:
+    """Unchanged by the visible advisory: ``_fit`` never leaves the card (export / template install strip
+    it) and an exported template carries no ``fit`` marker."""
+    _unlock(client)
+    store = client.app.state.ni
+    iid = _declared_card(store, _QUAKES, _TWO_QUAKES)
+    assert "_fit" in ni_routes._EXPORT_STRIP_KEYS and "_fit" in ni_library._TEMPLATE_STRIP_KEYS
+    template = ni_routes._build_export_template(store, store.get_item(iid), client.app.state.secret_store)
+    assert "_fit" not in template["spec_template"] and "fit" not in template["spec_template"]
+    assert "fit" not in template["preview_payload"]
 
 
 def test_board_prefers_latest_when_live_ok(client: TestClient) -> None:

@@ -6229,7 +6229,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # _MAX_NOTE truncates from the end, and the frame-level disclosures above (wrong place,
         # wrong window) matter more than naming which cell led the card.
         # FIT (Phase 3a, plan B3): one advisory closed local verdict on a build that already
-        # passed every code check above — logged only, never a reason to move on or refuse.
+        # passed every code check above — logged and shown as an advisory only, never a reason
+        # to move on or refuse.
         fit = _fit_check(answered, frame, intent, request, call_model)
         note += "; fit: " + (f"{fit.answers_ask} (model)" if fit is not None else "rules")
         _transition(store, item_id, "assembling", source_url=url, note=note)
@@ -7143,6 +7144,10 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     except (ni.NIError, ValueError) as exc:
         return _fail(store, item_id, "assembly", f"preview bind failed: {exc}")
     assert isinstance(bound, dict), "bind_scene must return a dict"
+    from .ni_forms.verdict import visible_fit
+    fit = visible_fit(spec, bound)  # the visible FIT advisory rides the C2 preview beside ``alternatives``
+    if fit is not None:
+        bound["fit"] = fit
     try:
         store.update_spec(item_id, spec, origin="agent")
         store.write_snapshot(item_id, "preview", bound, ok=True)

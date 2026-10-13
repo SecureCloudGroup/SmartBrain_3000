@@ -41,6 +41,7 @@
     tapClause,
   } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
+  import { fitText } from "$lib/ni/fit";
   import { awaitingYesSource, flowStageLabel, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
     filterTemplates,
@@ -1299,6 +1300,7 @@
           : ""}
         {@const notice = renderNotice(item)}
         {@const draftSites = renderDraftSites(item)}
+        {@const fit = fitText(item.fit)}
         <CardShell
           title={item.title}
           {state}
@@ -1311,6 +1313,7 @@
           {reason}
           rendered={item.rendered === true}
           {notice}
+          {fit}
         >
           {#snippet chips()}
             {#if state !== "fresh"}
@@ -1750,6 +1753,7 @@
                 busy={busyId === item.id}
                 interpretation={interpretationOf(item)}
                 coverage={item.query?.coverage}
+                fit={item.fit}
                 onUse={(id) => validateLooksRight(item, id)}
                 onWrong={() => openWrongNote(item)}
               />
@@ -2401,11 +2405,16 @@
      design, so it gets a content-sized span, same as a legacy card, even on a form
      item). `--ni-row-gap` mirrors spans.py's GAP (12px phone / 16px desktop) at the
      SAME 560px breakpoint IrPaint's `pickClir` already uses; CardShell reads it to
-     size a form card's 2- and 3-row min-height. */
+     size a form card's 2- and 3-row min-height. A bare `1fr` track is `minmax(auto, 1fr)` —
+     one card whose content can't shrink below some width (a long unbreakable list row) widens
+     BOTH tracks to fit it, so every card in that row inherits the overflow (caught in a
+     rendered phone check, 2026-10-13: a 390px board measured 531px wide, the far card running
+     off-screen). `minmax(0, 1fr)` holds the track to the row's own share of the grid; content
+     that still doesn't fit clips/ellipsizes inside its own card instead. */
   .ni-grid2 {
     --ni-row-gap: 12px;
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-auto-rows: minmax(176px, auto);
     grid-auto-flow: row;
     gap: var(--ni-row-gap, 12px);
@@ -2419,10 +2428,10 @@
     .ni-grid2 { --ni-row-gap: 16px; }
   }
   @media (min-width: 780px) {
-    .ni-grid2 { grid-template-columns: repeat(3, 1fr); }
+    .ni-grid2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   }
   @media (min-width: 1040px) {
-    .ni-grid2 { grid-template-columns: repeat(4, 1fr); }
+    .ni-grid2 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   }
   .ni-preview-tag { display: flex; }
   .ni-commission {

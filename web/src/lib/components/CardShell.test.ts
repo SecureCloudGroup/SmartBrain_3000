@@ -8,6 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { FitText } from "$lib/ni/fit";
 import type { CardState } from "$lib/ni/shell";
 import CardShell from "./CardShell.svelte";
 
@@ -97,7 +98,14 @@ describe("CardShell footer — interpretation line", () => {
 const UNAVAILABLE = "The page browser is unavailable on this machine, so this card can't update here.";
 
 /** Mount one card and return its root. */
-function cardOf(props: { state?: CardState; rendered?: boolean; notice?: string; reason?: string; hasForm?: boolean }): HTMLElement {
+function cardOf(props: {
+  state?: CardState;
+  rendered?: boolean;
+  notice?: string;
+  reason?: string;
+  hasForm?: boolean;
+  fit?: FitText | null;
+}): HTMLElement {
   const target = document.createElement("div");
   document.body.appendChild(target);
   mounted.push(mount(CardShell, {
@@ -157,5 +165,97 @@ describe("CardShell — the page browser chip and state notice", () => {
   it("keeps the legacy chrome for a form card carrying a notice (the line sits under the body)", () => {
     expect(cardOf({ state: "fresh", hasForm: true }).classList.contains("form")).toBe(true);
     expect(cardOf({ state: "fresh", hasForm: true, notice: UNAVAILABLE }).classList.contains("form")).toBe(false);
+  });
+});
+
+// Fit advisory (ruling 2026-10-12, $lib/ni/fit fitText; fix round 2026-10-13: a rendered check
+// found the overlaid head-row chip covering painted content on tight-chrome cards). Legacy chrome
+// (including a bound-form card NOT in tight chrome, e.g. "failing") wears it in the head's chip
+// row, as before; tight/"form" chrome (CardShell's own `box` gate, same one formBoxChrome decides
+// — not raw hasForm) wears it in the foot strip beside the ⋯ instead.
+const FIT_NO: FitText = { chip: "May not answer your question", detail: null };
+const FIT_PARTLY: FitText = { chip: "May not fully answer your question", detail: "Missing: wind, tide" };
+
+describe("CardShell — fit advisory, legacy chrome (ruling 2026-10-12)", () => {
+  it("adds nothing without a fit advisory (absent or null)", () => {
+    expect(cardOf({}).querySelector(".ni-fit, .ni-fit-strip")).toBeNull();
+    expect(cardOf({ fit: null }).querySelector(".ni-fit, .ni-fit-strip")).toBeNull();
+  });
+
+  it("wears a warn chip in the head, titled with the chip alone when there is no detail", () => {
+    const chip = cardOf({ fit: FIT_NO }).querySelector<HTMLElement>(".ni-fit .chip");
+    expect(chip?.classList.contains("warn")).toBe(true);
+    expect(chip?.textContent?.trim()).toBe(FIT_NO.chip);
+    expect(chip?.getAttribute("title")).toBe(FIT_NO.chip);
+  });
+
+  it("titles the head chip with the chip words AND the detail when one is named", () => {
+    const chip = cardOf({ fit: FIT_PARTLY }).querySelector<HTMLElement>(".ni-fit .chip");
+    expect(chip?.textContent?.trim()).toBe(FIT_PARTLY.chip);
+    expect(chip?.getAttribute("title")).toBe(`${FIT_PARTLY.chip}. ${FIT_PARTLY.detail}`);
+  });
+
+  it("sits first in the head's chip row, ahead of the page browser chip", () => {
+    const chips = cardOf({ fit: FIT_NO, rendered: true }).querySelectorAll(".ni-head .ni-chips > *");
+    expect(chips[0].classList.contains("ni-fit")).toBe(true);
+    expect(chips[1].textContent?.trim()).toBe("page browser");
+  });
+
+  it("shows in the head on a non-form card, and a form card NOT in tight chrome (e.g. failing)", () => {
+    expect(cardOf({ fit: FIT_NO, hasForm: false }).querySelector(".ni-fit")).not.toBeNull();
+    const failing = cardOf({ fit: FIT_NO, hasForm: true, state: "failing" });
+    expect(failing.classList.contains("form")).toBe(false); // sanity: failing never gets tight chrome
+    expect(failing.querySelector(".ni-fit")).not.toBeNull();
+    expect(failing.querySelector(".ni-fit-strip")).toBeNull();
+  });
+
+  it("shows the detail as a second footer line only when one is named", () => {
+    expect(cardOf({ fit: FIT_NO }).querySelector(".ni-fit-line")).toBeNull();
+    const line = cardOf({ fit: FIT_PARTLY }).querySelector(".ni-fit-line");
+    expect(onlyText(line)).toBe(FIT_PARTLY.detail);
+  });
+
+  it("shows for live and stale states alike", () => {
+    for (const state of ["fresh", "stale"] as const) {
+      expect(cardOf({ state, fit: FIT_NO }).querySelector(".ni-fit"), state).not.toBeNull();
+    }
+  });
+});
+
+describe("CardShell — fit advisory, tight (form) chrome (fix round 2026-10-13)", () => {
+  it("wears it in the foot strip, never the head, when the card is tight chrome", () => {
+    const card = cardOf({ fit: FIT_NO, hasForm: true, state: "fresh" });
+    expect(card.classList.contains("form")).toBe(true); // sanity: this really is tight chrome
+    expect(card.querySelector(".ni-head .ni-fit")).toBeNull();
+    const chip = card.querySelector<HTMLElement>(".ni-foot .ni-fit-strip .chip");
+    expect(chip?.classList.contains("warn")).toBe(true);
+  });
+
+  it("titles the strip's chip with the full sentence, same as the legacy chip", () => {
+    const chip = cardOf({ fit: FIT_PARTLY, hasForm: true, state: "fresh" })
+      .querySelector<HTMLElement>(".ni-fit-strip .chip");
+    expect(chip?.getAttribute("title")).toBe(`${FIT_PARTLY.chip}. ${FIT_PARTLY.detail}`);
+  });
+
+  it("carries the chip words alone, and the chip+detail combined, as the strip's two texts", () => {
+    const card = cardOf({ fit: FIT_PARTLY, hasForm: true, state: "fresh" });
+    expect(onlyText(card.querySelector(".ni-fit-strip-short"))).toBe(FIT_PARTLY.chip);
+    expect(onlyText(card.querySelector(".ni-fit-strip-phone"))).toBe(`${FIT_PARTLY.chip} · ${FIT_PARTLY.detail}`);
+  });
+
+  it("names the chip alone as both texts when there is no detail (nothing to fold in)", () => {
+    const card = cardOf({ fit: FIT_NO, hasForm: true, state: "fresh" });
+    expect(onlyText(card.querySelector(".ni-fit-strip-short"))).toBe(FIT_NO.chip);
+    expect(onlyText(card.querySelector(".ni-fit-strip-phone"))).toBe(FIT_NO.chip);
+  });
+
+  it("never adds a separate footer detail line (folded into the strip's phone text instead)", () => {
+    expect(cardOf({ fit: FIT_PARTLY, hasForm: true, state: "fresh" }).querySelector(".ni-fit-line")).toBeNull();
+  });
+
+  it("shows for fresh, stale and paused alike (CardShell's own tight-chrome states)", () => {
+    for (const state of ["fresh", "stale", "paused"] as const) {
+      expect(cardOf({ state, fit: FIT_NO, hasForm: true }).querySelector(".ni-fit-strip"), state).not.toBeNull();
+    }
   });
 });

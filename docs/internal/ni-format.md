@@ -2736,9 +2736,19 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   strips any `evidence.value` that is not a verbatim substring of the fenced preview rows. The
   verdict is LOGGED ONLY — `fit: yes|partly|no (model)` or `fit: rules` in the flow notes — and
   sealed as the spec's optional `_fit` (stripped on export / template install like `_c2_ok`); it
-  never blocks the build, never changes the card, is never painted. `call_model=None` (no
+  never blocks the build, never changes the card. `call_model=None` (no
   consent) or any model trouble returns `None`. Authority stays off (Phase 3b) until a labeled
-  set someone else writes shows precision("no") ≥0.90.
+  set someone else writes shows precision("no") ≥0.90. The sealed verdict DOES reach the
+  screen now, as a closed advisory marker (operator ruling 2026-10-12, never a block):
+  `ni_forms.verdict.visible_fit(spec, latest)` reads `_fit` and the bound reading the card
+  shows and returns `{verdict: no|partly, missing: [label] ≤3}` or `None` — `no`/`partly`
+  only (`yes` or absent shows nothing), `missing` ids resolved through the label lexicon or
+  dropped (a plain lowercase word/phrase ≤24 chars shows as itself; anything else is
+  dropped), and suppressed when the reading is the card's designed empty state (0 rows on a
+  `may_be_empty` list or a count answer) or nothing is bound yet. `ni_routes._board_row` and
+  `ni_flow._finalize`'s C2 preview bind both call it, so the marker rides the board row
+  (spec-level — a refresh never changes it) and the C2 preview bind beside `alternatives`;
+  a rebuild reseals `_fit`, so the marker changes with it.
 - **`tall` display size (2026-10-07).** `display_size_for_span` maps a 1×2 desktop design (`d1x2`) to
   `tall` (it read `large` before); `_DISPLAY_SIZES` accepts it. The board sizes a form card from the
   painted CLIR's own span key (web `cardSpan`, app PR #495 — absent/unknown size reads as small), so

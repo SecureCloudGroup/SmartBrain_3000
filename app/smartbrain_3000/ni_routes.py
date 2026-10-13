@@ -203,6 +203,12 @@ def _board_row(store: ni.NIStore, item: dict, *,
     query = item["spec"].get("query")
     if isinstance(query, dict) and isinstance(query.get("coverage"), dict):
         row["query"] = {"coverage": query["coverage"]}
+    # the visible FIT advisory (ruling 2026-10-12, §34): {verdict, missing} from the sealed _fit over the
+    # reading this row shows — omitted when "yes", absent or suppressed (ni_forms.verdict.visible_fit)
+    from .ni_forms.verdict import visible_fit
+    fit = visible_fit(item["spec"], snap["payload"] if snap else None)
+    if fit is not None:
+        row["fit"] = fit
     if ni.spec_renders(item["spec"]):  # Round 20 (B3a): ride only on a page-browser card
         row.update(_render_fields(item))
     return row

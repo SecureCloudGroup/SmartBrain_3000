@@ -8,7 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { NiCoverage } from "$lib/api";
+import type { NiCoverage, NiFit } from "$lib/api";
 import VerifyPanel from "./VerifyPanel.svelte";
 
 const LINE = "Earthquakes · Magnitude > 4 · past 7 days · count";
@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 /** Mount the panel for one form payload and return its root. */
-function panelOf(props: { interpretation?: string; coverage?: Record<string, NiCoverage> }): HTMLElement {
+function panelOf(props: { interpretation?: string; coverage?: Record<string, NiCoverage>; fit?: NiFit | null }): HTMLElement {
   const target = document.createElement("div");
   document.body.appendChild(target);
   mounted.push(mount(VerifyPanel, {
@@ -96,5 +96,38 @@ describe("VerifyPanel — how the ask was read", () => {
     const style = getComputedStyle(text as HTMLElement);
     expect(style.whiteSpace).not.toBe("nowrap");
     expect(style.textOverflow).not.toBe("ellipsis");
+  });
+});
+
+// Fit advisory line (ruling 2026-10-12, $lib/ni/fit fitLine): one line under the preview.
+const FIT_NO: NiFit = { verdict: "no", missing: [] };
+const FIT_PARTLY: NiFit = { verdict: "partly", missing: ["temperature", "wind"] };
+
+describe("VerifyPanel — fit advisory line (ruling 2026-10-12)", () => {
+  it("shows no line without a fit advisory (absent, null, or a garbage shape)", () => {
+    expect(panelOf({}).querySelector(".verify-fit")).toBeNull();
+    expect(panelOf({ fit: null }).querySelector(".verify-fit")).toBeNull();
+  });
+
+  it("says the card may not answer, with no lacks clause when nothing is missing", () => {
+    const line = panelOf({ fit: FIT_NO }).querySelector(".verify-fit");
+    expect(onlyText(line)).toBe("This card may not answer your question.");
+  });
+
+  it("says the card may not fully answer, and names what it lacks", () => {
+    const line = panelOf({ fit: FIT_PARTLY }).querySelector(".verify-fit");
+    expect(onlyText(line)).toBe("This card may not fully answer your question. It lacks: temperature, wind.");
+  });
+
+  it("sits under the preview, ahead of the Reads as line and the controls", () => {
+    const panel = panelOf({ fit: FIT_PARTLY, interpretation: LINE });
+    const line = panel.querySelector(".verify-fit");
+    expect(line?.nextElementSibling).toBe(panel.querySelector(".verify-reads"));
+  });
+
+  it("leaves the existing choices unchanged", () => {
+    const panel = panelOf({ fit: FIT_PARTLY });
+    expect(panel.querySelectorAll(".ni-actions button")).toHaveLength(2);
+    expect(panel.querySelector(".ni-actions")?.previousElementSibling).toBe(panel.querySelector(".verify-fit"));
   });
 });
