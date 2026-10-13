@@ -167,6 +167,21 @@ to know when a release changes behavior.
   reading; a count always keeps to its window and reports the count, down to zero.
   "Unemployment rate over the last two years" showed only the latest value; a trend
   ask now takes the source's declared history.
+- **A card no longer filters on a word of the question, keeps the team you named, ranks
+  what you asked to rank, and names a list by its titles.** "Latest earthquakes above
+  magnitude 5 anywhere in the world" and "largest active wildfires in Oregon" came back
+  empty because words of the question ("anywhere in the world", "active") were used to
+  filter the rows; a filter word now has to be backed by something real — a name you
+  wrote with a capital, a holiday, a label the source declares, a word the Library files
+  that kind of data under, or a value the source's own rows hold — and one that is not is
+  dropped, and the card's reading line no longer claims it. "Final score of the latest
+  Canucks game" showed another team's game from the league scoreboard; on a league-wide
+  list a capitalized name you write now always narrows the rows, and the card says
+  honestly when no row has it. "Ten biggest cryptocurrencies by trading volume" showed 20
+  coins in market-cap order; a number beside a ranking word ("ten biggest", "top 5") now
+  limits the list, and a ranking with no order is sorted by the quantity you named, else
+  by the one the list is ranked by. A Hacker News list whose titles repeated (a story
+  posted three times) named every story by its number; the titles name the rows again.
 
 ### Changed
 

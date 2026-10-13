@@ -1,0 +1,32 @@
+{
+ "F19": {
+  "source_id": "nhl-score-now",
+  "file": "nhl-score-now__541120ff.json",
+  "fetched_at": "2026-10-12T21:17:56Z"
+ },
+ "F21": {
+  "source_id": "hn-search",
+  "file": "hn-search__7e3493e4.json",
+  "fetched_at": "2026-10-12T21:17:57Z"
+ },
+ "F22": {
+  "source_id": "usgs-quakes-25-day",
+  "file": "usgs-quakes-25-day__5b685bb8.json",
+  "fetched_at": "2026-10-12T21:17:57Z"
+ },
+ "F24": {
+  "source_id": "coingecko-markets",
+  "file": "coingecko-markets__f519bbc1.json",
+  "fetched_at": "2026-10-12T21:17:57Z"
+ },
+ "F26": {
+  "source_id": "nifc-current-fires",
+  "file": "nifc-current-fires__6d4242a9.json",
+  "fetched_at": "2026-10-12T21:17:58Z"
+ },
+ "F21-run": {
+  "source_id": "hn-search",
+  "file": "hn-search__f21-run.json",
+  "fetched_at": "2026-10-12T20:51:55Z"
+ }
+}

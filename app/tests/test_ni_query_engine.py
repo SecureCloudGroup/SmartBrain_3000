@@ -154,10 +154,23 @@ def test_the_sealed_query_and_interpretation_are_closed() -> None:
             nimod.validate_spec(_spec(interpretation=bad_line))
 
 
+def test_a_value_note_carries_its_value_and_nothing_else_passes() -> None:
+    """Round 20 (Q3c): "filter_ungrounded:<value>" / "entity_added:<phrase>" carry a short one-line value; any
+    other code stays closed."""
+    for notes in (["filter_ungrounded:anywhere in the world"], ["entity_added:Canucks", "order_default"]):
+        nimod.validate_spec(_spec(query={**QUERY, "notes": notes}))
+        assert all(q_plan.note_ok(n) for n in notes)
+    for bad in ("entity_added:", "entity_added", "made_up:x", "filter_ungrounded:" + "x" * 61, "entity_added:a\nb"):
+        assert not nimod._query_note_ok(bad) and not q_plan.note_ok(bad), bad
+        with pytest.raises(ValueError):
+            nimod.validate_spec(_spec(query={**QUERY, "notes": [bad]}))
+
+
 def test_the_engines_closed_query_sets_mirror_the_query_layer() -> None:
     assert nimod._QUERY_COVERAGE_KEYS == frozenset(q_plan.COVERAGE_KEYS)
     assert nimod._QUERY_COVERAGE_VALUES == q_plan.COVERAGE_VALUES
     assert q_plan.NOTES <= nimod._QUERY_NOTES
+    assert q_plan.VALUE_NOTES == nimod._QUERY_VALUE_NOTES
     assert nimod._QUERY_OPS == frozenset(q_prompt.OPS)
     assert nimod._QUERY_IR_KEYS == frozenset(q_prompt.IR_KEYS)
     assert q_normalize.NUM_OPS | q_normalize.TEXT_OPS == nimod._QUERY_OPS
