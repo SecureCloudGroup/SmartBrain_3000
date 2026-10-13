@@ -15,7 +15,8 @@ Ownership (plan §E):
   one number cell is carried like a time anchor (``clauses.bind_comparators``: added when the model
   dropped it, its number winning over another the model wrote; coverage ``where: recognizer``).
 - evidence (Round 20, Q3c — ``ground``): a ``contains`` / ``names`` value stands only on positive evidence
-  (a proper-noun phrase, a holiday, a declared label, a taxonomy keyword of the asked subcategories, the
+  (a proper-noun phrase, a holiday, a declared label, a value of a Library code table the filtered text cell
+  declares — Q3d, note ``filter_grounded:codes`` —, a taxonomy keyword of the asked subcategories, the
   sample's rows: ``grounds``), else it is dropped (note ``filter_ungrounded:<value>``, coverage ``where:
   approximated``); on an address no resolver filled, every proper-noun phrase of the ask is carried by a
   ``names`` filter (note ``entity_added:<phrase>``, coverage ``where: recognizer``); a ranking the model left
@@ -63,7 +64,8 @@ COVERAGE_KEYS = ("answer", "time", "where", "order", "select", "limit", "agg")
 COVERAGE_VALUES = frozenset({"bound", "unbound", "approximated", "rules", "recognizer"})
 NOTES = frozenset({"query_rules", "model_off", "model_unavailable", "schema_invalid", "time_explicit",
                    "where_dropped", "numbers_unstated", "order_dropped", "params_dropped", "count_list",
-                   "time_range_kept", "comparator_added", "comparator_corrected", "order_default"})
+                   "time_range_kept", "comparator_added", "comparator_corrected", "order_default",
+                   "filter_grounded:codes"})   # Q3d: a Library code table grounded a filter value (one code)
 # Round 20 (Q3c): note codes that carry their value — "filter_ungrounded:anywhere in the world",
 # "entity_added:Canucks" (``note_ok``)
 VALUE_NOTES = frozenset({"filter_ungrounded", "entity_added"})
@@ -175,10 +177,11 @@ def _code_clauses(ir: dict, ctx: Ctx, notes: list[str]) -> dict:
     rows = counted or answer
     ir["where"], recognized = bind_comparators(ir["where"], rows, list(ctx.spans["comparators"]))
     notes += list(dict.fromkeys(recognized))
-    ir["where"], ungrounded = ground_where(ir["where"], rows, phrases=list(ctx.names), spans=ctx.spans,
-                                           grounds=ctx.grounds)
+    ir["where"], ungrounded, coded = ground_where(ir["where"], rows, phrases=list(ctx.names), spans=ctx.spans,
+                                                  grounds=ctx.grounds)
     ir["where"], added = carry_entities(ir["where"], rows, [] if ctx.resolved else list(ctx.phrases))
     notes += [f"filter_ungrounded:{v}" for v in ungrounded] + [f"entity_added:{p[:_MAX_NOTE_VALUE]}" for p in added]
+    notes += ["filter_grounded:codes"] if coded else []
     lst = counted if counted is not None and narrows(ir) else None
     if lst is not None:
         ir["answer"], answer = lst["name"], lst

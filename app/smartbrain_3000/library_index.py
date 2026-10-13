@@ -47,6 +47,7 @@ PACK = {
 }
 MAX_PACK_GZ_BYTES = 60_000_000       # the download cap (the v1.2 gzip is ~18 MB)
 MAX_PACK_BYTES = 600_000_000         # the unpacked cap (the v1.2 file is ~80 MB)
+MAX_CODE_VALUES = 1000               # a Library code table's values (spec v1.5: its own cap)
 
 LOCAL_RESERVED_ID = "__library_local__"
 LOCAL_SLOT = "sources"
@@ -431,6 +432,7 @@ class LibraryIndex:
         self._names_cache: list[tuple[str, set[str]]] | None = None
         self._entity_vocab_cache: dict[str, set[str]] = {}
         self._provider_names_cache: list[tuple[str, str]] | None = None
+        self._codes_cache: dict[str, frozenset[str]] = {}
 
     # --- install -----------------------------------------------------------------------------
 
@@ -479,6 +481,7 @@ class LibraryIndex:
             self._takes_cache = self._own_cache = None
             self._entity_vocab_cache = {}
             self._provider_names_cache = None
+            self._codes_cache = {}
             return meta
 
     def _conn(self) -> duckdb.DuckDBPyConnection:
@@ -1476,6 +1479,27 @@ class LibraryIndex:
         rec = self.get(source_id) if source_id else None
         got = (rec or {}).get("answers")
         return [a for a in got if isinstance(a, dict)] if isinstance(got, list) else []
+
+    def code_values(self, name: str) -> frozenset[str]:
+        """The values of the Library code table ``name`` (answers spec v1.5, ``library_codes``: the closed list of
+        values a text cell that declares it holds, "Flood Watch"), cached per installed pack. Empty for a table the
+        pack lacks, a pack older than v1.5 (no ``library_codes``) or none installed — never raises."""
+        assert isinstance(name, str), "name must be a str"
+        assert isinstance(self._codes_cache, dict), "the cache is a dict"
+        if name in self._codes_cache:
+            return self._codes_cache[name]
+        try:
+            with self._conn() as con:
+                rows = con.execute("SELECT value FROM library_codes WHERE name = ?", [name]).fetchmany(MAX_CODE_VALUES)
+        except duckdb.CatalogException:  # an older pack: no code tables, for good
+            self._codes_cache[name] = frozenset()
+            return frozenset()
+        except (duckdb.Error, LibraryIndexError) as exc:  # not installed / unreadable: nothing, retried later
+            log.warning("library: code table %s unreadable: %s", name[:40], type(exc).__name__)
+            return frozenset()
+        out = frozenset(v for (v,) in rows if isinstance(v, str) and v.strip())
+        self._codes_cache[name] = out
+        return out
 
 
 # --- local sources (user data, sealed) ---------------------------------------------------------

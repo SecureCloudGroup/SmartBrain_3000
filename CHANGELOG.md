@@ -174,7 +174,10 @@ to know when a release changes behavior.
   filter the rows; a filter word now has to be backed by something real — a name you
   wrote with a capital, a holiday, a label the source declares, a word the Library files
   that kind of data under, or a value the source's own rows hold — and one that is not is
-  dropped, and the card's reading line no longer claims it. "Final score of the latest
+  dropped, and the card's reading line no longer claims it. Weather alerts now read the
+  National Weather Service's own list of alert names, so "any flood warnings in Houston"
+  keeps to the flood alerts, or says honestly that there are none, instead of showing every
+  alert. "Final score of the latest
   Canucks game" showed another team's game from the league scoreboard; on a league-wide
   list a capitalized name you write now always narrows the rows, and the card says
   honestly when no row has it. "Ten biggest cryptocurrencies by trading volume" showed 20
