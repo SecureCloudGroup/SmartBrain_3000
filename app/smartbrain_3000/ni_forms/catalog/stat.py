@@ -359,7 +359,15 @@ class Stat(BaseForm):
         v = ctx.cand.bindings["value"]
         if ctx.cand.variant == "countdown":
             t = ctx.R.cell(0, v)
-            return ["d", "countdown", [fmt.iso(ctx.now), t]] if t else ["raw", v, 0]
+            if not t:
+                return ["raw", v, 0]
+            # fix round 1b (time forms, G3): a moment with a clock face (sunset, not a bare
+            # calendar date) leads with the time itself (next_event's own pattern); the live
+            # countdown rides under it (``_countdown_bind``), never a duration alone with no
+            # time of day anywhere on the card.
+            if ctx.R.f[v].type == "datetime":
+                return ["d", "date", [t, "h:mm a", ctx.tz]]
+            return ["d", "countdown", [fmt.iso(ctx.now), t]]
         # fix round 1a-6, class I: a unit too long to ride inline rides under the hero instead
         opts = {} if fmt.unit_rides_inline(ctx.R.f.get(v)) else {"unit": False}
         return ["cell", v, 0, opts]
@@ -367,8 +375,16 @@ class Stat(BaseForm):
     def _countdown_bind(self, ctx, cv, hb):
         if hb is None:
             return ctx.body["y0"]
-        t = ctx.R.cell(0, ctx.cand.bindings["value"])
-        cv.live("countdown", prim=hb.id, t=t, fmt="in_dhm")
+        v = ctx.cand.bindings["value"]
+        t = ctx.R.cell(0, v)
+        if ctx.R.f[v].type != "datetime":
+            cv.live("countdown", prim=hb.id, t=t, fmt="in_dhm")
+            return hb.bottom
+        cd = cv.text(["l", 0], hb.bottom + 2, ["d", "countdown", [fmt.iso(ctx.now), t]], "sub",
+                     src="code", max_w=ctx.W)
+        if cd:
+            cv.live("countdown", prim=cd.id, t=t, fmt="in_dhm")
+            return cd.bottom
         return hb.bottom
 
     def track(self, ctx: LayoutCtx, cv: Canvas, fa: float, fb: float, y: float, *, labels: bool,

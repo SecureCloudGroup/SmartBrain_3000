@@ -3398,6 +3398,35 @@ def _verify_source(frame: dict, source: dict, params: dict, answers: list[dict],
     return reasons, notes
 
 
+# a text product (the written forecast discussion) is answered only by a genuine ``text``-typed
+# cell — a short category word ("Mostly Clear") is a label, never a written product (G3, set G
+# #50). Only "discussion" names such a product: a summary / outlook / brief IS served by the
+# periods' short forecasts (sets F #49 and G #49, live and partial), and an "advisory" is an
+# alert product served by the alert lists (a one-row alert list binds as a measure and would be
+# refused here).
+_TEXT_PRODUCT_WANTS = frozenset({"discussion"})
+
+
+def _text_product_gap(built: dict, intent: dict) -> str | None:
+    """None, or the text-product word every want the user said names, when the one-row build
+    holds no ``measure`` field of type ``text`` for it — the honest answer is no card, not a
+    numeric stat wearing the asked word (``_verify_frame``)."""
+    assert isinstance(built, dict) and isinstance(intent, dict), "built + intent required"
+    wants = [str(w) for w in intent.get("wants") or []][:_MAX_INTENT_FIELDS]
+    if not wants:
+        return None
+    named = [next(iter(_answer_tokens(w) & _TEXT_PRODUCT_WANTS), None) for w in wants]
+    if not all(named):
+        return None
+    record = built["scene"].get("record") or {}
+    assert isinstance(record, dict), "the sealed scene carries a record dict"
+    if record.get("kind") != "measure":
+        return None
+    if any(f.get("role") == "measure" and f.get("type") == "text" for f in record.get("fields") or []):
+        return None
+    return named[0]
+
+
 def _verify_frame(frame: dict, source: dict, params: dict, built: dict, request: str, intent: dict,
                   now: datetime) -> tuple[list[str], list[str]]:
     """Does this declared-answers build answer the ask's frame? Returns (reasons it doesn't — any one
@@ -3429,6 +3458,9 @@ def _verify_frame(frame: dict, source: dict, params: dict, built: dict, request:
                       window=frame.get("window"))         or _legacy_window_gap(frame["window"], chosen, answers)
     if gap:
         reasons.append(gap)
+    text_gap = _text_product_gap(built, intent)
+    if text_gap:
+        reasons.append(f"no source reports a forecast {text_gap} yet")
     about: set[str] = set()
     for text in [str(intent.get("subject") or ""), *(str(w) for w in intent.get("wants") or [])]:
         about |= _answer_tokens(text.replace("_", " "))

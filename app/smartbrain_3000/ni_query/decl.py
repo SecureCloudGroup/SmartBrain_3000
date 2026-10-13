@@ -37,6 +37,14 @@ def axis_of(answer: dict | None) -> str | None:
     return axis.get("cell") if axis else None
 
 
+def axis_step_of(answer: dict | None) -> str | None:
+    """The answer's declared axis step ("hour" / "day" / "period"), or None."""
+    assert answer is None or isinstance(answer, dict), "answer must be a dict or None"
+    axis = (answer or {}).get("axis")
+    assert axis is None or isinstance(axis, dict), "axis must be a dict"
+    return axis.get("step") if axis else None
+
+
 def cell_types(answer: dict | None) -> dict[str, str]:
     """{cell path: cell type} of the answer's cells."""
     cells = cells_of(answer)

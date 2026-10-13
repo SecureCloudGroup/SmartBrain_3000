@@ -85,8 +85,11 @@ class SeriesLine(BaseForm):
         vf = next((f for f in rec.fields if f.role in ("value", "measure") and is_numeric(f)), None)
         if tf is None:
             return []
-        if vf is None and rec.kind == "series":
+        led = any(f.role in ("value", "measure") for f in rec.fields)
+        if vf is None and rec.kind == "series" and not led:
             # a series whose numeric columns all bound as secondaries: each column is a line
+            # (G3: a field already leading — the conditions cell an asked condition word names,
+            # not numeric — is never pushed aside for one of its own secondaries)
             nums = [f for f in rec.fields if is_numeric(f) and f.role in ("secondary", "count")]
             if not nums:
                 return []

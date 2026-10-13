@@ -2813,6 +2813,34 @@ display-class pick and the map/image → value degrade) are gone from the flow; 
   card. `_bind_form` has no lint-colour-driven "needs update" state, so a clock re-layout whose
   only red lint is `L-HOLLOW` (a day table thinning toward its last day) simply keeps the
   designed card, matching the prototype's rule by construction rather than by a ported check.
+- **G3 (2026-10-12/13, live refetch of set G).** Hero rule: a one-row `stat` / `conditions`
+  record never leads with a bare date/time cell when a real measure or text cell sits in the
+  same row (`record._apply_value_roles`: a date/datetime field is only ever the lead when
+  nothing else in the row is leadable) — the Library's day-axis / period-axis answers declare
+  their date column first, and a day cut to one row no longer lets it stand in for the asked
+  quantity; the cut day still shows as a `secondary` fact (`conditions`'s date/time cells are
+  no longer dropped from its KV facts). A moment with a clock face (sunset, not a bare calendar
+  date) leads `stat`'s countdown variant with the time itself (`"d","date"`, next_event's own
+  pattern) and the live countdown rides its own `sub` line underneath (`_countdown_bind`) —
+  never a duration alone with no time of day anywhere on the card. Asked-cell rule: a sky
+  condition word (fog, sunny, cloudy, overcast …) the ask names makes the row's own
+  `Conditions` cell the list's lead (`record._apply_list_roles`'s closed `_CONDITION_ASK_WORDS`
+  check), demoting a numeric column that would otherwise lead a `series_line` chart — a
+  category cell stays outside `asked.asked_fields`'s general rule (a closed vocabulary is never
+  the asked quantity) only for this one named class. Two bounds keep it honest: a quantity word
+  ("windy", "humid", "rainy", "snowy") is not a condition word (wind speed, humidity, rain chance
+  and snowfall are number cells), and when the ask names a number cell ("rain chance tomorrow
+  and will it be foggy") that number keeps the lead. Separately, an NWS forecast period carries
+  no name cell at all; its own name (`"Tuesday"`, `"Tuesday Night"`) is derived by code from its
+  `startTime` cell in the card zone (`fmt.period_name`) wherever a list shows it, never left as
+  a bare date. Text-product coverage: an ask whose every want is a written text product (the
+  forecast discussion — the closed `_TEXT_PRODUCT_WANTS`) is answered only by a genuine
+  `text`-typed cell; a one-row build with no such cell (a short category word like "Mostly
+  Clear" is a label, never a discussion) is an honest stop (`ni_flow._text_product_gap`, run
+  from `_verify_frame`) — links, never a numeric stat wearing the asked word. A summary /
+  outlook / brief is not such a product (the periods' short forecasts serve it: sets F #49 and
+  G #49, live and partial), nor is an advisory (an alert the alert lists serve; a one-row alert
+  list binds as a measure and must never be refused here).
 
 ## 35. Browser components (Round 20, steps B1–B2 — the component core and the walls)
 

@@ -1,0 +1,38 @@
+{
+ "_doc": "G3 engine round (2026-10-12/13 live refetch, keyless: open-meteo / api.weather.gov). Raw samples sit beside this file (G5/G8/G9/G10/G11/G40/G49/G50 __<source>.json); fetched_at + params in g3/samples_g/index.json (scratchpad, not shipped). before/after read off the tree's own _try_answers_build + _verify_frame (g3/cases.py); asserted by test_ni_forms_fixround_g3.py.",
+ "G5": {
+  "ask": "UV index in Phoenix this afternoon",
+  "before": {"form": "stat", "hero": "now", "note": "the Day date led; Max UV 5.2 rode as a secondary"},
+  "after": {"form": "stat", "hero": "5.2", "label": "Max UV", "secondary": "Day"}
+ },
+ "G8": {
+  "ask": "chance of snow in Denver on Thursday",
+  "before": {"form": "conditions", "hero": "0.0 in", "note": "the day cut to Thursday was never shown"},
+  "after": {"form": "conditions", "hero": "0.0 in", "secondary_includes": "Day"}
+ },
+ "G9": {
+  "ask": "hourly rain forecast for Orlando today",
+  "before": {"answer": "rain_this_hour", "form": "stat", "note": "one hour's reading, not the hourly list"},
+  "after": {"answer": "hours", "form": "series_line", "note": "step_preferred"}
+ },
+ "G10": {
+  "ask": "will it be foggy in Portland Oregon tomorrow morning",
+  "before": {"form": "series_line", "hero": "47.9°F", "note": "a temperature curve; conditions never shown"},
+  "after": {"form": "table", "value_field": "conditions", "note": "conditions leads, per hour, never a temperature curve"}
+ },
+ "G40": {
+  "ask": "what time does the sun set in Denver tomorrow",
+  "before": {"form": "stat", "hero": "in 23 h 44 m", "note": "only a countdown"},
+  "after": {"form": "stat", "hero": "6:23 pm", "secondary": "in 23 h 44 m"}
+ },
+ "G49": {
+  "ask": "short weather summary for Seattle tomorrow",
+  "before": {"form": "ranked_list", "note": "no period name on either row"},
+  "after": {"form": "ranked_list", "row_labels": ["Tuesday Night", "Wednesday"]}
+ },
+ "G50": {
+  "ask": "today's forecast discussion for Kansas City",
+  "before": {"form": "stat", "hero": "now", "note": "built on the period start time; no discussion text exists"},
+  "after": {"outcome": "refused", "reason": "no source reports a forecast discussion yet"}
+ }
+}

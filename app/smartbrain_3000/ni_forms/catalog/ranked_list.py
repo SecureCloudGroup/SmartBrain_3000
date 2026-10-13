@@ -84,7 +84,14 @@ class RankedList(BaseForm):
                 nums.append(["join", " ", [["cell", m, i, {"compact": True}], ["lower", ["label", m]]]])
             elif str(R.cell(i, m)).strip() != str(R.cell(i, b["name"]) or "").strip():
                 texts.append(["raw", m, i])           # never the title again
-        tm = [["cell", b["time"], i, {"short": True}]] if b.get("time") and R.cell(i, b["time"]) else []
+        # a forecast period's own time cell (path "startTime") carries no name cell (G3, set G
+        # #49): its day/night name is derived from its start time in the card zone, never shown
+        # as a bare date.
+        tf = R.f[b["time"]] if b.get("time") else None
+        if tf is not None and tf.path == "startTime" and R.cell(i, b["time"]):
+            tm = [["d", "period_name", [R.cell(i, b["time"]), R.tz]]]
+        else:
+            tm = [["cell", b["time"], i, {"short": True}]] if b.get("time") and R.cell(i, b["time"]) else []
         host = [["d", "host", [b["link"], i]]] if b.get("link") and R.cell(i, b["link"]) else []
         # the number a list is ranked by leads its meta line; otherwise when (and where) the item is from
         if b.get("lead") == "num":

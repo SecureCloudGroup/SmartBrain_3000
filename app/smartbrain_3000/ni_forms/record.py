@@ -51,6 +51,14 @@ _UNIT_TO_CURRENCY: dict[str, str] = {"$": "USD", "€": "EUR", "£": "GBP"}
 # answer label words the pack uses for a status-like text cell (ROLE pick).
 _STATUS_LABEL_WORDS: frozenset[str] = frozenset({"status", "severity", "state"})
 
+# a sky-condition word (G3, set G #10): the ask is about the conditions cell itself, not a
+# number beside it — "will it be foggy" never leads with temperature. Only words the conditions
+# vocabulary itself answers: "windy", "humid", "rainy", "snowy" ask for a quantity a number cell
+# carries (wind speed, humidity, rain chance, snowfall) and never lead with the conditions cell.
+_CONDITION_ASK_WORDS: frozenset[str] = frozenset({
+    "fog", "foggy", "sunny", "cloudy", "clear", "overcast", "hazy", "misty", "stormy", "drizzly",
+    "conditions"})
+
 # a field the forms can lead with (the first such field becomes the ``measure``)
 _LEAD_TYPES: frozenset[str] = frozenset({"number", "quantity", "currency", "percent",
                                          "category", "text", "datetime", "date", "bool"})
@@ -323,9 +331,10 @@ def _apply_value_roles(fields: list, answers: list, row: list, ask: str,
       Pittsburgh Penguins" is a matchup name, not prose — so a list demoted to a measure
       never treats a long cell as a passage lead);
     - the field the ask names (a one-row list demoted to a measure leads with the field the
-      words were about, e.g. "sunrise" over "day"), else the first other field a form can
-      lead with, preferring one whose sample cell is filled → ``measure`` (a number, a
-      word, a time);
+      words were about, e.g. "sunrise" over "day"), else the first other filled field that
+      is not a bare date/time (G3: "Day" declared before "Max UV" in a day-axis answer is
+      not the asked quantity — a date/time cell leads only when nothing else does) →
+      ``measure`` (a number, a word, a time);
     - a later time that is the reading's own stamp (answer window ``now``, or named
       as_of / updated / timestamp) → ``as_of``; everything else → ``secondary`` (a fact).
     Roles stay inside ``types.ROLES``.
@@ -341,11 +350,12 @@ def _apply_value_roles(fields: list, answers: list, row: list, ask: str,
     leadable = [i for i, f in enumerate(fields) if f.type in _LEAD_TYPES and _geo_role(f) is None
                 and i not in passage]
     filled = [i for i in leadable if row[i] is not None]
+    non_date = [i for i in filled if fields[i].type not in ("date", "datetime")]
     asked = set(asked_mod.asked_fields(fields, ask, wants))
     if wants_map and any(_geo_role(f) is not None for f in fields):
         lead = None                                   # the map is the headline
     elif filled:
-        lead = next((i for i in filled if fields[i].name in asked), filled[0])
+        lead = next((i for i in filled if fields[i].name in asked), (non_date or filled)[0])
     else:
         lead = None if passage else (leadable or [None])[0]
     for i, (f, a) in enumerate(zip(fields, answers, strict=True)):  # bounded: _FIELD_CAP
@@ -374,15 +384,25 @@ def _names_rows(samples: list, free_text: bool = False) -> bool:
     return free_text or len(vals) <= 1 or len(set(vals)) == len(vals)
 
 
-def _apply_list_roles(fields: list, cells: list, columns: list, asked: set | None = None) -> None:
+def _condition_asked(ask: str) -> bool:
+    """Does the ask name a sky-condition word (fog, sunny, overcast ...)? A closed word list,
+    never a per-card pattern — ``_apply_list_roles`` leads the row with the conditions cell."""
+    assert isinstance(ask, str), "ask must be a str"
+    words = set(re.findall(r"[a-z]+", ask.lower()))
+    return bool(words & _CONDITION_ASK_WORDS)
+
+
+def _apply_list_roles(fields: list, cells: list, columns: list, asked: set | None = None,
+                      ask: str = "") -> None:
     """Mutate ``fields`` in place with record-shaped roles (``columns`` = each field's
     sampled values): the first text cell whose values name their rows → ``name`` (else
-    the first text cell; a status/severity/state label → ``status``); other texts →
-    ``kind`` when they are a closed vocabulary (category), else ``meta``; the first
+    the first text cell; a status/severity/state label → ``status``; the cell literally
+    labeled "Conditions" when the ask names a sky-condition word → ``value``, G3); other
+    texts → ``kind`` when they are a closed vocabulary (category), else ``meta``; the first
     time/date → ``time`` / ``date``; the number the ask names (``asked``, fix round
     1a-5: "rain chances this week" leads with the rain column, not the high) else the
-    first number → ``value``, the other numbers → ``secondary``; coordinates →
-    ``lat`` / ``lon``."""
+    first number → ``value`` (``secondary`` when the conditions cell already leads) — the
+    other numbers → ``secondary``; coordinates → ``lat`` / ``lon``."""
     assert isinstance(fields, list), "fields must be a list"
     assert isinstance(cells, list) and len(cells) == len(fields), "one cell per field"
     assert isinstance(columns, list) and len(columns) == len(fields), "one sample column per field"
@@ -391,6 +411,11 @@ def _apply_list_roles(fields: list, cells: list, columns: list, asked: set | Non
     naming = [i for i in texts if _names_rows(columns[i], fields[i].type == "text")]
     name_at = (naming or texts or [None])[0]
     numbers = [i for i, f in enumerate(fields) if f.type in _NUMBER_TYPES and _geo_role(f) is None]
+    asked_number = any(fields[i].name in (asked or set()) for i in numbers)
+    # the conditions cell leads only when no number cell is the one the ask names ("rain chance
+    # tomorrow and will it be foggy" leads with the rain chance)
+    cond_at = next((i for i in texts if str(cells[i].get("label") or "").strip().lower() == "conditions"),
+                   None) if _condition_asked(ask) and not asked_number else None
     lead_num = next((i for i in numbers if fields[i].name in (asked or set())), (numbers or [None])[0])
     picked_time = False
     for i, (f, c) in enumerate(zip(fields, cells, strict=True)):  # bounded: _FIELD_CAP
@@ -400,6 +425,8 @@ def _apply_list_roles(fields: list, cells: list, columns: list, asked: set | Non
         elif f.type in ("text", "category"):
             if label_lower in _STATUS_LABEL_WORDS:
                 f.role = "status"
+            elif i == cond_at:
+                f.role = "value"
             elif i == name_at:
                 f.role = "name"
             else:
@@ -407,7 +434,7 @@ def _apply_list_roles(fields: list, cells: list, columns: list, asked: set | Non
         elif f.type in ("datetime", "date") and not picked_time:
             f.role, picked_time = ("time" if f.type == "datetime" else "date"), True
         elif f.type in _NUMBER_TYPES:
-            f.role = "value" if i == lead_num else "secondary"
+            f.role = "value" if i == lead_num and cond_at is None else "secondary"
         else:
             f.role = "meta"
 
@@ -482,7 +509,7 @@ def _shape_rows(answer: dict, outputs: dict, rows_name: str, ask: str = "",
     if len(rows) == 1 and question_kind != "count":
         _apply_value_roles(fields, cells, rows[0], ask, wants=wants, allow_passage=False)
         return "measure", fields, rows, long_text
-    _apply_list_roles(fields, cells, columns, set(asked_mod.asked_fields(fields, ask, wants)))
+    _apply_list_roles(fields, cells, columns, set(asked_mod.asked_fields(fields, ask, wants)), ask=ask)
     has_axis = bool(answer.get("axis"))
     has_time = any(f.type in ("datetime", "date") for f in fields)
     if answer.get("kind") == "columns":

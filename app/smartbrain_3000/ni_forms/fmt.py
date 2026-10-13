@@ -426,6 +426,16 @@ def cadence(s: int) -> str:
     return f"every {s} s"
 
 
+def period_name(t_iso: str, tz: str) -> str:
+    """An NWS-style forecast period's own name, derived from its start time in ``tz`` (G3,
+    set G #49: the Library's period lists carry no name cell) — the weekday, "Night" appended
+    for its PM half ("Tuesday", "Tuesday Night")."""
+    v = parse_t(t_iso)
+    dt = v.astimezone(zone(tz)) if isinstance(v, datetime) else datetime(v.year, v.month, v.day)
+    name = dt.strftime("%A")
+    return f"{name} Night" if dt.hour >= 12 else name
+
+
 def rel_day(d: date, today: date) -> str:
     n = (d - today).days
     if n == 0:

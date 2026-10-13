@@ -44,7 +44,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..ni_forms import llm
-from .clauses import bind_comparators, floor_answer, limit_for, rank_order, select_for
+from .clauses import (
+    bind_comparators,
+    floor_answer,
+    limit_for,
+    rank_order,
+    select_for,
+    step_answer,
+)
 from .decl import answer_named, counted_list
 from .ground import Grounds, carry_entities, ground_where, proper_phrases
 from .normalize import (
@@ -65,7 +72,8 @@ COVERAGE_VALUES = frozenset({"bound", "unbound", "approximated", "rules", "recog
 NOTES = frozenset({"query_rules", "model_off", "model_unavailable", "schema_invalid", "time_explicit",
                    "where_dropped", "numbers_unstated", "order_dropped", "params_dropped", "count_list",
                    "time_range_kept", "comparator_added", "comparator_corrected", "order_default",
-                   "filter_grounded:codes"})   # Q3d: a Library code table grounded a filter value (one code)
+                   "filter_grounded:codes",    # Q3d: a Library code table grounded a filter value (one code)
+                   "step_preferred"})         # G3: an explicit step word chose the same-source list answer
 # Round 20 (Q3c): note codes that carry their value — "filter_ungrounded:anywhere in the world",
 # "entity_added:Canucks" (``note_ok``)
 VALUE_NOTES = frozenset({"filter_ungrounded", "entity_added"})
@@ -173,6 +181,10 @@ def _code_clauses(ir: dict, ctx: Ctx, notes: list[str]) -> dict:
     assert isinstance(ir, dict) and isinstance(notes, list), "ir + notes required"
     assert isinstance(ctx, Ctx), "ctx must be a Ctx"
     answer = answer_named(ctx.answers, ir["answer"])
+    stepped = step_answer(ctx.ask, answer, ctx.answers)
+    if stepped is not answer:
+        ir["answer"], answer = stepped["name"], stepped
+        notes.append("step_preferred")
     counted = counted_list(ctx.answers, answer) if ctx.kind == "count" else None
     rows = counted or answer
     ir["where"], recognized = bind_comparators(ir["where"], rows, list(ctx.spans["comparators"]))

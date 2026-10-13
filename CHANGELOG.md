@@ -111,6 +111,17 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **Weather cards lead with what you asked, not a stray date or a temperature line.**
+  "UV index this afternoon" and "chance of snow on Thursday" now put the number you
+  asked for front and center, with the day it covers shown beside it instead of
+  silently standing in as the headline. "Will it be foggy tomorrow morning" shows the
+  hour-by-hour conditions themselves, never a temperature chart with no mention of
+  fog. "What time does the sun set tomorrow" shows the clock time with the countdown
+  underneath, not just a countdown. A short weather summary's rows are now labeled by
+  the period itself ("Tuesday", "Tuesday Night"). "Today's forecast discussion" is an
+  honest "no source reports a forecast discussion yet" when none of your sources
+  carries one, instead of a stat built from the day's temperature. "Hourly rain
+  forecast" now prefers the hour-by-hour list over a single hour's reading.
 - **Asks that say "advisories" or "watches" find the alerts sources, and a transit
   ask no longer lands on airport status.** "Heat advisories in Arizona" and "coastal
   flood advisories for Long Island" went to links because the plural never matched the
