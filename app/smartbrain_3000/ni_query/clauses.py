@@ -22,6 +22,9 @@ every cell selected, params filled with places, the declared count chosen over l
   "by trading volume" → the 24h volume cell), else the one the answer's own label names ("Top coins by
   market cap"), else the answer's first number cell — descending, ascending when the ask's ranking word
   is smallest / lowest / least.
+- step preference (``step_for``, G3): an explicit step word ("hourly", "by hour", "daily", "by
+  day") prefers the same-source list answer declaring that axis step over one that does not — a
+  single current-hour reading is not an "hourly forecast".
 - agg: "count" iff the kind is ``count``.
 - comparators (``bind_comparators``, Round 20 Q3b): an explicit comparator the recognizers read is an
   anchor like an explicit time. Its quantity word (between the phrase and the number, else before
@@ -44,7 +47,9 @@ every cell selected, params filled with places, the declared count chosen over l
 """
 from __future__ import annotations
 
-from .decl import axis_of, cells_of
+import itertools
+
+from .decl import axis_of, axis_step_of, cells_of
 from .recognize import words
 
 _SELECT_STOP = frozenset({
@@ -196,6 +201,37 @@ def limit_for(ask: str, kind: str | None, answer: dict, spans: dict) -> tuple[in
         return None, [], False
     axis, ahead = axis_of(answer), "next" in said
     return 1, ([{"col": axis, "dir": "asc" if ahead else "desc"}] if axis else []), ahead
+
+
+# an explicit step word names the row grain the ask wants (closed, G3): "hourly" / "daily", or
+# "by" immediately before "hour" / "day"
+_STEP_WORDS: dict[str, str] = {"hourly": "hour", "daily": "day"}
+
+
+def step_for(ask: str) -> str | None:
+    """The axis step ("hour" / "day") an explicit ask word names ("hourly", "by hour", "daily",
+    "by day"), or None."""
+    assert isinstance(ask, str), "ask must be a str"
+    ws = words(ask)[:400]
+    said = {w for w, _, _ in ws}
+    by_adjacent = {b for (a, _, a_end), (b, b_start, _) in itertools.pairwise(ws) if a == "by" and b_start - a_end <= 1}
+    step = next((s for w, s in _STEP_WORDS.items() if w in said or s in by_adjacent), None)
+    assert step is None or step in _STEP_WORDS.values(), "a closed axis step"
+    return step
+
+
+def step_answer(ask: str, answer: dict, answers: list[dict]) -> dict:
+    """``answer``, or the same-source list answer whose declared axis step matches an explicit
+    step word of the ask when ``answer`` does not already serve it (module docstring: step
+    preference) — a single current-hour reading is not an "hourly forecast"."""
+    assert isinstance(ask, str) and isinstance(answer, dict), "ask + answer required"
+    assert isinstance(answers, list), "answers must be a list"
+    step = step_for(ask)
+    if step is None or axis_step_of(answer) == step:
+        return answer
+    sibling = next((a for a in answers if a is not answer and a.get("kind") == "list"
+                     and axis_step_of(a) == step), None)
+    return sibling if sibling is not None else answer
 
 
 def rank_order(ask: str, kind: str | None, answer: dict | None, answers: list[dict], spans: dict,

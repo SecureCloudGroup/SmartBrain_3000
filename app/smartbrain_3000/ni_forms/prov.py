@@ -156,6 +156,8 @@ def derived(op: str, args: list, opts: dict, R) -> str:
         return fmt.rel_day(date.fromisoformat(args[0]), date.fromisoformat(args[1]))
     if op == "date":
         return fmt.format_time(args[0], args[1], args[2])
+    if op == "period_name":
+        return fmt.period_name(args[0], args[1])
     if op == "host":
         v = R.cell(args[1], args[0])
         from urllib.parse import urlsplit
@@ -198,7 +200,8 @@ def uses_data(rc) -> bool:
     if not isinstance(rc, list) or not rc:
         return False
     if rc[0] in ("cell", "raw", "d"):
-        return rc[0] != "d" or rc[1] not in ("count", "relday", "date", "age", "countdown", "quarter")
+        return rc[0] != "d" or rc[1] not in ("count", "relday", "date", "age", "countdown", "quarter",
+                                             "period_name")
     if rc[0] == "tpl":
         return any(uses_data(v) for v in rc[2].values() if isinstance(v, list))
     if rc[0] == "join":

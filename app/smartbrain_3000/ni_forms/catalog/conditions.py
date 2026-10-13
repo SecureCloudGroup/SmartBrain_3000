@@ -58,7 +58,7 @@ class Conditions(BaseForm):
         code = next((f for f in rec.fields if f.unit == "wmo"), None)
         sec = [f.name for f in rec.fields if f.name != v.name and (code is None or f.name != code.name)
                and fact_ok(f, rec) and f.role not in ("as_of", "time", "date", "name", "unknown")
-               and (is_numeric(f) or f.type in ("category", "text"))]
+               and (is_numeric(f) or f.type in ("category", "text", "date"))]
         seen, uniq = {v.label.lower()}, []
         for n_ in sec:                      # each label once: a repeated label is a near-duplicate reading
             lab = R.f[n_].label.lower()

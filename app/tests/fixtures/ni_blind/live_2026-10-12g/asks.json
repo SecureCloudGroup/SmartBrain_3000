@@ -1,0 +1,37 @@
+[
+ {
+  "id": "G5",
+  "ask": "UV index in Phoenix this afternoon",
+  "kind": "current_value"
+ },
+ {
+  "id": "G8",
+  "ask": "chance of snow in Denver on Thursday",
+  "kind": "forecast"
+ },
+ {
+  "id": "G9",
+  "ask": "hourly rain forecast for Orlando today",
+  "kind": "forecast"
+ },
+ {
+  "id": "G10",
+  "ask": "will it be foggy in Portland Oregon tomorrow morning",
+  "kind": "forecast"
+ },
+ {
+  "id": "G40",
+  "ask": "what time does the sun set in Denver tomorrow",
+  "kind": "next_event"
+ },
+ {
+  "id": "G49",
+  "ask": "short weather summary for Seattle tomorrow",
+  "kind": "forecast"
+ },
+ {
+  "id": "G50",
+  "ask": "today's forecast discussion for Kansas City",
+  "kind": "forecast"
+ }
+]

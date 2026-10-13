@@ -735,7 +735,7 @@ _QUERY_NOTES = frozenset({"query_rules", "model_off", "model_unavailable", "sche
                           "where_dropped", "numbers_unstated", "order_dropped", "params_dropped", "count_list",
                           "names_unbound", "bound_pushed", "clock_bound", "refetched",
                           "quantity_unbound", "time_range_kept", "comparator_added", "comparator_corrected",
-                          "order_default", "filter_grounded:codes"})
+                          "order_default", "filter_grounded:codes", "step_preferred"})
 # Round 20 (Q3c): note codes that carry their value ("filter_ungrounded:anywhere in the world", "entity_added:Canucks")
 _QUERY_VALUE_NOTES = frozenset({"filter_ungrounded", "entity_added"})
 _MAX_QUERY_NOTE_VALUE = 60
