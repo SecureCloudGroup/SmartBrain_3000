@@ -1810,9 +1810,39 @@ is FIXED and pinned:
   state CTA, duplicate-title message, pause note).
 Known-and-accepted for the round (documented, not hidden): compound asks
 build the best single card with the unserved half disclosed at consent
-(true decomposition = PLAN, the next milestone); model-ish asks land the
+(true decomposition = PLAN, the next milestone) — superseded 2026-10-13 by
+the G2 honest stop below; model-ish asks land the
 pick pause rather than an honest "cards can't write content yet" (PLAN's
 route classes); deeper build-slot queueing beyond honest copy.
+
+**Locate: places and compound asks (Round 20, G1+G2 — 2026-10-13, after the
+sealed set G read).** Four silent wrongs came from place resolution ("how many
+quakes … hit Alaska" ran at Many, Louisiana; "hurricanes in the Atlantic" at
+Atlantic, Iowa; two-place compares sealed one city). The rules, all in
+`library_resolve.Resolver.by_name` / `library_index.named_place`, closed data:
+G1b a bare ONE-WORD place alias written lowercase names a place only with a
+cue — the ask capitalises it (ALL-CAPS codes count: "NYC"), names its own
+state, or a place-cue word (in, near, at, around, for, from, to, of) sits
+right before it; a prominent place (`BARE_PLACE_RANK` 5.0: the pack's rank is
+~log10 population, so 100,000 people or more) is its own cue ("seattle
+weather tomorrow") unless the ask names some other state (G1a: "mobile …
+across illinois" is not Mobile, AL, and the named state is the place — the
+state-scoped sources serve it); the intent's own place text is resolved with
+`cued=True` (the model named it, so a lowercase "galveston" hint still
+resolves). G1c a closed `REGION_WORDS` table (Atlantic, Pacific, Gulf of
+Mexico, Caribbean, Arctic, Great Lakes, Gulf Coast, East/West Coast, Midwest,
+Northeast, Southeast, Southwest, Pacific Northwest, New England …) is vetoed
+before scoring — a region is never a point place; "Midwest City" and
+"Atlantic City" are longer aliases and still resolve. G2 two independently
+cued places (or a place and a state that does not contain it) joined by a
+comparison word (or, vs, versus, compared with/to, against, than) give
+`named_place` the status `compound`; `candidates()` offers nothing with the
+closed reason "this compares two places; one source answers one place" and
+the flow stops honestly with links; `_validate_intent` accepts `place` as a
+list of ≤ 3 short strings and routes to the same stop (set F's compares had
+failed at that stage). Measured on pack_f: the labeled locate set unchanged
+(103 / 108), 25 of the 350 asks of sets A–G change and every one is a G1/G2
+class, 61 constructed probes 61 / 61, 14 lowercase big-city asks all resolve.
 
 **G4b — the page door (2026-09-21, field round 2)**. The activity log
 rewrote the "web search is failing" report: EVERY URL the operator pasted

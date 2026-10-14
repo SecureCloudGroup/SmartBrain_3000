@@ -50,6 +50,22 @@ ENGLISH = frozenset(["a", "an", "the", "of", "in", "on", "at", "for", "to", "and
 
 GEO_NEAR = ("tide_station", "buoy", "radar_site", "nwps_gauge")
 
+# G1c (blind50g review, 2026-10-12): a basin/ocean/region word is never a point place — closed, from
+# the ruling's own list. "Atlantic City" / "Pacific Grove" / "Midwest City" are different, longer
+# aliases and are untouched (the veto matches only these exact words).
+REGION_WORDS = frozenset([
+    "atlantic", "pacific", "gulf of mexico", "caribbean", "arctic", "indian ocean", "great lakes",
+    "gulf coast", "east coast", "west coast", "midwest", "northeast", "southeast", "southwest",
+    "pacific northwest", "new england",
+])
+
+# G1b: a place cue that can admit a bare one-word place alias ("quakes near Many")
+PLACE_CUES = frozenset(["in", "near", "at", "around", "for", "from", "to", "of"])
+# G1b: a prominent place needs no cue — its one-word name IS the cue ("seattle weather tomorrow"); the
+# pack's place rank is ~log10(population), so 5.0 is a city of 100,000 people or more. Below it a bare
+# lowercase one-word alias ("many", "normal", "hope", "winter", "gas") is an ordinary word first.
+BARE_PLACE_RANK = 5.0
+
 
 def norm(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", (text or "").lower().replace("&", " and "))).strip()
@@ -83,6 +99,16 @@ def _row(r: tuple) -> dict:
 _ENTRY_COLS = "e.id, e.resolver, e.kind, e.key, e.name, e.lat, e.lon, e.state, e.attrs, e.rank"
 
 
+def _place_cued(gram: str, i: int, tokens: list[str], titled: set[str], state: str, named: set[str]) -> bool:
+    """A bare one-word place alias ("many", "normal", "hope") is the ask's place only with a cue
+    (G1b): the ask capitalises it, names its own state, or a place-cue word comes right before it."""
+    assert isinstance(gram, str) and gram, "gram must be a non-empty string"
+    assert isinstance(tokens, list) and 0 <= i < len(tokens), "i must index tokens"
+    if gram in titled or (state and state in named):
+        return True
+    return i > 0 and tokens[i - 1] in PLACE_CUES
+
+
 class Resolver:
     """The one matcher over the pack's resolver tables (see the module docstring)."""
 
@@ -108,7 +134,10 @@ class Resolver:
         row = self._con.execute("SELECT record FROM library_sources WHERE id = ?", [source_id]).fetchone()
         return json.loads(row[0]) if row else None
 
-    def by_name(self, resolver: str, ask: str, *, many: bool = False) -> dict:
+    def by_name(self, resolver: str, ask: str, *, many: bool = False, cued: bool = False) -> dict:
+        """``cued``: the caller vouches that ``ask`` names a place (the intent's own place text), so the
+        G1b bare-alias cue is not required of it."""
+        assert isinstance(cued, bool), "cued must be a bool"
         tokens = norm(ask).split()
         grams = []
         for i in range(len(tokens)):
@@ -129,6 +158,9 @@ class Resolver:
             by_alias.setdefault(r[10], []).append((e["id"], bool(r[11])))
             aliases_of.setdefault(e["id"], []).append(r[10])
         upper = set(re.findall(r"\b[A-Z0-9$]{1,6}\b", ask or ""))
+        # "capitalised" (G1b) is Title case ("Many") or a spelled-out code ("NYC") — the same signal
+        # the two-letter rule already reads off `upper`, generalised to any length
+        titled = {m.lower() for m in re.findall(r"\b[A-Z][a-z]+\b", ask or "")} | {u.lower() for u in upper}
         states = states_in(ask, self)
         # a capitalised state code that is also a place's nickname ("LA", "DC") names that place only when
         # no other place is named: "LA weather" is Los Angeles, "Lafayette LA" is Lafayette, Louisiana
@@ -143,6 +175,8 @@ class Resolver:
             spec = sum(1 for w in gram.split() if w not in ENGLISH) or 1
             if n == 1 and gram in ENGLISH:
                 continue
+            if resolver == "place" and gram in REGION_WORDS:
+                continue  # G1c: a basin/ocean/region word is never a point place
             for eid, partial in by_alias.get(gram, []):
                 e = entries[eid]
                 if n == 1 and gram == norm(e["key"]) and len(gram) <= 5 and gram not in norm(e["name"]).split():
@@ -155,6 +189,15 @@ class Resolver:
                     continue
                 if n == 1 and e["kind"] == "place" and len(gram) <= 2 and gram.upper() not in upper:
                     continue  # a two-letter place nickname counts only in capitals ("LA", never the word "la")
+                # G1b: a longer one-word place alias written lowercase ("many") needs a cue too — the
+                # ask capitalises it, names its own state, or a place-cue word sits right before it.
+                # A prominent place (BARE_PLACE_RANK) is its own cue ("seattle weather tomorrow") unless
+                # the ask names some OTHER state (G1a: "mobile … across illinois" is not Mobile, AL); the
+                # caller can vouch for the text instead (``cued``: the intent named it as the place).
+                if n == 1 and e["kind"] == "place" and len(gram) > 2 and not cued \
+                        and not _place_cued(gram, i, tokens, titled, e["state"], states) \
+                        and ((e["rank"] or 0.0) < BARE_PLACE_RANK or (states and e["state"] not in states)):
+                    continue
                 score = (2.0 * spec - (0.5 if partial else 0.0) + (0.5 if gram == norm(e["name"]) else 0.0)
                          + RANK_WEIGHT.get(resolver, 0.05) * e["rank"])
                 said = states - {gram.upper()} if n == 1 and gram in codes else states
