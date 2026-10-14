@@ -377,6 +377,8 @@ approval. Deleting a task is irreversible, so it asks every time.
 
 ## Neural Interface
 
+![Neural Interface — ask in plain words, say yes to the SmartBrain Library source it found, check the card it designs from the real data, and it goes live on your board; when no source answers, the card says so and offers links instead of guessing](assets/gifs/12-neural-interface.gif)
+
 A dashboard of things you asked to watch. Type what you want into the box at
 the top of the **Neural** page — *"show me AAPL every 5 minutes"*, *"tide
 times for Wallace Creek"* — and a deterministic build engine turns your words
@@ -385,6 +387,8 @@ out. The card appears immediately and builds in front of you; every later step
 is a tap on the card itself. The engine then keeps it fresh on its own
 schedule. (Chat can *read* your cards and talk about them, but cards are
 created and changed on the Neural page — chat has no card-writing tools.)
+
+![The Neural page: three live cards — tomorrow's sunset in Denver, the latest magnitude 3+ earthquakes near Los Angeles, and today's UV index in Phoenix — each built from a SmartBrain Library source](assets/04-neural-board.png)
 
 How a card comes to life:
 

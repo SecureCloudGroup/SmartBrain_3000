@@ -1,0 +1,47 @@
+{
+ "_doc": "Clip 12's recorded source responses (tools/gifgen/README.md, clip 12 notes): each fixture is one body curl'd once from the keyless public API at `url`, served by gifdemo_shim/sitecustomize.py `_install_ni` for that address (query sorted, clock-filled dates as {date}); `shift` moves its dates to today when served.",
+ "fixtures": [
+  {
+   "url": "https://api.open-meteo.com/v1/forecast?latitude=33.572154&longitude=-112.090132&current=uv_index&daily=uv_index_max&timezone=auto",
+   "file": "open-meteo-uv-phoenix.json",
+   "content_type": "application/json; charset=utf-8",
+   "recorded_at": "2026-10-14T13:01:01Z",
+   "shift": {
+    "mode": "dates",
+    "anchor": "2026-10-14",
+    "zone": "America/Phoenix"
+   }
+  },
+  {
+   "url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude=34.019394&longitude=-118.410825&maxradiuskm=200&minmagnitude=2.5&starttime=2026-09-14&orderby=time",
+   "file": "usgs-quakes-near-los-angeles-m2.5.json",
+   "content_type": "application/json; charset=utf-8",
+   "recorded_at": "2026-10-14T13:04:15Z",
+   "shift": {
+    "mode": "epoch_ms",
+    "anchor_ms": 1791983054000
+   }
+  },
+  {
+   "url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&latitude=34.019394&longitude=-118.410825&maxradiuskm=200&minmagnitude=3&starttime=2026-09-14&orderby=time",
+   "file": "usgs-quakes-near-los-angeles-m3.json",
+   "content_type": "application/json; charset=utf-8",
+   "recorded_at": "2026-10-14T13:04:50Z",
+   "shift": {
+    "mode": "epoch_ms",
+    "anchor_ms": 1791983090000
+   }
+  },
+  {
+   "url": "https://api.open-meteo.com/v1/forecast?latitude=39.76185&longitude=-104.881105&daily=sunrise,sunset&timezone=auto&forecast_days=7",
+   "file": "open-meteo-sun-denver.json",
+   "content_type": "application/json; charset=utf-8",
+   "recorded_at": "2026-10-14T13:06:36Z",
+   "shift": {
+    "mode": "dates",
+    "anchor": "2026-10-14",
+    "zone": "America/Denver"
+   }
+  }
+ ]
+}
