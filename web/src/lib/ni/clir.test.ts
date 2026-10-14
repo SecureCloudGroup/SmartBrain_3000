@@ -351,3 +351,33 @@ describe("text box top — the baseline lands on the CLIR y with Inter's metrics
     expect(top).toBeLessThan(14);
   });
 });
+
+// ---------------------------------------------------------------- reactive state (Proxy)
+/** A deep Proxy over plain data — what a Svelte deep `$state` hands a component. */
+function deepProxy<T>(v: T): T {
+  if (v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return new Proxy(v.map(deepProxy), {}) as T;
+  return new Proxy(Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepProxy(x)])), {}) as T;
+}
+
+describe("applyLive on a CLIR held in reactive state", () => {
+  it("resolves a proxied CLIR (structuredClone would throw) and returns plain data", () => {
+    const c = validateClir(loadFixture("curve_tide"));
+    const proxied = deepProxy(c);
+    // the hazard this pins: a Proxy anywhere inside the CLIR is not structured-cloneable
+    expect(() => structuredClone(proxied)).toThrow();
+    const out = applyLive(proxied, MS_UTC(2026, 9, 25, 15, 0));
+    expect(out.live).toEqual([]);
+    expect(out.prims.length).toBeGreaterThan(0);
+    expect(() => structuredClone(out)).not.toThrow();
+    // never mutates its input
+    expect(proxied.live.length).toBeGreaterThan(0);
+  });
+
+  it("paints a static CLIR from reactive state too", () => {
+    const c = validateClir(loadFixture("stat_nvda"));
+    const out = applyLive(deepProxy(c), MS_UTC(2026, 9, 25, 15, 0));
+    expect(out.prims.length).toBe(c.prims.length);
+    expect(out.summary).toContain("NVDA");
+  });
+});
