@@ -452,6 +452,9 @@ def _parse_json_reply(text: str) -> dict:
 _INTENT_NAME_WORD_RE = re.compile(r"[A-Za-z0-9]+")
 _MAX_INTENT_NAMES = 5
 _MAX_INTENT_NAME_CHARS = 60
+# G2: a compound ask ("Phoenix or Miami") can make the model name both places as a list
+_MAX_COMPOUND_PLACES = 3
+_MAX_COMPOUND_PLACE_CHARS = 60
 
 
 def _clean_intent_names(raw: object, request: str) -> list[str]:
@@ -506,10 +509,17 @@ def _validate_intent(reply: dict, request: str = "") -> dict:
     # geocode-consent (2026-09-15): ``place`` is optional and bounded — it only
     # ever becomes a percent-encoded geocode query behind the confirm card.
     place = reply.get("place")
+    if isinstance(place, list) and len(place) <= _MAX_COMPOUND_PLACES \
+            and all(isinstance(p, str) and len(p) <= _MAX_COMPOUND_PLACE_CHARS for p in place):
+        # G2: a compound ask ("Phoenix or Miami") can make the model name both places as a list;
+        # the ask's own words, not this field, drive locate's compound honest stop (named_place) —
+        # never a stage failure over the model's shape choice
+        place = " / ".join(p.strip() for p in place if p.strip()) or None
     if place is not None and not isinstance(place, str):
         raise ValueError("intent.place must be a string or null")
     if isinstance(place, str) and len(place) > 120:
-        reply["place"] = place[:120]
+        place = place[:120]
+    reply["place"] = place
     reply["names"] = _clean_intent_names(reply.get("names"), request)
     return reply
 

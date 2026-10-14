@@ -122,6 +122,15 @@ to know when a release changes behavior.
   honest "no source reports a forecast discussion yet" when none of your sources
   carries one, instead of a stat built from the day's temperature. "Hourly rain
   forecast" now prefers the hour-by-hour list over a single hour's reading.
+- **A card's place comes from the place you named, never from a stray word.** "How
+  many quakes hit Alaska" used to run at Many, Louisiana (the word "many" matched the
+  town) and "hurricanes in the Atlantic" at Atlantic, Iowa; a small town's one-word name
+  now needs a cue (a capital letter, its state, or "in / near / at" before it), a
+  region such as the Atlantic or the Gulf Coast is never a point on the map, and a
+  state you name wins over a same-named town elsewhere. Big cities keep working in
+  lowercase ("seattle weather tomorrow"). An ask that compares two places ("is it
+  warmer in Phoenix or Miami") no longer silently answers for one of them: it stops
+  with links and says that one source answers one place.
 - **Asks that say "advisories" or "watches" find the alerts sources, and a transit
   ask no longer lands on airport status.** "Heat advisories in Arizona" and "coastal
   flood advisories for Long Island" went to links because the plural never matched the

@@ -258,17 +258,75 @@ def _speaks_to(need: set[str], own: str, phrases: list[str], ask: str, name: str
     return bool({_fold(w) for w in need} & set((text + folded(name)).split()))
 
 
+# G2 (blind50g review): a two-subject ask ("X or Y", "X vs Y", "X compared with Y") must not seal a
+# one-subject card. A comparison word joining two independently-cued places (or a place and a state
+# that doesn't contain it) makes the ask "compound": locate offers no candidate, closed.
+_COMPARISON_PHRASES = ("compared with", "compared to", "versus", "against", "vs", "than", "or")
+_COMPARISON_RE = re.compile(
+    r"\b(" + "|".join(p.replace(" ", r"\s+") for p in _COMPARISON_PHRASES) + r")\b", re.IGNORECASE)
+
+
+def _comparison_split(ask: str) -> tuple[str, str] | None:
+    """``ask`` split at its leftmost comparison word/phrase, case-insensitive; None when it names
+    none. Splits the ORIGINAL ask (not a lowercased copy) so each half keeps its own capitalisation
+    — ``by_name``'s cue grammar (G1b) reads that back on each side independently."""
+    assert isinstance(ask, str) and ask, "ask must be a non-empty string"
+    m = _COMPARISON_RE.search(ask)
+    if m is None:
+        return None
+    assert m.start() < m.end(), "a real match has a non-empty span"
+    return ask[:m.start()], ask[m.end():]
+
+
+def _side_location(res, half: str) -> tuple[str, str, str]:
+    """(name, "place"|"state"|"", its state/own code) ``half`` names with its own cue, else ("", "", "").
+    An "ambiguous" reading (no single dominant population, e.g. "Charleston") has no ``best``; its
+    likeliest candidate (``by_name`` ranks these by population, largest first) stands in for it."""
+    assert isinstance(half, str), "half must be a string"
+    from .library_resolve import norm
+    low = f" {norm(half)} "
+    r = res.by_name("place", half)
+    words, _passed = _place_words_in(res, r, low, half, "")
+    top = r.get("best") or next(iter(r.get("candidates") or []), None)
+    if words and top:
+        assert isinstance(top, dict), "a resolved reading carries its entry dict"
+        return norm(top["name"]), "place", str(top.get("state") or "")
+    st = res.by_name("us_state", half)
+    if st["status"] == "resolved":
+        return norm(st["best"]["name"]), "state", str(st["best"].get("key") or "").upper()
+    return "", "", ""
+
+
+def _is_compound(res, ask: str) -> bool:
+    """Two distinct, independently-cued places (or a place and a non-containing state) joined by a
+    comparison word: "is it warmer in Phoenix or Miami", never "Lake Michigan... in Chicago" (no
+    comparison word) or "Dodgers vs Giants" (neither side is a place)."""
+    assert isinstance(ask, str) and ask, "ask must be a non-empty string"
+    split = _comparison_split(ask)
+    if split is None:
+        return False
+    assert len(split) == 2, "a comparison split always returns two halves"
+    name_a, kind_a, code_a = _side_location(res, split[0])
+    name_b, kind_b, code_b = _side_location(res, split[1])
+    if not name_a or not name_b or name_a == name_b:
+        return False
+    return not (code_a and code_a == code_b and "state" in (kind_a, kind_b))
+
+
 def named_place(res, ask: str, hint_place: str | None = None) -> tuple[set[str], bool, str]:
     """The place the ask names, decided as the fill decides it: (its words, named?, the resolver's status).
 
     Starts from the resolver's own reading (a "largest of its name" pick is a big place), then the other
     ties; a place is the ask's when it is big, follows in/at/near/for/around, is a reviewed area name, comes
     with a state, or is the intent's own place. A place the resolver can't settle is "ambiguous", never
-    dropped. A ZIP or a state name is a place too."""
+    dropped. A ZIP or a state name is a place too. Two independently-cued places joined by a comparison
+    word are "compound" (G2): never one place sealed for an ask that names two."""
     from .library_resolve import norm
     low = f" {norm(ask)} "
     if re.search(r"\b\d{5}\b", ask or ""):
         return set(), True, "resolved"
+    if _is_compound(res, ask):
+        return set(), False, "compound"
     st = res.by_name("us_state", ask)
     state_words = set(norm(st["best"]["name"]).split()) if st["status"] == "resolved" else set()
     hinted = f" {norm(hint_place or '')} "
@@ -283,10 +341,11 @@ def named_place(res, ask: str, hint_place: str | None = None) -> tuple[set[str],
     status = r["status"]
     if not words and passed:
         # a longer name that isn't the place can hide the one that is ("Lake Erie Beach" in "Lake Erie water
-        # temp Cleveland"): the rest of the ask is read once more
-        rest = low
+        # temp Cleveland"): the rest of the ask is read once more, from the ORIGINAL ask (not the lowercased
+        # `low`) so a one-word alias elsewhere in it ("Cleveland") keeps its own capitalisation cue (G1b)
+        rest = ask
         for said in passed:
-            rest = rest.replace(f" {said} ", " ")
+            rest = re.sub(rf"\b{re.escape(said)}\b", " ", rest, flags=re.IGNORECASE)
         r = res.by_name("place", rest)
         words, _ = _place_words_in(res, r, low, ask, hinted)
         status = r["status"] if words else status
@@ -305,7 +364,7 @@ def _said_place(res, hint_place: str, low: str) -> tuple[str, str]:
     """The words of the intent's place as the ask says them (its name or an alias), and the resolver's status
     for it; ('', 'none') when the ask doesn't say it."""
     from .library_resolve import norm
-    h = res.by_name("place", hint_place)
+    h = res.by_name("place", hint_place, cued=True)   # the intent named it: no G1b cue required of its text
     for c in ([h["best"]] if h["best"] else h["candidates"][:3]):  # bounded: three readings
         nm = norm(c["name"])
         said = nm if f" {nm} " in low else next((w for w in _aliases_in(res, c["id"], low)), "")
@@ -1149,6 +1208,10 @@ class LibraryIndex:
             if route is None:  # a pack without route asks: the keyword frame, as without vectors
                 vectors = None
             ctx = self._context(con, ask, hint, route)
+            if ctx["place_status"] == "compound":
+                # G2: a two-subject ask ("Phoenix or Miami") gets no candidate — one source answers
+                # one place; the caller's existing "no row" path is the honest stop with links
+                return [], ["this compares two places; one source answers one place"]
             if vectors is not None:
                 keyword = [sid for sid, _score in self._ranked(con, ctx, "s.tier <> 'harvested'", [])]
                 ranked = vectors.fuse(keyword, vectors.dense(q), route)
