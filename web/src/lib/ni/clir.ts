@@ -622,7 +622,12 @@ function pathY(path: PathPrim, fx: number): number | null {
 export function applyLive(clir: Clir, now: number): Clir {
   console.assert(Number.isFinite(now), "applyLive: now finite");
   console.assert(clir.v === 1, "applyLive: clir v=1");
-  const out: Clir = structuredClone(clir);
+  // A JSON round trip, not structuredClone: on the board the CLIR lives inside a deep `$state`
+  // (routes/ni/+page.svelte `items`), so its nested arrays reach here as Svelte proxies, and
+  // structuredClone throws DataCloneError on any Proxy — every designed card then stuck the
+  // board on its spinner (found 2026-10-14 recording the Neural Interface clip). A CLIR is JSON
+  // by contract (validateClir), so the round trip loses nothing and yields plain data.
+  const out: Clir = JSON.parse(JSON.stringify(clir)) as Clir;
   const by = new Map(out.prims.map((p) => [p.id, p]));
   const hidden = new Set<number>();
   for (const lb of out.live) {
