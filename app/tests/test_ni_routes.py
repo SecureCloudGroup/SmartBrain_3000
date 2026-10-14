@@ -1204,6 +1204,10 @@ def test_intake_creates_shell_and_starts_worker(client: TestClient,
     assert item["spec"].get("_shell") is True
     entries = client.get("/api/audit").json()["entries"]
     assert any(e["tool"] == "ni_intake" for e in entries)
+    # the shell's placeholder source is a `model` no-op that has read nothing: no "Interpreted"
+    # chip on the board while the card builds (2026-10-14)
+    row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == iid)
+    assert row["interpreted"] is False
 
 
 def test_intake_duplicate_title_409s_naming_the_card(client: TestClient,

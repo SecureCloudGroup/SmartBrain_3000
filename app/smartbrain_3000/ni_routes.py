@@ -146,7 +146,11 @@ def _board_row(store: ni.NIStore, item: dict, *,
     slot = "preview" if item["state"] == "draft" else (snap.get("slot") if snap else None)
     built_from = item["spec"].get("_built_from") or {}
     source_type = (item["spec"].get("source") or {}).get("type")
-    interpreted = source_type == "model" or ni._spec_has_llm_stage(item["spec"])
+    # A flow SHELL (ni_flow._empty_shell_spec) carries a `model` placeholder source but has read
+    # nothing: no "Interpreted" chip while it builds (found 2026-10-14 recording the NI clip —
+    # the consent pause and an honest stop both wore the chip).
+    interpreted = item["spec"].get("_shell") is not True \
+        and (source_type == "model" or ni._spec_has_llm_stage(item["spec"]))
     update_flag, gone_flag = _template_update_flags(item, library_index, library_pack_id,
                                                     spec_hashes)
     row = {
