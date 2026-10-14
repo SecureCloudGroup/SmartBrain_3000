@@ -9,14 +9,9 @@ date and start a fresh `## [Unreleased]`. Call out **breaking changes** and any 
 step explicitly — SmartBrain runs forward-only, data-safe migrations, but users still need
 to know when a release changes behavior.
 
-### Changed
-
-- **Bigger pages fit.** The page fetch and the extractor jail now accept pages up to
-  8 MB (the jail's hard stdin cap is 16 MB and its output cap 4 MB), up from 2 MB, so
-  long schedules, rankings and script-heavy pages are no longer refused as too large.
-
-
 ## [Unreleased]
+
+## [0.26.0] - 2026-10-14
 
 ### Added
 
@@ -212,6 +207,9 @@ to know when a release changes behavior.
 
 ### Changed
 
+- **Bigger pages fit.** The page fetch and the extractor jail now accept pages up to
+  8 MB (the jail's hard stdin cap is 16 MB and its output cap 4 MB), up from 2 MB, so
+  long schedules, rankings and script-heavy pages are no longer refused as too large.
 - **Library pack v1.5.0.** The pinned SmartBrain Library pack moves to v1.5.0: the NWS alert names are a
   declared code table (so "flood", "coastal flood advisory" and the rest ground a card's filter), alert
   lists carry only real (not test) alerts, and parameter bounds are declared per source.
