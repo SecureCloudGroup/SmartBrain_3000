@@ -8,7 +8,8 @@ isolation — no real provider keys, no touching a real Bifrost. See README.md.
 Endpoints:
   GET  /reset                      -> clear configured providers (use before clip 02)
   GET  /v1/models                  -> catalog for the currently "configured" providers
-  POST /v1/chat/completions        -> stream (SSE) or JSON; emits add_task/kb_search tool calls
+  POST /v1/chat/completions        -> stream (SSE) or JSON; emits add_task/kb_search tool calls, and
+                                      the Neural Interface's canned JSON turns (clip 12, NI_ASKS)
   POST /v1/embeddings              -> a fixed vector (reindex + semantic search work)
   POST /api/providers              -> mark a provider configured (register_ollama/set_provider)
   POST /api/providers/<n>/keys     -> 200
@@ -17,7 +18,9 @@ Endpoints:
 
 Run:  python3 mock_gateway.py 38099   (also binds :11434 for Ollama detection)
 """
+import ast
 import json
+import re
 import sys
 import threading
 from datetime import date, timedelta
@@ -43,8 +46,108 @@ def _tomorrow():
     return (date.today() + timedelta(days=1)).isoformat()
 
 
+# ---- Neural Interface (clip 12) -------------------------------------------------------------------
+# The NI flow's model turns are closed JSON shapes; each branch below keys on the turn's own prompt
+# marker and replies with valid JSON for exactly the asks clip 12 types (an unknown ask gets a plain
+# intent, the query floor and the floor's design). Everything else — locate, the address, the fetch,
+# the build, the form design, the checks — is the app's own code.
+NI_INTENT = "Classify a dashboard-card request."                       # ni_flow._INTENT_PROMPT
+NI_QUERY = "You turn a person's ask into one query object"             # ni_query.prompt.RULES
+NI_PRESENT = "You choose how a personal dashboard card presents live data."   # ni_forms.present
+NI_FIT = "You check whether the chosen answers actually answer"        # ni_forms.verdict
+
+
+def _ir(answer, **clauses):
+    """A query IR: the prompt's default object with the clauses its RULES give this ask."""
+    return {"answer": answer, "params": {}, "select": [], "where": [], "time": None, "order": [],
+            "limit": None, "agg": "none", **clauses}
+
+
+NI_ASKS = {  # the ask as clip 12 types it (lowercased) -> what a local model returns at each turn
+    "uv index in phoenix this afternoon": {
+        "intent": {"subject": "UV index in Phoenix", "wants": ["uv index"], "threshold": None,
+                   "place": "Phoenix", "names": ["Phoenix"], "display_hint": "value"},
+        "query": _ir("uv_max_today", time={"from": "today", "to": "today"}),
+        "form": None},
+    "most recent earthquakes near los angeles above magnitude 3": {
+        "intent": {"subject": "Earthquakes near Los Angeles", "wants": ["earthquakes", "magnitude"],
+                   "threshold": 3, "place": "Los Angeles", "names": ["Los Angeles"],
+                   "display_hint": "list"},
+        "query": _ir("quakes", where=[{"col": "properties.mag", "op": ">", "value": 3}],
+                     order=[{"col": "properties.time", "dir": "desc"}]),
+        "form": "ranked_list"},
+    "what time does the sun set in denver tomorrow": {
+        "intent": {"subject": "Sunset in Denver", "wants": ["sunset time"], "threshold": None,
+                   "place": "Denver", "names": ["Denver"], "display_hint": "value"},
+        "query": _ir("sunset_tomorrow", time={"from": "tomorrow", "to": "tomorrow"}),
+        "form": None},
+}
+
+
+def _ni_ask(text, pattern):
+    """The canned turns for the ask the prompt quotes last (the query prompt's few-shot examples
+    quote other asks first), or None for an ask clip 12 doesn't type."""
+    quoted = re.findall(pattern, text, re.MULTILINE)
+    try:
+        ask = str(ast.literal_eval(quoted[-1])) if quoted else ""
+    except (ValueError, SyntaxError):
+        ask = quoted[-1].strip("'\"")
+    return ask, NI_ASKS.get(ask.strip().rstrip("?.").lower())
+
+
+def _ni_intent(text):
+    """Stage 1: the closed intent for the ask on the prompt's ``Request:`` line."""
+    ask, known = _ni_ask(text, r"^Request: (.+)$")
+    intent = known["intent"] if known else {"subject": ask[:60], "wants": [ask[:40] or "value"],
+                                            "threshold": None, "place": None, "names": [],
+                                            "display_hint": "value"}
+    return json.dumps({"kind": "external_data", "cadence_minutes": 15, **intent})
+
+
+def _ni_query(text):
+    """The query layer: the IR the prompt's RULES give the ask; an unknown ask gets a non-JSON line,
+    so the deterministic rules floor plans it (ni_query.plan, the documented no-model path)."""
+    _ask, known = _ni_ask(text, r"^Ask: (.+)$")
+    return json.dumps(known["query"]) if known else "(demo gateway: no query model here)"
+
+
+def _ni_present(text):
+    """PRESENT: the ask's form when the menu offers it, else c0 — the rules floor's top-ranked
+    candidate (enumerate ranks before it names ids, so c0 is stable however the menu is shuffled) —
+    with every key the skeleton names."""
+    _ask, known = _ni_ask(text, r"^Ask: (.+)$")
+    ids = re.search(r'"pick": "<one of ([^>]+)>"', text).group(1).split("|")
+    opts = re.search(r"^Options: (\[.*\])$", text, re.MULTILINE)
+    menu = json.loads(opts.group(1)) if opts else []
+    pick = next((o["id"] for o in menu if known and o["form"] == known["form"]),
+                "c0" if "c0" in ids else sorted(ids)[0])
+    labels = re.search(r'"labels": \{(.*)\},$', text, re.MULTILINE)
+    keys = re.findall(r'"([^"]+)": "<key or ask>"', labels.group(1)) if labels else []
+    fits = [{"cand": i, "answers_ask": "yes" if i == pick else "partly"} for i in ids]
+    return json.dumps({"intent": next((o["intent"] for o in menu if o["id"] == pick), "now"), "fits": fits,
+                       "pick": pick, "second": None, "primary_field": None,
+                       "labels": {k: "key" for k in keys}, "uncovered_wants": [], "none_fits": False})
+
+
+def _ni_reply(messages):
+    """The canned NI turn for this conversation, or None when it is not an NI prompt."""
+    text = "\n\n".join(str(m.get("content") or "") for m in messages)
+    if NI_INTENT in text:
+        return _ni_intent(text)
+    if NI_QUERY in text:
+        return _ni_query(text)
+    if NI_PRESENT in text:
+        return _ni_present(text)
+    if NI_FIT in text:  # the card passed every code check; the advisory verdict agrees
+        return json.dumps({"answers_ask": "yes", "missing": [], "wrong": [], "evidence": []})
+    return None
+
+
 def decide(messages):
     """Return {'text': ...} or {'tool': {'name','arguments'}} from the conversation."""
+    ni = _ni_reply(messages)
+    if ni is not None:
+        return {"text": ni}
     last_user, has_tool_result, last_tool = "", False, ""
     for m in messages:
         if m.get("role") == "user":

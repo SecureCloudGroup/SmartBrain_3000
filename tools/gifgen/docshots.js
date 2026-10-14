@@ -1,9 +1,11 @@
-// The SEVEN committed guide screenshots (docs/assets/*.png + web/static/assets/*.png),
+// The EIGHT committed guide screenshots (docs/assets/*.png + web/static/assets/*.png),
 // re-shot deterministically against the same throwaway demo container as the GIF recorder.
 // `./run.sh docshots` stages the two states and invokes this twice:
 //   node docshots.js disconnected   -> 01-chat-connect, 02-providers, 03-local-models
 //   node docshots.js connected      -> 05-knowledge, 06-remote-access, 07-update-banner,
 //                                      08-always-allowed
+// and `./run.sh 12` invokes the third phase right after its take, on the board the take leaves:
+//   node docshots.js neural         -> 04-neural-board (three live Neural Interface cards)
 // Output: out/docshots/*.png . Dark is canonical (operator decision) — colorScheme is pinned.
 const { chromium } = require("playwright");
 const fs = require("fs");
@@ -15,8 +17,8 @@ const W = 1380, H = 900;
 
 (async () => {
   const phase = process.argv[2] || "";
-  if (phase !== "disconnected" && phase !== "connected") {
-    console.error("usage: node docshots.js <disconnected|connected>");
+  if (phase !== "disconnected" && phase !== "connected" && phase !== "neural") {
+    console.error("usage: node docshots.js <disconnected|connected|neural>");
     process.exit(1);
   }
   fs.mkdirSync(OUT, { recursive: true });
@@ -26,6 +28,7 @@ const W = 1380, H = 900;
     deviceScaleFactor: 2,
     colorScheme: "dark",
     serviceWorkers: "block", // the PWA worker would answer /api/health around page.route
+    ...(phase === "neural" ? { timezoneId: "America/Los_Angeles" } : {}), // clip 12's zone: same "as of" times
     extraHTTPHeaders: process.env.SB_LOCAL_TOKEN ? { Authorization: `Bearer ${process.env.SB_LOCAL_TOKEN}` } : {}, // R14: desktop credential
   });
   const page = await ctx.newPage();
@@ -97,6 +100,17 @@ const W = 1380, H = 900;
     await page.waitForSelector('button:has-text("Stop allowing")', { timeout: 8000 });
     await page.waitForTimeout(400);
     await shot("08-always-allowed.png");
+  }
+
+  if (phase === "neural") {
+    // The Neural Interface board clip 12 leaves behind (./run.sh 12 stages it): a clock-time hero, a
+    // ranked list and a stat, each built from its Library source's recorded response. Waits for the three
+    // live cards, not for network idle: the board keeps polling.
+    await page.goto(BASE + "/ni");
+    await page.waitForFunction(() => document.querySelectorAll('.ni-card[data-state="fresh"]').length >= 3,
+      null, { timeout: 8000 });
+    await page.waitForTimeout(800); // fonts + the painted cards settle
+    await shot("04-neural-board.png");
   }
 
   await ctx.close();

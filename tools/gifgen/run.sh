@@ -2,7 +2,7 @@
 # Regenerate a quickstart GIF (or all of them) from the REAL app, deterministically.
 #
 #   ./run.sh 03          # record + encode clip 03
-#   ./run.sh all         # all 10
+#   ./run.sh all         # all 12
 #
 # Prereqs (kept out of the repo on purpose):
 #   - docker, with the smartbrain_3000:dev image built (cd .. ; docker build ...).
@@ -24,10 +24,11 @@ name_of(){ case "$1" in
   01) echo 01-install-to-unlocked;; 02) echo 02-connect-a-model;; 03) echo 03-first-chat;;
   04) echo 04-add-knowledge;;       05) echo 05-approve-an-action;; 06) echo 06-planner;;
   07) echo 07-schedule-a-prompt;;   08) echo 08-pair-a-phone;;      09) echo 09-backup-recovery;;
-  10) echo 10-vaults;; 11) echo 11-vault-subscribe;; esac; }
+  10) echo 10-vaults;; 11) echo 11-vault-subscribe;; 12) echo 12-neural-interface;; esac; }
 
 # Extra `docker run` args, empty except for clip 11 (the public-vault subscribe/update demo), which
-# mounts the RECORDER-ONLY netguard shim + the served publisher files. The shim serves a real .sbvault
+# mounts the RECORDER-ONLY netguard shim + the served publisher files, and clip 12 (the Neural Interface:
+# the same shim serving recorded source responses). The shim serves a real .sbvault
 # in place of the network fetch so the localhost URL a demo needs never has to defeat the SSRF guard;
 # it lives in tools/gifgen only, is never COPY'd into the image, and only activates under SB_GIFDEMO=1.
 SHIM=()
@@ -48,14 +49,29 @@ reset_demo(){ docker rm -f sb_gifdemo >/dev/null 2>&1 || true
   # demo never records the one-time legacy-launcher nudge banner a launcher-less container
   # would otherwise show in every clip.
   for i in $(seq 1 40); do curl -fsS -H 'x-smartbrain-launcher: gifdemo' -H "$AUTH" $U/api/health >/dev/null 2>&1 && break; sleep 1; done; }
+# Clip 12 (the Neural Interface) builds its cards from the SmartBrain Library pack this app pins, mounted
+# read-only at the demo's library dir (/tmp/library, beside SMARTBRAIN_DB_PATH) so the demo never downloads
+# it. SB_LIBRARY_PACK names an installed pack dir (library.duckdb + installed.json); without one, the app's
+# own installer fetches the pinned pack once (sha256-checked against library_index.PACK) into out/library.
+NI_PACK="${SB_LIBRARY_PACK:-$HERE/out/library}"
+gen_pack(){ { [ -f "$NI_PACK/library.duckdb" ] && [ -f "$NI_PACK/installed.json" ]; } && return 0; mkdir -p "$NI_PACK"
+  docker run --rm -v "$REPO/app:/app" -v "$NI_PACK:/tmp/library" -w /app smartbrain_3000:dev python -c \
+    'from pathlib import Path; from smartbrain_3000 import library_index as L; L.LibraryIndex(Path("/tmp")).install()'; }
 setup(){ curl -fsS -X POST $U/api/account/setup -H 'content-type: application/json' -d "{\"passphrase\":\"$PASS\"}"; }
 connect(){ curl -fsS -H "$AUTH" -X PUT $U/api/local-models/ollama -H 'content-type: application/json' -d '{"url":"http://host.docker.internal:11434"}' >/dev/null; }
 task(){ curl -fsS -H "$AUTH" -X POST $U/api/tasks -H 'content-type: application/json' -d "$1" >/dev/null; }
 doc(){ curl -fsS -H "$AUTH" -X POST $U/api/kb -H 'content-type: application/json' -d "$1" >/dev/null; }
-enc(){ local out="$1" fps="${2:-12}" scale="${3:-960}" lossy="${4:-55}" colors="${5:-120}" webm; cd "$HERE"; webm=$(ls -t video/*.webm|head -1)
-  ffmpeg -y -loglevel error -i "$webm" -vf "fps=$fps,scale=$scale:-1:flags=lanczos,palettegen=max_colors=120:stats_mode=diff" /tmp/sbpal.png
-  ffmpeg -y -loglevel error -i "$webm" -i /tmp/sbpal.png -lavfi "fps=$fps,scale=$scale:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none" /tmp/sbraw.gif
+# The optional 6th arg skips the take's first N seconds (clip 12 starts its GIF and poster on the title card).
+enc(){ local out="$1" fps="${2:-12}" scale="${3:-960}" lossy="${4:-55}" colors="${5:-120}" ss="${6:-0}" webm; cd "$HERE"; webm=$(ls -t video/*.webm|head -1)
+  ffmpeg -y -loglevel error -ss "$ss" -i "$webm" -vf "fps=$fps,scale=$scale:-1:flags=lanczos,palettegen=max_colors=120:stats_mode=diff" /tmp/sbpal.png
+  ffmpeg -y -loglevel error -ss "$ss" -i "$webm" -i /tmp/sbpal.png -lavfi "fps=$fps,scale=$scale:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none" /tmp/sbraw.gif
   gifsicle -O3 --lossy=$lossy --colors $colors /tmp/sbraw.gif -o "out/$out.gif"; echo "  -> out/$out.gif ($(du -h out/$out.gif|cut -f1))"; }
+# Clip 12 also leaves its poster (the GIF's first frame: the title card) and an 8-frame contact sheet.
+stills(){ local name="$1" frames; cd "$HERE"; mkdir -p out/posters out/sheets
+  ffmpeg -y -loglevel error -i "out/$name.gif" -frames:v 1 "out/posters/$name.poster.png"
+  frames=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "out/$name.gif")
+  ffmpeg -y -loglevel error -i "out/$name.gif" -vf "select='not(mod(n\,$(( (frames + 7) / 8 ))))',scale=320:-1,tile=4x2" \
+    -frames:v 1 "out/sheets/$name.png"; echo "  -> out/posters/$name.poster.png, out/sheets/$name.png ($frames frames)"; }
 
 record(){ local n="$1"; mock_up; mkdir -p "$HERE/out"; rm -rf "$HERE/video"; mkdir -p "$HERE/video"; cd "$HERE"; local RK=""
   case "$n" in
@@ -77,13 +93,28 @@ record(){ local n="$1"; mock_up; mkdir -p "$HERE/out"; rm -rf "$HERE/video"; mkd
         SHIM=(-v "$HERE/gifdemo_shim:/gifdemo:ro" -v "$HERE/out/gifdemo:/gifdemo-state:ro"
               -e SB_GIFDEMO=1 -e PYTHONPATH=/gifdemo -e SB_GIFDEMO_STATE=/gifdemo-state)
         reset_demo; setup >/dev/null; connect ;;  # subscriber instance; the shim serves the publisher
+    12) gen_pack   # the Library pack + the RECORDER-ONLY shim serving recorded source responses (gifdemo_state/ni)
+        # LIBRARY_AUTOINSTALL=0: a pack that isn't this app's pin fails below instead of downloading;
+        # LIBRARY_API empty: a tap's Library vote is never sent to the real Library service.
+        SHIM=(-v "$HERE/gifdemo_shim:/gifdemo:ro" -v "$HERE/gifdemo_state/ni:/gifdemo-ni:ro" -v "$NI_PACK:/tmp/library:ro"
+              -e SB_GIFDEMO=1 -e PYTHONPATH=/gifdemo -e SB_GIFDEMO_NI=/gifdemo-ni
+              -e SMARTBRAIN_LIBRARY_AUTOINSTALL=0 -e SMARTBRAIN_LIBRARY_API=)
+        reset_demo; setup >/dev/null; connect   # cards build on the local model: the ni route names it
+        curl -fsS -H "$AUTH" -X PUT $U/api/routes -H 'content-type: application/json' -d '{"routes":{"ni":"ollama/llama3.1:8b"}}' >/dev/null
+        curl -fsS -H "$AUTH" $U/api/library/status | grep -q '"installed": *true' \
+          || { echo "the Library pack in $NI_PACK is not the one this app pins"; exit 1; } ;;
   esac
   RECOVERY_KEY="$RK" DEMO_PASS="$PASS" node clips.js "$n"
+  if [ "$n" = 12 ]; then node docshots.js neural; fi  # the board guide shot needs this take's live cards
   # Clip 10 (the public-vault publish story) is content-heavy; a firmer lossy/color budget keeps it
   # under the ~2.6 MB target at the same 10fps/900px as 06/08.
   # 10 (publish) and 11 (subscribe/update) are content- and scroll-heavy; a firmer lossy/color budget
   # keeps them under the ~2.6 MB target at 10fps/900px. 11 is the tighter of the two.
-  case "$n" in 06|08) enc "$(name_of "$n")" 10 900 ;; 10) enc "$(name_of "$n")" 10 900 100 100 ;; 11) enc "$(name_of "$n")" 10 900 180 60 ;; *) enc "$(name_of "$n")" ;; esac
+  # 12 (the Neural Interface) is the longest take; it starts on its title card (video/start.txt, + a frame).
+  case "$n" in 06|08) enc "$(name_of "$n")" 10 900 ;; 10) enc "$(name_of "$n")" 10 900 100 100 ;; 11) enc "$(name_of "$n")" 10 900 180 60 ;;
+    12) enc "$(name_of "$n")" 10 900 100 100 "$(python3 -c 'import sys; print(float(open(sys.argv[1]).read()) + 0.2)' video/start.txt)"
+        stills "$(name_of "$n")" ;;
+    *) enc "$(name_of "$n")" ;; esac
 }
 
 shots(){ # deterministic screenshot grid of every route (design-PR before/after evidence)
@@ -103,9 +134,9 @@ docshots(){ # the seven committed guide screenshots (docs/assets + web/static/as
   node docshots.js connected
 }
 
-if [ "${1:-}" = "all" ]; then for n in 01 02 03 04 05 06 07 08 09 10 11; do echo "### $n"; record "$n"; done
+if [ "${1:-}" = "all" ]; then for n in 01 02 03 04 05 06 07 08 09 10 11 12; do echo "### $n"; record "$n"; done
 elif [ "${1:-}" = "shots" ]; then shots
 elif [ "${1:-}" = "docshots" ]; then docshots
 elif [ -n "$(name_of "${1:-}")" ]; then record "$1"
-else echo "usage: $0 <01..10|all|shots|docshots>"; exit 1; fi
+else echo "usage: $0 <01..12|all|shots|docshots>"; exit 1; fi
 echo "done. (cleanup: docker rm -f sb_gifdemo; pkill -f mock_gateway.py)"

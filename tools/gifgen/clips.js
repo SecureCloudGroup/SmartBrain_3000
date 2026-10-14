@@ -1,4 +1,4 @@
-// Record one quickstart clip:  node clips.js <NN>   (NN = 01..10).  See README.md
+// Record one quickstart clip:  node clips.js <NN>   (NN = 01..12).  See README.md
 // for the demo-container + per-clip state each one needs. Output: ./video/*.webm.
 const { chromium, Rec } = require("./lib");
 const URL = process.env.DEMO_URL || "http://localhost:33096";
@@ -17,9 +17,10 @@ async function open(opts = {}) {
     extraHTTPHeaders: process.env.SB_LOCAL_TOKEN ? { Authorization: `Bearer ${process.env.SB_LOCAL_TOKEN}` } : {}, // R14: desktop credential
     ...opts });
   const page = await ctx.newPage();
+  const t0 = Date.now(); // the page's video starts here (clip 12 trims to its title card from it)
   await page.goto(URL, { waitUntil: "networkidle" });
   const R = new Rec(page); await R.init();
-  return { browser, ctx, page, R };
+  return { browser, ctx, page, R, t0 };
 }
 const done = async (h) => { await h.ctx.close(); await h.browser.close(); };
 const nav = (page, name) => page.getByRole("link", { name, exact: true }).first();
@@ -311,11 +312,101 @@ const CLIPS = {
     await R.cap("Updated and added — and the copy you made yours was kept", "4/4"); await R.dwell(2200); await R.noring();
     await done(h);
   },
+  // 12 Neural Interface (demo SET UP + model connected, the `ni` route on the local model, the SmartBrain
+  // Library pack mounted read-only). Every source response is a RECORDED one, served offline by the
+  // recorder-only netguard shim (gifdemo_shim/sitecustomize.py `_install_ni`, fixtures in
+  // gifdemo_state/ni); the model turns are the mock gateway's canned NI replies (mock_gateway.py NI_ASKS).
+  // The rest is the app's own code: locate in the Library, the consent pause, the build from the source's
+  // declared answers, the form design, the first run, the C2 check, the honest stop. Two waits are
+  // compressed, never faked: a new card's first run waits for the scheduler's next 30 s tick, so the
+  // recorder fires it through the card's own Run now endpoint; and the board repaints the moment the
+  // engine reaches its next stop (the SPA's own reload-on-visible hook) instead of on its 3 s / 10 s poll.
+  "12": async () => {
+    const TZ = "America/Los_Angeles"; // pinned: the cards' "as of" times and day windows read the same anywhere
+    const AUTH = { Authorization: `Bearer ${process.env.SB_LOCAL_TOKEN}`, "content-type": "application/json" };
+    const api = async (method, path, body) =>
+      (await fetch(URL + path, { method, headers: AUTH, body: body && JSON.stringify(body) })).json();
+    const until = async (id, ok) => {
+      for (let i = 0; i < 600; i++) { // ≤ 60 s
+        const it = (await api("GET", "/api/ni/board")).items.find((x) => x.id === id);
+        if (it && ok(it)) return it;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      throw new Error(`card ${id} never reached the next step`);
+    };
+    const paused = (x) => x.flow?.suggestions !== undefined; // the source-pick pause is on the card
+    const built = (x) => !x.flow && x.state === "commissioning"; // designed, waiting for its first run
+    const firstRun = async (id) => { // the card's own Run now, unless a tick already ran it
+      if (!(await until(id, built)).last_checked) await api("POST", `/api/ni/items/${id}/run`);
+      await until(id, (x) => x.payload);
+    };
+    // The user's zone, as the SPA reports it — before anything is built.
+    await fetch(URL + "/api/health", { headers: { ...AUTH, "x-smartbrain-timezone": TZ } });
+    // The board already holds one live card, built exactly as the taps below build theirs.
+    const sun = (await api("POST", "/api/ni/intake", { request: "What time does the sun set in Denver tomorrow" })).id;
+    const offer = await until(sun, paused);
+    await api("POST", `/api/ni/items/${sun}/flow/pick-source`, { url: offer.flow.suggestions[0].url });
+    await firstRun(sun);
+    await api("POST", `/api/ni/items/${sun}/validate`, { ok: true }); await until(sun, (x) => x.state === "live");
+
+    const h = await open({ timezoneId: TZ }); const { page, R } = h;
+    const ASK = 'input[aria-label="Describe the card you want"]';
+    const USE = '.verify-panel button:text-is("Use this")';
+    const repaint = () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    const create = async (text) => {
+      await R.moveTo(ASK); await R.type(ASK, text); await R.dwell(600);
+      const [resp] = await Promise.all([page.waitForResponse((r) => r.url().endsWith("/api/ni/intake")),
+        R.click('button:has-text("Create card")')]);
+      return (await resp.json()).id;
+    };
+    await page.evaluate(() => { document.getElementById("__cap").style.opacity = "0"; }); // a clean title card
+    await R.card(`<div style="font-size:48px;font-weight:800;margin-bottom:16px">Neural Interface</div><div style="font-size:30px;color:#9aa7b4">Ask for anything, get a live card</div>`);
+    // The GIF (and its poster) start on this card: run.sh trims the frames before it.
+    require("fs").writeFileSync(require("path").join(__dirname, "video", "start.txt"), String((Date.now() - h.t0) / 1000));
+    await R.dwell(2300);
+    await R.card("", false); await page.evaluate(() => { document.getElementById("__cap").style.opacity = "1"; });
+    await nav(page, "Neural").click(); await page.waitForSelector(".ni-card"); await R.ensure();
+    await R.cap("Ask for what you want to watch — in plain words", "1/4"); await R.dwell(1300);
+    const quake = await create("Most recent earthquakes near Los Angeles above magnitude 3");
+    await until(quake, paused); await repaint();
+    await page.waitForSelector(".ni-web-sug"); await R.ensure(); await R.highlight(".ni-web-sug");
+    await R.cap("It found a source in the SmartBrain Library — you say yes before it fetches anything", "1/4");
+    await R.dwell(2800); await R.noring();
+    await R.click('.ni-web-sug button:has-text("USGS earthquakes near a place")'); const tap = Date.now();
+    await R.moveTo('.ni-card[data-state="designing"] .ni-title', 500); // watch it build, off its buttons
+    await R.cap("It designs the card from the source's real data", "2/4");
+    await firstRun(quake); await R.dwell(Math.max(0, 1900 - (Date.now() - tap)));
+    await repaint(); await page.waitForSelector(USE); await R.ensure();
+    await R.highlight(".verify-panel");
+    await R.cap("You check the card before it goes live", "2/4"); await R.dwell(2700); await R.noring();
+    await R.click(USE); await until(quake, (x) => x.state === "live");
+    await page.waitForSelector('.ni-card[data-state="fresh"]:has-text("Signal Hill")'); await R.ensure();
+    await R.highlight('.ni-card[data-state="fresh"]:has-text("Signal Hill")');
+    await R.cap("Live on your board — refreshed on your cadence", "3/4"); await R.dwell(2500); await R.noring();
+    // A second ask, shorter beats: the same pause, the same check.
+    await R.cap("Another ask, another live card", "3/4");
+    const uv = await create("UV index in Phoenix this afternoon");
+    await until(uv, paused); await repaint();
+    await page.waitForSelector('.ni-web-sug button:has-text("Open-Meteo UV index")'); await R.ensure(); await R.dwell(500);
+    await R.click('.ni-web-sug button:has-text("Open-Meteo UV index")');
+    await R.moveTo('.ni-card[data-state="designing"] .ni-title', 500);
+    await firstRun(uv); await repaint(); await page.waitForSelector(USE); await R.ensure(); await R.dwell(1300);
+    await R.click(USE); await until(uv, (x) => x.state === "live");
+    await page.waitForSelector('.ni-card[data-state="fresh"]:has-text("UV index today")'); await R.ensure(); await R.dwell(1000);
+    // No Library source answers this one: the card says so and offers links — it never guesses.
+    await R.cap("Honest when it can't answer: links, never a guess", "4/4");
+    const stop = await create("Building permits in Seattle");
+    await until(stop, paused); await repaint();
+    await page.waitForSelector(".ni-links"); await R.ensure(); await R.highlight(".ni-commission:has(.ni-links)");
+    await R.dwell(3000); await R.noring(); await R.dwell(600); await done(h);
+    // Leave the three live cards for the board guide shot (`node docshots.js neural`, staged by run.sh).
+    await api("DELETE", `/api/ni/items/${stop}`);
+  },
 };
 
 (async () => {
   const n = process.argv[2];
-  if (!CLIPS[n]) { console.error("usage: node clips.js <01..11>"); process.exit(1); }
+  if (!CLIPS[n]) { console.error("usage: node clips.js <01..12>"); process.exit(1); }
   await CLIPS[n]();
   console.log("recorded " + n);
 })();

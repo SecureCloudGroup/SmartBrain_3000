@@ -155,6 +155,7 @@ from install to fully working; the rest are optional power-ups:
 | [4 · Add knowledge & search](docs/assets/gifs/04-add-knowledge.gif) | [9 · Backup & recovery](docs/assets/gifs/09-backup-recovery.gif) |
 | [5 · Approve an action](docs/assets/gifs/05-approve-an-action.gif) | [10 · Vaults — share knowledge](docs/assets/gifs/10-vaults.gif) |
 | | [11 · Vaults — subscribe & update](docs/assets/gifs/11-vault-subscribe.gif) |
+| | [12 · Neural Interface — live cards](docs/assets/gifs/12-neural-interface.gif) |
 
 ### Updating
 
