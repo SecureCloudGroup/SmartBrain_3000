@@ -203,6 +203,9 @@ to know when a release changes behavior.
 
 ### Changed
 
+- **Library pack v1.5.0.** The pinned SmartBrain Library pack moves to v1.5.0: the NWS alert names are a
+  declared code table (so "flood", "coastal flood advisory" and the rest ground a card's filter), alert
+  lists carry only real (not test) alerts, and parameter bounds are declared per source.
 - **Building a card asks the model to read your words once, not twice.** The
   understanding sealed before the source pick is reused when the build resumes
   after your tap, a key you add, or a model you approve. The build runs under
