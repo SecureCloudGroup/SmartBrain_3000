@@ -6,7 +6,7 @@
   // Polls softly (10s, visible tab + unlocked only, errors swallowed). The card CTAs
   // — Run now, Pause/Resume, Delete, and the commissioning C2 "Looks right/Something's
   // wrong" strip — mirror ni-format §10 verbs exactly.
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import CardShell from "$lib/components/CardShell.svelte";
   import Chip from "$lib/components/Chip.svelte";
@@ -961,10 +961,15 @@
 
   // Cold-navigate → unlock flow: when the vault flips from locked to unlocked in this
   // tab, re-trigger load() so the board paints immediately instead of waiting up to 10s.
+  // The ONLY dependency is the unlocked flag: load() is called under `untrack`, because its
+  // synchronous prefix reads `items` (a `$state` this effect would otherwise track) and then
+  // reassigns it after the fetch — tracked, that re-ran the effect on every reload and the
+  // page hammered GET /api/ni/board back to back, forever (found 2026-10-14 recording the
+  // Neural Interface clip; the board's first-card crash, fixed in #517, had hidden it).
   $effect(() => {
     console.assert(typeof account.status?.unlocked !== "undefined" || account.status === null, "$effect: unlocked accessed");
     console.assert(gen >= 0, "$effect: gen counter present");
-    if (account.status?.unlocked) void load();
+    if (account.status?.unlocked) untrack(() => { void load(); });
   });
 
   // Bounded fast-poll: while ANY item is walking a creation/remap flow (seconds-to-
