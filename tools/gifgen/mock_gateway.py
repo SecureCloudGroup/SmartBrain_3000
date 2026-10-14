@@ -111,18 +111,31 @@ def _ni_query(text):
     return json.dumps(known["query"]) if known else "(demo gateway: no query model here)"
 
 
+def _between(text, start, end):
+    """The substring of ``text`` after the first ``start`` and before the next ``end`` ("" when absent)."""
+    i = text.find(start)
+    if i < 0:
+        return ""
+    i += len(start)
+    j = text.find(end, i)
+    return text[i:j] if j >= 0 else ""
+
+
 def _ni_present(text):
     """PRESENT: the ask's form when the menu offers it, else c0 — the rules floor's top-ranked
     candidate (enumerate ranks before it names ids, so c0 is stable however the menu is shuffled) —
     with every key the skeleton names."""
     _ask, known = _ni_ask(text, r"^Ask: (.+)$")
-    ids = re.search(r'"pick": "<one of ([^>]+)>"', text).group(1).split("|")
+    # plain string slicing, not regexes: the skeleton is machine-written and CodeQL flags a
+    # backtracking pattern over a prompt-sized string (py/polynomial-redos)
+    ids = _between(text, '"pick": "<one of ', '>"').split("|")
     opts = re.search(r"^Options: (\[.*\])$", text, re.MULTILINE)
     menu = json.loads(opts.group(1)) if opts else []
     pick = next((o["id"] for o in menu if known and o["form"] == known["form"]),
                 "c0" if "c0" in ids else sorted(ids)[0])
-    labels = re.search(r'"labels": \{(.*)\},$', text, re.MULTILINE)
-    keys = re.findall(r'"([^"]+)": "<key or ask>"', labels.group(1)) if labels else []
+    labels = _between(text, '"labels": {', "}")
+    keys = [part.split(":", 1)[0].strip().strip('"')
+            for part in labels.split(",") if '"<key or ask>"' in part]
     fits = [{"cand": i, "answers_ask": "yes" if i == pick else "partly"} for i in ids]
     return json.dumps({"intent": next((o["intent"] for o in menu if o["id"] == pick), "now"), "fits": fits,
                        "pick": pick, "second": None, "primary_field": None,
