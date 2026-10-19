@@ -358,6 +358,33 @@ def test_a_pdf_with_an_empty_cover_page_survives_export_and_import() -> None:
     assert page_for(opened[0]["meta"], text.index("second")) == 3
 
 
+def test_the_reader_limits_mirror_what_ingest_and_kb_can_produce() -> None:
+    # vault_format keeps literal copies (importing ingest would be circular via netguard). Pin them,
+    # so a raised ingest/kb cap can never again silently outgrow what a recipient will accept.
+    from smartbrain_3000 import ingest, kb
+
+    assert vault_format.MAX_TEXT == ingest._MAX_TEXT
+    assert vault_format.MAX_PAGES == ingest._MAX_SECTIONS
+    assert vault_format.MAX_CHUNKS == kb._MAX_CHUNKS
+    assert vault_format.MAX_DIM == kb._MAX_EMBED_DIM
+
+
+def test_a_document_at_ingest_max_sizes_round_trips() -> None:
+    # The biggest document ingest can store, in the worst JSON encoding (a control char escapes to
+    # six bytes, \u0001), with a full page map and a full-size vector block — sealed, so each object
+    # also carries its 16-byte GCM tag. Every reader bound must admit it.
+    content = "\x01" * vault_format.MAX_TEXT
+    chunks = vault_format.MAX_CHUNKS
+    vectors = [[0.5] * vault_format.MAX_DIM for _ in range(chunks)]
+    meta = {"filename": "Big.pdf", "page_label": "page",
+            "pages": list(range(0, vault_format.MAX_TEXT, vault_format.MAX_TEXT // vault_format.MAX_PAGES))}
+    opened = _pack_open([{"uid": "u1", "title": "T" * vault_format.MAX_TITLE, "content": content,
+                          "meta": meta, "chunks": chunks, "vectors": vectors}])
+    assert opened[0]["content"] == content
+    assert opened[0]["meta"]["pages"] == meta["pages"]
+    assert len(opened[0]["vectors"]) == chunks and len(opened[0]["vectors"][0]) == vault_format.MAX_DIM
+
+
 def test_a_non_finite_vector_is_rejected() -> None:
     # One inf makes `matrix @ q` produce NaN and ranks the WHOLE corpus at random — the one place a
     # malicious vault could silently break search. It must be an error, not an assert (asserts vanish
