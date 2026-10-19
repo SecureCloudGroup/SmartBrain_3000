@@ -236,6 +236,7 @@ export class RemoteConnection {
   }
 
   private async onAuthOk(): Promise<void> {
+    const markReady = this.markReady; // THIS attempt's resolver — teardown/connect may swap it during the await
     if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; } // connected in time
     this.lastPong = Date.now(); // the auth round-trip proves the path is alive right now
     this.pingTimer = setInterval(() => this.pingTick(), _PING_INTERVAL_MS);
@@ -243,7 +244,7 @@ export class RemoteConnection {
     // Fail SAFE on uncertainty: don't claim "direct (P2P)" unless we actually confirmed it —
     // a relayed session mislabeled as direct would falsely reassure the user.
     setRemoteStatus(kind === "relay" ? "connected-relay" : kind === "direct" ? "connected-direct" : "connected");
-    this.markReady?.();
+    if (markReady && this.markReady === markReady) markReady(); // a stale attempt must not ready the next one
   }
 
   private async connectionKind(): Promise<"direct" | "relay" | "unknown"> {
@@ -419,6 +420,10 @@ export class RemoteConnection {
       p.reject(new Error("connection dropped"));
     }
     this.pending.clear();
+    // Settle this attempt's ready: requests awaiting it would otherwise hang forever (their
+    // 60s timer only starts after ready). No-op if it already resolved.
+    this.failReady?.(new Error("connection dropped"));
+    this.markReady = this.failReady = null;
     try {
       this.ws?.close();
     } catch { /* ignore */ }
