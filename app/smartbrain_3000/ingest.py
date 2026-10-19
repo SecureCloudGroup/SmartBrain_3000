@@ -109,7 +109,10 @@ def _join_sections(sections: list[str]) -> tuple[str, list[int]]:
 
     This is the one and only place the offset arithmetic lives, because it is the arithmetic a
     citation depends on: get it wrong and "page 12" points at page 11. Offsets stay exact across the
-    single separator char that join inserts, and across the leading strip.
+    single separator char that join inserts, and across the leading strip. Empty LEADING sections
+    (an image-only cover page) all clamp to 0, so the map is non-decreasing, not strictly increasing
+    — e.g. [0, 0, 15]. That is deliberate: a page with no text has no start of its own, and
+    kb.page_for's bisect_right cites offset 0 to the last tied page, the one the text starts on.
     """
     starts: list[int] = []
     pos = 0

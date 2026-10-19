@@ -311,12 +311,51 @@ def test_export_is_byte_reproducible() -> None:
 
 
 def test_a_hostile_page_map_is_rejected() -> None:
-    # kb.page_for does bisect_right(pages, offset) and TRUSTS the list: a non-increasing or huge one
+    # kb.page_for does bisect_right(pages, offset) and TRUSTS the list: a decreasing or huge one
     # gives wrong citations ("p.12" pointing at page 3) or a memory hit.
-    with pytest.raises(vault_format.VaultError, match="strictly increasing"):
+    with pytest.raises(vault_format.VaultError, match="non-decreasing"):
         vault_format._clean_meta({"pages": [0, 50, 20]})
+    with pytest.raises(vault_format.VaultError, match="non-negative"):
+        vault_format._clean_meta({"pages": [-1, 0]})
     with pytest.raises(vault_format.VaultError, match="too long"):
         vault_format._clean_meta({"pages": list(range(vault_format.MAX_PAGES + 1))})
+
+
+def _pack_open(docs: list[dict]) -> list[dict]:
+    """pack() ``docs`` sealed under a fresh key and open_vault() them back — the recipient's view."""
+    import duckdb
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000.secrets import SecretStore, gen_master_key
+
+    assert docs, "at least one doc required"
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = SecretStore(conn, gen_master_key())
+    key = vault_format.new_vault_key()
+    blob = vault_format.pack(store=store, vault_id="v1", name="V", description="", seq=1,
+                             docs=docs, vault_key=key)
+    _payload, opened = vault_format.open_vault(blob, key)
+    assert len(opened) == len(docs), "every packed doc must come back"
+    return opened
+
+
+def test_a_pdf_with_an_empty_cover_page_survives_export_and_import() -> None:
+    # An image-only cover page extracts no text, so its start and the next page's start are BOTH 0
+    # after the leading strip: [0, 0, ...]. That map is honest (bisect_right lands offset 0 on the
+    # page the text really starts on) and it is what every such document already stored carries — so
+    # a recipient must accept it, not refuse the whole vault.
+    from _pdfgen import make_pdf
+
+    from smartbrain_3000 import ingest
+    from smartbrain_3000.kb import page_for
+
+    title, text, meta = ingest.from_file("Cover.pdf", make_pdf(["", "first real page", "second"]))
+    assert meta["pages"][:2] == [0, 0], "an empty leading page shares the next page's start"
+    opened = _pack_open([{"uid": "u1", "title": title, "content": text, "meta": meta, "chunks": 1}])
+    assert opened[0]["meta"]["pages"] == meta["pages"]
+    assert page_for(opened[0]["meta"], 0) == 2, "the first text is cited to page 2, not the cover"
+    assert page_for(opened[0]["meta"], text.index("second")) == 3
 
 
 def test_a_non_finite_vector_is_rejected() -> None:

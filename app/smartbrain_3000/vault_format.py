@@ -279,10 +279,13 @@ def _clean_meta(meta) -> dict:
             if not isinstance(value, list) or len(value) > MAX_PAGES:
                 raise VaultError("document page map is malformed or too long")
             pages = []
-            last = -1
+            last = 0
+            # Non-decreasing, not strictly increasing: ingest gives empty leading pages (an image-only
+            # cover) the same start as the first page with text — [0, 0, 15] — and bisect_right then
+            # cites offset 0 to the page the text really starts on. Only a DECREASE breaks citations.
             for p in value:  # bounded by MAX_PAGES
-                if not isinstance(p, int) or isinstance(p, bool) or p < 0 or p <= last:
-                    raise VaultError("document page map must be non-negative and strictly increasing")
+                if not isinstance(p, int) or isinstance(p, bool) or p < last:
+                    raise VaultError("document page map must be non-negative and non-decreasing")
                 last = p
                 pages.append(p)
             out["pages"] = pages
