@@ -292,11 +292,34 @@ _RESUMING_TURNS: set[str] = set()
 
 
 def _all_pending_resolved(approvals, turn_id: str) -> bool:
-    """True iff no pending/approved rows remain for the turn — safe to auto-resume."""
+    """True iff no row still blocks the turn — safe to auto-resume.
+
+    Blocking = pending/approved, or claimed ('executed') with no stored result yet
+    (its handler is still running). That in-flight approve stores its result and
+    then re-runs this check itself, so the last finisher drives the resume.
+    """
     assert approvals is not None and turn_id, "approvals + turn id required"
     rows = approvals.list_for_turn(turn_id)
     assert isinstance(rows, list), "list_for_turn must return a list"
-    return bool(rows) and not any(r["status"] in ("pending", "approved") for r in rows)
+    return bool(rows) and not any(agent.unresolved(r) for r in rows)
+
+
+# Chat resume vs. an approved tool still executing (another client approved it and
+# a sibling was resolved meanwhile): wait for its stored result, bounded, rather
+# than resume early. Past the bound resume_turn answers awaiting_approval.
+_INFLIGHT_WAIT_SECONDS = 60.0
+_INFLIGHT_POLL_SECONDS = 0.25
+
+
+def _wait_for_in_flight(approvals, turn_id: str) -> None:
+    """Block (bounded) until no row of the turn is claimed-but-unfinished."""
+    assert approvals is not None and turn_id, "approvals + turn id required"
+    assert _INFLIGHT_POLL_SECONDS > 0, "poll interval must be positive"
+    polls = max(1, int(_INFLIGHT_WAIT_SECONDS / _INFLIGHT_POLL_SECONDS))
+    for _ in range(polls):  # bounded by the wait budget
+        if not any(agent.in_flight(r) for r in approvals.list_for_turn(turn_id)):
+            return
+        time.sleep(_INFLIGHT_POLL_SECONDS)
 
 
 def _scheduled_origin(row: dict) -> dict | None:
@@ -429,7 +452,12 @@ def approve(request: Request, pid: str, body: ApproveIn) -> dict:
             consent.remember(request.app.state.dbx, row["tool_name"])
     try:
         result = tools.run(ctx, audit, row["tool_name"], row["args"], actor="user", claim=lambda: approvals.claim(pid))
-    except PermissionError:
+    except PermissionError as exc:
+        # Usually the claim was lost (row not executed -> store_result no-ops). But a
+        # HANDLER can raise PermissionError (an OSError) after a won claim; without a
+        # stored result that row would read as still in flight and block the resume.
+        approvals.store_result(pid, {"error": str(exc)})
+        _maybe_finish_scheduled_turn(request, row)
         raise HTTPException(status_code=409, detail="approval already consumed") from None
     except Exception as exc:
         # Root cause of the 2026-09-16 field spiral: this branch used to raise
@@ -1071,6 +1099,7 @@ def agent_resume(request: Request, turn_id: str) -> dict:
     def sink(used_model: str, response: object) -> None:
         usage.record_response(conn, used_model, response)
 
+    _wait_for_in_flight(approvals, turn_id)  # a sibling's tool may still be running
     try:
         result = agent.resume_turn(ctx, audit, approvals, turn_id, conn=conn, usage_sink=sink, auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT)
     except gateway.GatewayError as exc:
