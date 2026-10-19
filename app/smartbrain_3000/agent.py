@@ -713,7 +713,9 @@ def resume_turn(ctx, audit, approvals, turn_id: str, *, conn=None, usage_sink=No
         return None
     if any(unresolved(r) for r in rows):  # not all resolved yet (incl. a tool still running)
         still = [{"id": r["id"], "tool": r["tool_name"], "tier": r["tier"], "args": tools.redact(r["args"])} for r in rows if r["status"] == "pending"]
-        return {"status": "awaiting_approval", "turn_id": turn_id, "pending": still}
+        # in_flight: an approved tool is still running — the caller retries shortly, never an error.
+        running = any(in_flight(r) for r in rows)
+        return {"status": "awaiting_approval", "turn_id": turn_id, "pending": still, "in_flight": running}
     # A turn may park more than once. Resume from the LATEST park's snapshot (its
     # messages already contain every earlier park's assistant+tool exchange), and
     # answer ONLY that park's tool_calls — so the tool-message sequence stays

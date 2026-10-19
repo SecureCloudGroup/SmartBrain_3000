@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
   import { chatSession } from "$lib/chat.svelte";
-  import { resumeChat } from "$lib/chat-resume";
+  import { inFlightRetryDelay, resumeChat } from "$lib/chat-resume";
   import { refreshPending } from "$lib/pending.svelte";
   import { api, ApiError, type AgentResult, type ChatMessage, type Conversation, type DiscoveredModel, type PendingAction, type RecentScheduleRun, type Source, type VoiceStatus } from "$lib/api";
   import { finalAssistantId, mergeRefreshedLog, transcriptUpToLastUser } from "$lib/chat-log";
@@ -57,6 +57,12 @@
     "web search, tasks, knowledge, and email actions won't run. Pick a tool-capable model above for those.";
   let pendingTurnId = $state<string | null>(null);
   let resumeNotice = $state(""); // transient: shown if Resume is clicked before the action is approved
+  // An approved action of the parked turn is still running (another tab/device approved it):
+  // the server answers at once, so the page keeps the turn and re-asks on a bounded timer.
+  let waitingInFlight = $state(false);
+  let resumeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resumeRetries = 0;
+  let destroyed = false; // a resume reply landing after nav-away must not schedule a retry
   // Non-null only while a STREAMED turn is in flight — flips the composer's Send into Stop.
   // The non-streaming paths (remote/WebRTC, approval fallback) can't be interrupted mid-flight,
   // so they never set it.
@@ -702,6 +708,8 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
+    cancelResumeRetry();
     stopLiveWatch();
     if (recState === "standby") void cancelRecording();
     if (updatesTimer) clearInterval(updatesTimer);
@@ -733,7 +741,8 @@
     try {
       const { pending } = await api.listPending();
       pendingActions = pending.filter((p) => p.conversation_id === cid);
-      pendingTurnId = pendingActions.find((p) => p.turn_id)?.turn_id ?? null;
+      // No card while an approved action still runs is expected: keep that turn for the retry.
+      pendingTurnId = pendingActions.find((p) => p.turn_id)?.turn_id ?? (waitingInFlight ? pendingTurnId : null);
     } catch {
       // a transient failure just leaves the cards absent (Activity still lists the approval)
     }
@@ -971,6 +980,7 @@
     pendingTurnId = null; // never carry a parked turn across a conversation switch
     pendingActions = [];
     resumeNotice = "";
+    cancelResumeRetry();
     renaming = false; // a half-typed rename belongs to the conversation being left
     try {
       const convo = await api.getConversation(id);
@@ -994,6 +1004,7 @@
     pendingTurnId = null;
     pendingActions = [];
     resumeNotice = "";
+    cancelResumeRetry();
     renaming = false;
     error = "";
   }
@@ -1523,13 +1534,50 @@
     goto(`/knowledge?doc=${encodeURIComponent(s.id)}&offset=${s.offset ?? ""}`);
   }
 
-  async function resume() {
+  function cancelResumeRetry(): void {
+    if (resumeRetryTimer) clearTimeout(resumeRetryTimer);
+    resumeRetryTimer = null;
+    resumeRetries = 0;
+    waitingInFlight = false;
+  }
+
+  // Re-ask after an in-flight answer. Only for the same parked turn; a busy page (a send in
+  // progress) defers the attempt, which still counts against the bounded budget.
+  function scheduleResumeRetry(turn: string, delay: number): void {
+    console.assert(delay > 0, "retry delay must be positive");
+    resumeRetries += 1;
+    resumeRetryTimer = setTimeout(() => {
+      resumeRetryTimer = null;
+      if (destroyed || pendingTurnId !== turn) return cancelResumeRetry();
+      if (!busy) return void resume(true);
+      const next = inFlightRetryDelay({ status: "awaiting_approval", in_flight: true }, resumeRetries);
+      if (next === null) waitingInFlight = false;
+      else scheduleResumeRetry(turn, next);
+    }, delay);
+  }
+
+  async function resume(retry = false) {
     if (!pendingTurnId || busy || chatSession.currentId === null) return;
+    if (!retry) cancelResumeRetry(); // a fresh, user-driven resume restarts the wait budget
+    const turn = pendingTurnId;
+    const cid = chatSession.currentId;
     busy = true;
     error = "";
     resumeNotice = "";
     try {
-      const res = await api.agentResume(pendingTurnId);
+      const res = await api.agentResume(turn);
+      if (destroyed || pendingTurnId !== turn || chatSession.currentId !== cid) return; // left meanwhile
+      const delay = inFlightRetryDelay(res, resumeRetries);
+      waitingInFlight = delay !== null;
+      if (delay !== null) {
+        scheduleResumeRetry(turn, delay); // keep the turn; nothing for the user to decide yet
+        return;
+      }
+      if (res.in_flight && !res.pending?.length) {
+        // Budget spent and the action is still running: keep the turn so Resume stays available.
+        resumeNotice = "The approved action is still running — try Resume again in a moment.";
+        return;
+      }
       if (res.status === "awaiting_approval") {
         // Resumed into another blocked action (or one is still unresolved) — the cards say so.
         resumeNotice = "Still waiting on your approval — approve or deny the action above.";
@@ -1537,6 +1585,7 @@
       await handleAgentResult(res, chatSession.currentId);
       await loadConversations();
     } catch (err) {
+      waitingInFlight = false; // a failed retry falls back to the Resume card, never a silent wait
       const text = describeError(err);
       if (text) log.push({ id: nextEntryId("err"), role: "assistant", content: text, err: true });
     } finally {
@@ -1798,12 +1847,15 @@
       </p>
     {/if}
     {#if resumeNotice}<p class="muted resume-notice">{resumeNotice}</p>{/if}
+  {:else if pendingTurnId && waitingInFlight}
+    <!-- An approved action of this turn is still running; the page re-asks on its own. -->
+    <p class="muted resume-notice">Waiting for the approved action to finish…</p>
   {:else if pendingTurnId}
     <!-- Parked turn whose pending list couldn't load (transient) — keep the old fallback. -->
     <ActionCard icon="activity" title="The assistant is waiting for your approval" badge={false}>
       {#snippet actions()}
         <button class="secondary" onclick={() => goto("/activity")}>Open Activity</button>
-        <button disabled={busy} onclick={resume}>Resume after approval</button>
+        <button disabled={busy} onclick={() => resume()}>Resume after approval</button>
       {/snippet}
     </ActionCard>
     {#if resumeNotice}<p class="muted resume-notice">{resumeNotice}</p>{/if}

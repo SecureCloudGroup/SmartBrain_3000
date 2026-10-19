@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { resumeChat } from "./chat-resume";
+import { IN_FLIGHT_MAX_RETRIES, IN_FLIGHT_RETRY_MS, inFlightRetryDelay, resumeChat } from "./chat-resume";
 
 const isNotFound = (e: unknown) => (e as { status?: number })?.status === 404;
 
@@ -44,5 +44,26 @@ describe("resumeChat", () => {
       }, isNotFound),
     ).rejects.toBeDefined();
     expect(session.currentId).toBe("c2"); // a transient failure must NOT look like a new chat
+  });
+});
+
+describe("inFlightRetryDelay", () => {
+  const running = { status: "awaiting_approval", in_flight: true, pending: [] };
+
+  it("retries while an approved tool is still running and nothing awaits the user", () => {
+    expect(inFlightRetryDelay(running, 0)).toBe(IN_FLIGHT_RETRY_MS);
+    expect(inFlightRetryDelay(running, IN_FLIGHT_MAX_RETRIES - 1)).toBe(IN_FLIGHT_RETRY_MS);
+  });
+
+  it("stops once the retry budget (~2 minutes) is spent", () => {
+    expect(inFlightRetryDelay(running, IN_FLIGHT_MAX_RETRIES)).toBeNull();
+    expect(IN_FLIGHT_RETRY_MS * IN_FLIGHT_MAX_RETRIES).toBe(120_000);
+  });
+
+  it("never retries when the user must decide, or the turn finished", () => {
+    const card = [{ id: "p1" }];
+    expect(inFlightRetryDelay({ status: "awaiting_approval", in_flight: true, pending: card }, 0)).toBeNull();
+    expect(inFlightRetryDelay({ status: "awaiting_approval", pending: [] }, 0)).toBeNull();
+    expect(inFlightRetryDelay({ status: "complete", in_flight: true }, 0)).toBeNull();
   });
 });
