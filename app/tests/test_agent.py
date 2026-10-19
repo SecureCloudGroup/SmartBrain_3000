@@ -1405,11 +1405,12 @@ def test_scheduled_sibling_denied_mid_execution_resumes_once_with_real_result(sc
     assert any(r["status"] == "complete" and r["message"] == "One noted, two skipped." for r in runs)
 
 
-def test_chat_resume_during_in_flight_tool_waits_then_resumes(sched_client, monkeypatch) -> None:
-    # A chat park: another client (Activity page, second tab) approves A; while A's
-    # handler runs, the chat page denies B and calls /resume. The resume must wait
-    # for A's stored result instead of answering "tool execution failed".
-    import threading
+def test_chat_resume_during_in_flight_tool_answers_immediately_then_resumes(sched_client, monkeypatch) -> None:
+    # A chat park: another client (Activity page, second tab) approved A and its handler
+    # is still running; the chat page denies B and calls /resume. The resume must not
+    # hold a server thread waiting: it answers at once with in_flight (no false
+    # "tool execution failed", no model call), and a retry after A's result is stored
+    # resumes with the REAL result.
     client, _sid = sched_client
     from smartbrain_3000 import gateway as gwmod
     seen: list = []
@@ -1422,64 +1423,26 @@ def test_chat_resume_during_in_flight_tool_waits_then_resumes(sched_client, monk
         seen.append([dict(m) for m in messages])
         return next(it)
     monkeypatch.setattr(gwmod, "chat_with_tools", fake)
-    monkeypatch.setattr(agent_routes, "_INFLIGHT_POLL_SECONDS", 0.05)
     turn = client.post("/api/agent/turn", json={
         "messages": [{"role": "user", "content": "remember"}], "model": "openai/gpt-4", "conversation_id": "c1",
     }).json()
     tid = turn["turn_id"]
     a, b = turn["pending"][0]["id"], turn["pending"][1]["id"]
-    real_run = tools.run
-    resumed: list = []
-    denied = threading.Event()
-
-    def chat_page() -> None:
-        client.post(f"/api/agent/pending/{b}/deny")
-        denied.set()
-        resumed.append(client.post(f"/api/agent/resume/{tid}").json())
-
-    def slow_run(*args, **kw):
-        result = real_run(*args, **kw)  # claimed + executed
-        worker = threading.Thread(target=chat_page)
-        worker.start()
-        assert denied.wait(10)
-        time.sleep(0.3)  # the chat page's resume is now polling the in-flight row
-        return result
-    monkeypatch.setattr(agent_routes.tools, "run", slow_run)
-    ok = client.post(f"/api/agent/pending/{a}/approve", json={})
-    assert ok.status_code == 200
-    deadline = time.monotonic() + 10
-    while not resumed and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert resumed and resumed[0]["status"] == "complete" and resumed[0]["message"] == "Chat: one noted."
-    tool_msgs = [m["content"] for m in seen[-1] if m.get("role") == "tool"]
-    assert not any(_EXEC_FAILED in c for c in tool_msgs)
-
-
-def test_chat_resume_gives_up_waiting_without_claiming_failure(sched_client, monkeypatch) -> None:
-    # An in-flight row that outlasts the bounded wait: the resume answers
-    # awaiting_approval (the model is never told the tool failed).
-    client, _sid = sched_client
-    from smartbrain_3000 import gateway as gwmod
-    seen: list = []
-    it = iter([_toolcalls(("remember_fact", {"text": "one"}), ("remember_fact", {"text": "two"}))])
-
-    def fake(messages, *a, **k):
-        seen.append(1)
-        return next(it)
-    monkeypatch.setattr(gwmod, "chat_with_tools", fake)
-    monkeypatch.setattr(agent_routes, "_INFLIGHT_POLL_SECONDS", 0.01)
-    monkeypatch.setattr(agent_routes, "_INFLIGHT_WAIT_SECONDS", 0.05)
-    turn = client.post("/api/agent/turn", json={
-        "messages": [{"role": "user", "content": "remember"}], "model": "openai/gpt-4", "conversation_id": "c2",
-    }).json()
-    tid = turn["turn_id"]
-    a, b = turn["pending"][0]["id"], turn["pending"][1]["id"]
     approvals = client.app.state.approvals
-    assert approvals.approve(a) and approvals.claim(a)  # handler "still running", never stores
-    client.post(f"/api/agent/pending/{b}/deny")
-    r = client.post(f"/api/agent/resume/{tid}")
-    assert r.status_code == 200 and r.json()["status"] == "awaiting_approval"
-    assert seen == [1]  # no resumed model call
+    assert approvals.approve(a) and approvals.claim(a)  # handler "still running"
+    assert client.post(f"/api/agent/pending/{b}/deny").status_code == 200
+    for _ in range(2):  # every retry while in flight answers at once (a hung handler can't pin threads)
+        started = time.monotonic()
+        r = client.post(f"/api/agent/resume/{tid}")
+        assert time.monotonic() - started < 5
+        assert r.status_code == 200
+        assert r.json() == {"status": "awaiting_approval", "turn_id": tid, "pending": [], "in_flight": True}
+    assert len(seen) == 1  # the model was never resumed early
+    approvals.store_result(a, {"ok": True, "stored": "one"})
+    done = client.post(f"/api/agent/resume/{tid}").json()
+    assert done["status"] == "complete" and done["message"] == "Chat: one noted."
+    tool_msgs = [m["content"] for m in seen[-1] if m.get("role") == "tool"]
+    assert not any(_EXEC_FAILED in c for c in tool_msgs) and any('"stored": "one"' in c for c in tool_msgs)
 
 
 def test_scheduled_resume_still_strips_schedule_write_tools(sched_client, monkeypatch) -> None:

@@ -304,24 +304,6 @@ def _all_pending_resolved(approvals, turn_id: str) -> bool:
     return bool(rows) and not any(agent.unresolved(r) for r in rows)
 
 
-# Chat resume vs. an approved tool still executing (another client approved it and
-# a sibling was resolved meanwhile): wait for its stored result, bounded, rather
-# than resume early. Past the bound resume_turn answers awaiting_approval.
-_INFLIGHT_WAIT_SECONDS = 60.0
-_INFLIGHT_POLL_SECONDS = 0.25
-
-
-def _wait_for_in_flight(approvals, turn_id: str) -> None:
-    """Block (bounded) until no row of the turn is claimed-but-unfinished."""
-    assert approvals is not None and turn_id, "approvals + turn id required"
-    assert _INFLIGHT_POLL_SECONDS > 0, "poll interval must be positive"
-    polls = max(1, int(_INFLIGHT_WAIT_SECONDS / _INFLIGHT_POLL_SECONDS))
-    for _ in range(polls):  # bounded by the wait budget
-        if not any(agent.in_flight(r) for r in approvals.list_for_turn(turn_id)):
-            return
-        time.sleep(_INFLIGHT_POLL_SECONDS)
-
-
 def _scheduled_origin(row: dict) -> dict | None:
     """Return the scheduled-origin marker from a pending row, or None if not scheduled.
 
@@ -1091,7 +1073,11 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
 
 @router.post("/api/agent/resume/{turn_id}")
 def agent_resume(request: Request, turn_id: str) -> dict:
-    """Continue a parked turn after its approvals are resolved (server-reconstructed)."""
+    """Continue a parked turn after its approvals are resolved (server-reconstructed).
+
+    Never blocks on a sibling tool that is still running: resume_turn answers
+    awaiting_approval with ``in_flight: true`` and the chat page retries shortly.
+    """
     ctx, audit = _context(request)
     approvals = _approvals(request)
     conn = request.app.state.dbx
@@ -1099,7 +1085,6 @@ def agent_resume(request: Request, turn_id: str) -> dict:
     def sink(used_model: str, response: object) -> None:
         usage.record_response(conn, used_model, response)
 
-    _wait_for_in_flight(approvals, turn_id)  # a sibling's tool may still be running
     try:
         result = agent.resume_turn(ctx, audit, approvals, turn_id, conn=conn, usage_sink=sink, auto_approve=consent.remembered(conn), timeout=_INTERACTIVE_TIMEOUT)
     except gateway.GatewayError as exc:
