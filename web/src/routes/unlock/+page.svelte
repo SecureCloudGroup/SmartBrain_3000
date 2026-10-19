@@ -59,7 +59,10 @@
       }
       goto("/chat");
     } catch (err) {
-      error = err instanceof ApiError && err.status === 401 ? "Incorrect credentials." : "Unlock failed.";
+      // 429 = the server's unlock throttle; its message says how long to wait.
+      error = err instanceof ApiError && err.status === 401 ? "Incorrect credentials."
+        : err instanceof ApiError && err.status === 429 ? err.message
+        : "Unlock failed.";
     } finally {
       busy = false;
     }
