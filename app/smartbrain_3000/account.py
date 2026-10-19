@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import hmac
 import logging
+import math
 import os
 import re
+import threading
+import time
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -39,6 +42,24 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 _MIN_PASSPHRASE = 8
+
+# Unlock throttle. /api/account/unlock is an OPEN route and every attempt runs Argon2id
+# (64 MiB, t=3), so without a limit any local OS account (or a LAN host in LAN/TLS mode)
+# could guess passphrases at CPU speed, and parallel requests could exhaust memory.
+# One derivation at a time (an excess request gets 429 at once, never queues), and after
+# _FREE_FAILURES wrong credentials each further attempt waits an exponential delay capped
+# at _BACKOFF_MAX_S, reset by a success. The state is PROCESS-WIDE, not per client: this
+# is a single-user app, and every phone request arrives from the local relay bridge and
+# every other local account from loopback, so a per-IP key would either lump them together
+# anyway or hand a LAN attacker a fresh bucket per address. The cap keeps the worst case
+# for the real user a few minutes' wait, never a permanent lockout.
+_monotonic = time.monotonic  # module attribute so a test can drive the backoff clock
+_UNLOCK_SLOTS = 1
+_FREE_FAILURES = 5
+_BACKOFF_BASE_S = 1.0
+_BACKOFF_MAX_S = 300.0
+_MAX_COUNTED_FAILURES = 64  # bounds the exponent; the delay is long since capped by then
+_GUARD_INIT = threading.Lock()
 
 
 class SetupRequest(BaseModel):
@@ -256,6 +277,68 @@ def account_setup(request: Request, response: Response, body: SetupRequest) -> d
     }
 
 
+class _UnlockGuard:
+    """Process-wide unlock throttle state: a derivation slot plus a failure backoff."""
+
+    def __init__(self) -> None:
+        self.slots = threading.BoundedSemaphore(_UNLOCK_SLOTS)
+        self.lock = threading.Lock()
+        self.failures = 0
+        self.not_before = 0.0
+        assert 1 <= _UNLOCK_SLOTS <= 2, "derivations must stay capped"
+        assert _FREE_FAILURES >= 1 and _BACKOFF_MAX_S > _BACKOFF_BASE_S > 0, "sane backoff"
+
+    def retry_after(self, now: float) -> int:
+        """Whole seconds until the next attempt may run (0 = now)."""
+        with self.lock:
+            wait = self.not_before - now
+        assert wait <= _BACKOFF_MAX_S, "the delay never exceeds the cap"
+        return max(0, math.ceil(wait))
+
+    def record(self, ok: bool, now: float) -> None:
+        """A success clears the backoff; a failure counts toward (and extends) it."""
+        with self.lock:
+            if ok:
+                self.failures, self.not_before = 0, 0.0
+                return
+            self.failures = min(self.failures + 1, _MAX_COUNTED_FAILURES)
+            if self.failures >= _FREE_FAILURES:
+                delay = min(_BACKOFF_BASE_S * 2 ** (self.failures - _FREE_FAILURES), _BACKOFF_MAX_S)
+                self.not_before = now + delay
+                log.warning("unlock: %d failed attempts; next allowed in %.0f s", self.failures, delay)
+        assert 0 <= self.failures <= _MAX_COUNTED_FAILURES, "failure count is bounded"
+
+
+def _unlock_guard(request: Request) -> _UnlockGuard:
+    """The app's one throttle, created on first use (one app per process)."""
+    with _GUARD_INIT:
+        guard = getattr(request.app.state, "unlock_guard", None)
+        if guard is None:
+            guard = _UnlockGuard()
+            request.app.state.unlock_guard = guard
+    assert isinstance(guard, _UnlockGuard), "unlock_guard must be the throttle"
+    return guard
+
+
+def _too_many(retry_s: int, detail: str) -> HTTPException:
+    """A 429 with a readable detail and a Retry-After the client can honour."""
+    assert retry_s >= 1, "Retry-After must be at least one second"
+    assert detail, "a 429 must say why"
+    return HTTPException(status_code=429, detail=detail, headers={"Retry-After": str(retry_s)})
+
+
+def _derive_unlock_key(conn, body: UnlockRequest) -> bytes:
+    """Run the one Argon2 derivation for this attempt; 401 on a wrong credential."""
+    assert conn is not None, "connection required"
+    assert body.passphrase or body.recovery_key, "caller checks a credential is present"
+    try:
+        if body.passphrase:
+            return keyvault.unlock(conn, body.passphrase)
+        return keyvault.unlock_with_recovery(conn, body.recovery_key)
+    except Exception:
+        raise HTTPException(status_code=401, detail="invalid credentials") from None
+
+
 @router.post("/api/account/unlock")
 def account_unlock(request: Request, response: Response, body: UnlockRequest) -> dict[str, bool]:
     """Unlock with the passphrase or the recovery key; load the master key.
@@ -264,26 +347,36 @@ def account_unlock(request: Request, response: Response, body: UnlockRequest) ->
     unlocked, a correct credential only mints this browser's session — it does NOT
     re-run the unlock (which would start a new unlock session and hide every pending
     approval from the old one).
+
+    Throttled (see _UnlockGuard): the backoff is checked while HOLDING the single
+    derivation slot, so two racing requests cannot both slip past a just-recorded failure.
     """
     conn = _conn(request)
     if not keyvault.is_initialized(conn):
         raise HTTPException(status_code=409, detail="not initialized; run setup")
+    if not (body.passphrase or body.recovery_key):
+        raise HTTPException(status_code=400, detail="passphrase or recovery_key required")
+    guard = _unlock_guard(request)
+    if not guard.slots.acquire(blocking=False):
+        raise _too_many(1, "another unlock attempt is in progress; try again in a moment")
     try:
-        if body.passphrase:
-            master_key = keyvault.unlock(conn, body.passphrase)
-        elif body.recovery_key:
-            master_key = keyvault.unlock_with_recovery(conn, body.recovery_key)
-        else:
-            raise HTTPException(status_code=400, detail="passphrase or recovery_key required")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="invalid credentials") from None
-    current = getattr(request.app.state, "master_key", None)
-    if current is None:
-        _set_unlocked(request, master_key)
-    elif not hmac.compare_digest(current, master_key):  # cannot happen for a valid wrap
-        raise HTTPException(status_code=401, detail="invalid credentials")
+        wait = guard.retry_after(_monotonic())
+        if wait > 0:
+            raise _too_many(wait, f"too many failed unlock attempts; try again in {wait} s")
+        try:
+            master_key = _derive_unlock_key(conn, body)
+        except HTTPException:
+            guard.record(False, _monotonic())
+            raise
+        current = getattr(request.app.state, "master_key", None)
+        if current is not None and not hmac.compare_digest(current, master_key):
+            guard.record(False, _monotonic())  # cannot happen for a valid wrap
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        guard.record(True, _monotonic())
+        if current is None:
+            _set_unlocked(request, master_key)
+    finally:
+        guard.slots.release()
     _mint_session(request, response)
     return {"unlocked": True}
 
