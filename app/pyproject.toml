@@ -86,6 +86,9 @@ markers = [
 # deliberately deviates from; correctness rules with real findings were fixed
 # rather than added here.
 [tool.ruff.lint]
+# Ruff 0.17 dropped these from its defaults; keep them on so the rule set is the
+# same on 0.16 and 0.17 (the codebase's DTZ noqa comments stay meaningful).
+extend-select = ["DTZ001", "DTZ006", "DTZ012", "DTZ901"]
 ignore = [
     # The app catches Exception at edges (best-effort operations, request
     # handlers, background sync/scheduler ticks) so one bad row/URL never takes
