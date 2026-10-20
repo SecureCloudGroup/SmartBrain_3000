@@ -28,7 +28,7 @@ from . import db, keyvault
 
 # Desktop-only check: ONE implementation, in account (R14 — credential authority,
 # not a header). Re-exported so feed_routes / vault_routes imports keep working.
-from .account import _require_desktop_local
+from .account import _credential_attempt, _require_desktop_local
 
 router = APIRouter()
 
@@ -59,19 +59,19 @@ def _reauthorize(request: Request, body: ReauthRequest) -> None:
     passphrase. This blocks a passer-by at an unattended-but-unlocked Desktop and
     a stale paired session from silently exfiltrating everything in one click. A
     Recovery Key is accepted too, so a user who unlocked via the Kit isn't stranded.
+    Throttled with unlock (same slot + failure backoff — see account._credential_attempt).
     """
     conn = request.app.state.dbx  # per-thread cursor facade (thread-safe under the pool)
-    try:
-        if body.passphrase:
-            keyvault.unlock(conn, body.passphrase)
-        elif body.recovery_key:
-            keyvault.unlock_with_recovery(conn, body.recovery_key)
-        else:
-            raise HTTPException(status_code=400, detail="passphrase required")
-    except HTTPException:
-        raise
-    except Exception:  # wrong passphrase / bad recovery key / malformed wrap
-        raise HTTPException(status_code=401, detail="incorrect passphrase") from None
+    if not (body.passphrase or body.recovery_key):
+        raise HTTPException(status_code=400, detail="passphrase required")
+    with _credential_attempt(request, "passphrase"):
+        try:
+            if body.passphrase:
+                keyvault.unlock(conn, body.passphrase)
+            else:
+                keyvault.unlock_with_recovery(conn, body.recovery_key)
+        except Exception:  # wrong passphrase / bad recovery key / malformed wrap
+            raise HTTPException(status_code=401, detail="incorrect passphrase") from None
 
 
 @router.post("/api/export")

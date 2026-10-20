@@ -179,7 +179,7 @@ def unlock(conn: duckdb.DuckDBPyConnection, passphrase: str) -> bytes:
 def reset_passphrase(conn: duckdb.DuckDBPyConnection, master_key: bytes, new: str) -> None:
     """Re-wrap an already-unlocked master key under a new passphrase.
 
-    Unlike ``change_passphrase`` this does NOT require the current passphrase —
+    This does NOT itself check the current passphrase —
     being unlocked (e.g. via the Recovery Key) is the authorization. The master
     key is unchanged, so all encrypted data and the Recovery Key stay valid; only
     the passphrase wrap is replaced.
@@ -197,14 +197,6 @@ def reset_passphrase(conn: duckdb.DuckDBPyConnection, master_key: bytes, new: st
         [salt, _TIME_COST, _MEMORY_COST, _PARALLELISM, nonce, wrapped],
     )
     assert is_initialized(conn), "passphrase wrap must remain after re-wrap"
-
-
-def change_passphrase(conn: duckdb.DuckDBPyConnection, current: str, new: str) -> None:
-    """Re-wrap the master key under a new passphrase, verifying the current one first."""
-    assert current and new, "current + new passphrase required"
-    assert is_initialized(conn), "keyvault is not initialized"
-    master_key = unlock(conn, current)  # raises on a wrong current passphrase
-    reset_passphrase(conn, master_key, new)
 
 
 def add_recovery_key(conn: duckdb.DuckDBPyConnection, master_key: bytes) -> str:

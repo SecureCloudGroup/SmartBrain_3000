@@ -46,14 +46,18 @@ MAX_VAULT_DOCS = 10_000  # 10k docs x ~10 chunks = 100k vectors = exactly kb._MA
 MAX_VAULT_BYTES = 512 * 1024 * 1024
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_INDEX_BYTES = 16 * 1024 * 1024
-MAX_DOC_OBJECT_BYTES = 8 * 1024 * 1024  # ingest._MAX_TEXT (1M chars) + UTF-8/JSON escaping headroom
-MAX_VEC_OBJECT_BYTES = 12 + 64 * 4096 * 4  # header + max chunks x max dim x float32
 MAX_ZIP_EXPANSION = 100  # refuse an entry claiming >100x its compressed size (zip bomb)
 MAX_TITLE = 300
+# Literal mirrors, not imports (ingest -> netguard -> vault_format would be circular); a test pins
+# each to its source so a raised ingest/kb cap cannot silently outgrow what a recipient accepts.
 MAX_PAGES = 1000  # mirrors ingest._MAX_SECTIONS
-MAX_TEXT = 1_000_000  # mirrors ingest._MAX_TEXT
+MAX_TEXT = 4_000_000  # mirrors ingest._MAX_TEXT
 MAX_DIM = 4096  # mirrors kb._MAX_EMBED_DIM
 MAX_CHUNKS = 1000  # mirrors kb._MAX_CHUNKS (big-document coverage; ~4M chars per doc)
+# Worst case per char is 6 bytes (a control char JSON-escapes to \u00XX; nothing UTF-8 is longer),
+# plus 1 MiB for title + meta + the sealed GCM tag. ~25 MB, read one object at a time.
+MAX_DOC_OBJECT_BYTES = 6 * MAX_TEXT + 1024 * 1024
+MAX_VEC_OBJECT_BYTES = 12 + MAX_CHUNKS * MAX_DIM * 4 + 16  # header + chunks x dim x float32 + GCM tag
 
 _MANIFEST = "manifest.json"
 _INDEX = "index.bin"
@@ -279,10 +283,13 @@ def _clean_meta(meta) -> dict:
             if not isinstance(value, list) or len(value) > MAX_PAGES:
                 raise VaultError("document page map is malformed or too long")
             pages = []
-            last = -1
+            last = 0
+            # Non-decreasing, not strictly increasing: ingest gives empty leading pages (an image-only
+            # cover) the same start as the first page with text — [0, 0, 15] — and bisect_right then
+            # cites offset 0 to the page the text really starts on. Only a DECREASE breaks citations.
             for p in value:  # bounded by MAX_PAGES
-                if not isinstance(p, int) or isinstance(p, bool) or p < 0 or p <= last:
-                    raise VaultError("document page map must be non-negative and strictly increasing")
+                if not isinstance(p, int) or isinstance(p, bool) or p < last:
+                    raise VaultError("document page map must be non-negative and non-decreasing")
                 last = p
                 pages.append(p)
             out["pages"] = pages

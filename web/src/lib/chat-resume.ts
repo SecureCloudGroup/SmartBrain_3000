@@ -24,3 +24,21 @@ export async function resumeChat<M>(
     throw err;
   }
 }
+
+// A resume that lands while an approved tool of the turn is still running answers
+// awaiting_approval with in_flight and no pending cards (the server never holds the
+// request). The page keeps the turn and retries on this cadence, bounded (~2 min).
+export const IN_FLIGHT_RETRY_MS = 2000;
+export const IN_FLIGHT_MAX_RETRIES = 60;
+
+// Delay before the next resume attempt, or null when the response is not an in-flight
+// wait or the retry budget is spent. `attempt` counts the retries already made.
+export function inFlightRetryDelay(
+  res: { status: string; in_flight?: boolean; pending?: unknown[] },
+  attempt: number,
+): number | null {
+  console.assert(Number.isInteger(attempt) && attempt >= 0, "attempt must be a non-negative integer");
+  const waiting = res.status === "awaiting_approval" && res.in_flight === true && !res.pending?.length;
+  if (!waiting || attempt >= IN_FLIGHT_MAX_RETRIES) return null;
+  return IN_FLIGHT_RETRY_MS;
+}

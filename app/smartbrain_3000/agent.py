@@ -682,6 +682,24 @@ _DENIED_TOOL_RESULT = (
 )
 
 
+def in_flight(row: dict) -> bool:
+    """True for an approved tool still running: claimed ('executed') but no result stored.
+
+    The approve route claims BEFORE the handler runs and stores the result after, so
+    this window is real; resuming inside it would feed the model a false failure.
+    """
+    assert isinstance(row, dict), "row must be a dict"
+    assert "status" in row, "row must carry a status"
+    return row["status"] == "executed" and row.get("result") is None
+
+
+def unresolved(row: dict) -> bool:
+    """True while a parked row still blocks its turn's resume (waiting or in flight)."""
+    assert isinstance(row, dict), "row must be a dict"
+    assert "status" in row, "row must carry a status"
+    return row["status"] in ("pending", "approved") or in_flight(row)
+
+
 def resume_turn(ctx, audit, approvals, turn_id: str, *, conn=None, usage_sink=None, auto_approve=frozenset(), timeout=60.0, result_cap=_RESULT_CAP) -> dict | None:
     """Resume a parked turn once its approvals are resolved; None if unknown turn.
 
@@ -693,9 +711,11 @@ def resume_turn(ctx, audit, approvals, turn_id: str, *, conn=None, usage_sink=No
     rows = approvals.list_for_turn(turn_id)
     if not rows:
         return None
-    if any(r["status"] in ("pending", "approved") for r in rows):  # not all resolved yet
+    if any(unresolved(r) for r in rows):  # not all resolved yet (incl. a tool still running)
         still = [{"id": r["id"], "tool": r["tool_name"], "tier": r["tier"], "args": tools.redact(r["args"])} for r in rows if r["status"] == "pending"]
-        return {"status": "awaiting_approval", "turn_id": turn_id, "pending": still}
+        # in_flight: an approved tool is still running — the caller retries shortly, never an error.
+        running = any(in_flight(r) for r in rows)
+        return {"status": "awaiting_approval", "turn_id": turn_id, "pending": still, "in_flight": running}
     # A turn may park more than once. Resume from the LATEST park's snapshot (its
     # messages already contain every earlier park's assistant+tool exchange), and
     # answer ONLY that park's tool_calls — so the tool-message sequence stays

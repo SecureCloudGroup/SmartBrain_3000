@@ -292,11 +292,16 @@ _RESUMING_TURNS: set[str] = set()
 
 
 def _all_pending_resolved(approvals, turn_id: str) -> bool:
-    """True iff no pending/approved rows remain for the turn — safe to auto-resume."""
+    """True iff no row still blocks the turn — safe to auto-resume.
+
+    Blocking = pending/approved, or claimed ('executed') with no stored result yet
+    (its handler is still running). That in-flight approve stores its result and
+    then re-runs this check itself, so the last finisher drives the resume.
+    """
     assert approvals is not None and turn_id, "approvals + turn id required"
     rows = approvals.list_for_turn(turn_id)
     assert isinstance(rows, list), "list_for_turn must return a list"
-    return bool(rows) and not any(r["status"] in ("pending", "approved") for r in rows)
+    return bool(rows) and not any(agent.unresolved(r) for r in rows)
 
 
 def _scheduled_origin(row: dict) -> dict | None:
@@ -429,7 +434,12 @@ def approve(request: Request, pid: str, body: ApproveIn) -> dict:
             consent.remember(request.app.state.dbx, row["tool_name"])
     try:
         result = tools.run(ctx, audit, row["tool_name"], row["args"], actor="user", claim=lambda: approvals.claim(pid))
-    except PermissionError:
+    except PermissionError as exc:
+        # Usually the claim was lost (row not executed -> store_result no-ops). But a
+        # HANDLER can raise PermissionError (an OSError) after a won claim; without a
+        # stored result that row would read as still in flight and block the resume.
+        approvals.store_result(pid, {"error": str(exc)})
+        _maybe_finish_scheduled_turn(request, row)
         raise HTTPException(status_code=409, detail="approval already consumed") from None
     except Exception as exc:
         # Root cause of the 2026-09-16 field spiral: this branch used to raise
@@ -1063,7 +1073,11 @@ def agent_turn_stream(request: Request, body: TurnIn) -> StreamingResponse:
 
 @router.post("/api/agent/resume/{turn_id}")
 def agent_resume(request: Request, turn_id: str) -> dict:
-    """Continue a parked turn after its approvals are resolved (server-reconstructed)."""
+    """Continue a parked turn after its approvals are resolved (server-reconstructed).
+
+    Never blocks on a sibling tool that is still running: resume_turn answers
+    awaiting_approval with ``in_flight: true`` and the chat page retries shortly.
+    """
     ctx, audit = _context(request)
     approvals = _approvals(request)
     conn = request.app.state.dbx

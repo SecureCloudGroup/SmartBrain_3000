@@ -374,17 +374,42 @@ def test_multi_park_resume_is_wellformed(monkeypatch) -> None:
     assert ctx.memory.list_memories() and ctx.planner.list_tasks()  # both executed
 
 
-def test_resume_executed_without_result_feeds_error(monkeypatch) -> None:
-    # An executed-but-failed action (no stored result) must not be reported as success.
+def test_resume_executed_without_result_does_not_resume(monkeypatch) -> None:
+    # Claimed ('executed') with no stored result = the handler is still running. The
+    # turn must neither report a forged success nor a false failure: it stays parked.
     ctx, audit, approvals = _wired()
     _script(monkeypatch, [_toolcalls(("remember_fact", {"text": "x"}))])
     pid = _run(ctx, audit, approvals)["pending"][0]["id"]
     approvals.approve(pid)
-    approvals.claim(pid)  # executed, but store_result deliberately NOT called (handler-failure shape)
+    approvals.claim(pid)  # executed, but store_result not called yet
     calls = _recorder(monkeypatch, [_text("ok")])
-    agent.resume_turn(ctx, audit, approvals, "t1")
-    tool_msg = next(m for m in calls[-1] if m.get("role") == "tool")
-    assert "error" in tool_msg["content"]  # not a forged {"ok": true}
+    r = agent.resume_turn(ctx, audit, approvals, "t1")
+    assert r["status"] == "awaiting_approval" and calls == []  # the model is not called
+
+
+def test_handler_permission_error_after_claim_stores_error_and_resumes(sched_client, monkeypatch) -> None:
+    # A handler raising PermissionError (an OSError, e.g. EACCES) AFTER the claim won:
+    # the route must store an error result so the row is not left "in flight" forever.
+    client, sid = sched_client
+    from smartbrain_3000 import gateway as gwmod
+    seen: list = []
+    it = iter([_toolcalls(("remember_fact", {"text": "x"})), _text("Could not save it.")])
+
+    def fake(messages, *a, **k):
+        seen.append([dict(m) for m in messages])
+        return next(it)
+    monkeypatch.setattr(gwmod, "chat_with_tools", fake)
+    run = client.post(f"/api/schedules/{sid}/run").json()
+    pid = run["pending"][0]["id"]
+
+    def denied_write(text):
+        raise PermissionError("disk says no")
+    monkeypatch.setattr(client.app.state.memory, "add_memory", denied_write)
+    r = client.post(f"/api/agent/pending/{pid}/approve", json={})
+    assert r.status_code == 409  # response unchanged
+    assert client.app.state.approvals.get(pid)["result"] == {"error": "disk says no"}
+    tool_msgs = [m["content"] for m in seen[-1] if m.get("role") == "tool"]
+    assert len(seen) == 2 and any("disk says no" in c for c in tool_msgs)
 
 
 def test_invalid_dangerous_args_go_inline_not_parked(monkeypatch) -> None:
@@ -1316,6 +1341,108 @@ def test_two_pending_first_approval_waits_second_resumes(sched_client, monkeypat
     assert second.json().get("resumed_turn") is True
     runs = client.get(f"/api/schedules/{sid}/runs").json()["runs"]
     assert any(r["status"] == "complete" and r["message"] == "Both noted." for r in runs)
+
+
+# --- in-flight approved tool: claimed ('executed') but its result not stored yet ---
+#
+# The approve route claims a row BEFORE the handler runs and stores the result only
+# after it returns. A sibling resolved inside that window must NOT resume the turn:
+# the in-flight row would read back as "tool execution failed" and the model could
+# retry — parking a duplicate of an action that is, in fact, still running.
+
+_EXEC_FAILED = "tool execution failed"
+
+
+def test_resume_waits_for_an_in_flight_executed_row(monkeypatch) -> None:
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("remember_fact", {"text": "one"}), ("remember_fact", {"text": "two"}))])
+    pend = _run(ctx, audit, approvals, turn_id="t-flight")["pending"]
+    a, b = pend[0]["id"], pend[1]["id"]
+    assert approvals.approve(a) and approvals.claim(a)  # claimed; handler still running
+    assert approvals.deny(b)
+    assert agent_routes._all_pending_resolved(approvals, "t-flight") is False
+    calls = _recorder(monkeypatch, [_text("done")])
+    early = agent.resume_turn(ctx, audit, approvals, "t-flight")
+    assert early["status"] == "awaiting_approval" and calls == []  # the model was not called
+    approvals.store_result(a, {"ok": True, "stored": "one"})
+    assert agent_routes._all_pending_resolved(approvals, "t-flight") is True
+    final = agent.resume_turn(ctx, audit, approvals, "t-flight")
+    assert final["status"] == "complete"
+    tool_msgs = [m["content"] for m in calls[-1] if m.get("role") == "tool"]
+    assert not any(_EXEC_FAILED in c for c in tool_msgs) and any('"stored": "one"' in c for c in tool_msgs)
+
+
+def test_scheduled_sibling_denied_mid_execution_resumes_once_with_real_result(sched_client, monkeypatch) -> None:
+    client, sid = sched_client
+    from smartbrain_3000 import gateway as gwmod
+    seen: list = []
+    it = iter([
+        _toolcalls(("remember_fact", {"text": "one"}), ("remember_fact", {"text": "two"})),
+        _text("One noted, two skipped."),
+    ])
+
+    def fake(messages, *a, **k):
+        seen.append([dict(m) for m in messages])
+        return next(it)
+    monkeypatch.setattr(gwmod, "chat_with_tools", fake)
+    run = client.post(f"/api/schedules/{sid}/run").json()
+    a, b = run["pending"][0]["id"], run["pending"][1]["id"]
+    real_run = tools.run
+    deny_status: list = []
+
+    def run_then_deny_sibling(*args, **kw):
+        result = real_run(*args, **kw)  # row a is now 'executed', result not yet stored
+        deny_status.append(client.post(f"/api/agent/pending/{b}/deny").status_code)
+        return result
+    monkeypatch.setattr(agent_routes.tools, "run", run_then_deny_sibling)
+    ok = client.post(f"/api/agent/pending/{a}/approve", json={})
+    assert deny_status == [200]
+    assert ok.status_code == 200 and ok.json()["resumed_turn"] is True  # the LAST finisher resumes
+    assert len(seen) == 2  # exactly one resume
+    tool_msgs = [m["content"] for m in seen[1] if m.get("role") == "tool"]
+    assert not any(_EXEC_FAILED in c for c in tool_msgs)
+    runs = client.get(f"/api/schedules/{sid}/runs").json()["runs"]
+    assert any(r["status"] == "complete" and r["message"] == "One noted, two skipped." for r in runs)
+
+
+def test_chat_resume_during_in_flight_tool_answers_immediately_then_resumes(sched_client, monkeypatch) -> None:
+    # A chat park: another client (Activity page, second tab) approved A and its handler
+    # is still running; the chat page denies B and calls /resume. The resume must not
+    # hold a server thread waiting: it answers at once with in_flight (no false
+    # "tool execution failed", no model call), and a retry after A's result is stored
+    # resumes with the REAL result.
+    client, _sid = sched_client
+    from smartbrain_3000 import gateway as gwmod
+    seen: list = []
+    it = iter([
+        _toolcalls(("remember_fact", {"text": "one"}), ("remember_fact", {"text": "two"})),
+        _text("Chat: one noted."),
+    ])
+
+    def fake(messages, *a, **k):
+        seen.append([dict(m) for m in messages])
+        return next(it)
+    monkeypatch.setattr(gwmod, "chat_with_tools", fake)
+    turn = client.post("/api/agent/turn", json={
+        "messages": [{"role": "user", "content": "remember"}], "model": "openai/gpt-4", "conversation_id": "c1",
+    }).json()
+    tid = turn["turn_id"]
+    a, b = turn["pending"][0]["id"], turn["pending"][1]["id"]
+    approvals = client.app.state.approvals
+    assert approvals.approve(a) and approvals.claim(a)  # handler "still running"
+    assert client.post(f"/api/agent/pending/{b}/deny").status_code == 200
+    for _ in range(2):  # every retry while in flight answers at once (a hung handler can't pin threads)
+        started = time.monotonic()
+        r = client.post(f"/api/agent/resume/{tid}")
+        assert time.monotonic() - started < 5
+        assert r.status_code == 200
+        assert r.json() == {"status": "awaiting_approval", "turn_id": tid, "pending": [], "in_flight": True}
+    assert len(seen) == 1  # the model was never resumed early
+    approvals.store_result(a, {"ok": True, "stored": "one"})
+    done = client.post(f"/api/agent/resume/{tid}").json()
+    assert done["status"] == "complete" and done["message"] == "Chat: one noted."
+    tool_msgs = [m["content"] for m in seen[-1] if m.get("role") == "tool"]
+    assert not any(_EXEC_FAILED in c for c in tool_msgs) and any('"stored": "one"' in c for c in tool_msgs)
 
 
 def test_scheduled_resume_still_strips_schedule_write_tools(sched_client, monkeypatch) -> None:

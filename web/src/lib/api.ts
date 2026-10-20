@@ -214,6 +214,7 @@ export interface AgentResult {
   detail?: string; // present on a scheduled-run error
   turn_id?: string;
   pending?: { id: string; tool: string; tier: string }[];
+  in_flight?: boolean; // resume only: an approved tool of the turn is still running; retry shortly
   degraded?: boolean;
   sources?: Source[]; // citations from the turn's tool results ([] when no knowledge was used)
   guidance?: { request_type: string; directive: string }; // optimizer steering that shaped this answer
