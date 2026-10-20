@@ -43,10 +43,83 @@ from . import netguard as _netguard_mod
 from . import ni, ni_master, ni_query, page_verify, pagegraph
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
-from .library_resolve import ENGLISH as LIBRARY_ENGLISH
 from .library_resolve import resolve_lookup
 from .ni_forms import llm as _ni_llm
 from .ni_query.say import time_words as _time_words
+from .ni_verify.frame import (  # noqa: F401  (re-exported: the flow and its tests reach them here)
+    _TEXT_PRODUCT_WANTS,
+    _dated_rows,
+    _frame_gap,
+    _lacks,
+    _legacy_window_gap,
+    _said_wants,
+    _text_product_gap,
+    _times_in,
+    _verify_frame,
+    _verify_source,
+)
+from .ni_verify.places import (  # noqa: F401  (re-exported: the flow and its tests reach them here)
+    _LABEL_STATE_RE,
+    _MAX_CHECKED_CELLS,
+    _MAX_CHECKED_ROWS,
+    _NOT_A_PLACE,
+    _label_state_code,
+    _national_us_misses_place,
+    _place_taken,
+    _resolver_landed_outside_state,
+    _rows_contradict_place,
+    _scoping_names_place,
+    _source_contradicts_place,
+    _source_host_states,
+    _state_code_of,
+)
+from .ni_verify.subject import (  # noqa: F401  (re-exported: the flow and its tests reach them here)
+    _SUBNATIONAL_RE,
+    _about_named,
+    _foreign_providers_in,
+    _other_of_kind,
+    _other_subject,
+    _own_readings,
+    _speaks_to,
+    _stray_topics,
+)
+from .ni_verify.text import (  # noqa: F401  (re-exported: the flow and its tests reach them here)
+    _ANSWER_MEASURES,
+    _ANSWER_STOP,
+    _COMPONENT_WORDS,
+    _DAY_NAME_RE,
+    _DAY_NAMES,
+    _GENERIC_SUBJECT,
+    _GEO_PARAMS,
+    _KIND_WORDS,
+    _KNOWN_OUTLET_WORDS,
+    _MAX_INTENT_FIELDS,
+    _MAX_INTENT_NAMES,
+    _MAX_VALUE_ANSWERS,
+    _MEASURE_CUES,
+    _NAME_STOP,
+    _NUMBER_CODES,
+    _OUTLET_SUFFIX_WORDS,
+    _SCORE_WORDS,
+    _WINDOW_WORDS,
+    _amp,
+    _answer_score,
+    _answer_tokens,
+    _covers_measure,
+    _entity_vocabulary,
+    _event_time,
+    _folded_words,
+    _kind_tokens,
+    _names_hit,
+    _own_words,
+    _proper_tokens,
+    _request_proper,
+    _single_keywords,
+    _subcategory,
+    _subject_names,
+    _v12,
+    _window_words,
+)
 
 log = logging.getLogger("smartbrain.ni.flow")
 
@@ -103,7 +176,6 @@ _FLOW_MODEL_TIMEOUT_S = 300.0  # P0 (2026-09-16): parity with the 300s cold-loca
 # over 25.7 until the menu was type-filtered — this table drives the filter.
 # String-natured field words are kept as ``string``; everything else defaults
 # to ``number`` (the useful case for scene binding). Bounded to 4 fields.
-_MAX_INTENT_FIELDS = 4
 _STRING_FIELD_WORDS: frozenset[str] = frozenset({
     "title", "name", "place", "headline", "subject", "author", "location",
     "city", "state", "country", "region", "message", "status", "label",
@@ -450,7 +522,6 @@ def _parse_json_reply(text: str) -> dict:
 
 
 _INTENT_NAME_WORD_RE = re.compile(r"[A-Za-z0-9]+")
-_MAX_INTENT_NAMES = 5
 _MAX_INTENT_NAME_CHARS = 60
 # G2: a compound ask ("Phoenix or Miami") can make the model name both places as a list
 _MAX_COMPOUND_PLACES = 3
@@ -560,15 +631,6 @@ def _cadence_from_text(request: str) -> int | None:
     return None
 
 
-# day names → the engine's weekday tokens (``_window_words`` says a window back in the user's words)
-_DAY_NAMES = {"monday": "mon", "tuesday": "tue", "wednesday": "wed", "thursday": "thu", "friday": "fri",
-              "saturday": "sat", "sunday": "sun"}
-# names that hold a day word and are no window ("Saturday Night Live" is a show, "Black Friday" a sale): the
-# verify step reads their words as a name (``_other_subject``)
-_DAY_NAME_RE = re.compile(
-    r"\b(?:saturday night live|(?:monday|thursday|sunday|friday) night (?:football|baseball|hockey|lights|raw|"
-    r"smackdown)|black friday|cyber monday|super tuesday|good friday|fat tuesday|giving tuesday|ash wednesday|"
-    r"holy (?:thursday|saturday)|small business saturday|super bowl sunday|taco tuesday)\b")
 
 
 def stage_intent(request: str, model_call: Callable[[str], str]) -> dict:
@@ -1284,28 +1346,14 @@ _ANSWER_CELL_KEYS = frozenset({"path", "label", "type", "unit", "unit_path", "co
 # of time a value is about, the quantity it reports, the date/time a list's rows are indexed by, and
 # the flag that says a time is a placeholder. All closed.
 _ANSWER_WINDOWS = ("now", "today", "tonight", "tomorrow", "latest")
-_ANSWER_MEASURES = ("temperature", "feels_like", "precip_chance", "precip_amount", "conditions", "thunderstorm",
-                    "snow", "wind", "humidity", "waves", "swell", "wave_direction", "water_temp", "alerts", "kp",
-                    "uv", "air_quality", "tide", "sunrise", "sunset")
 _AXIS_STEPS = ("day", "hour", "period")
 _ANSWER_VALUE_TYPES = ("number", "text", "time", "date", "count")
 _ANSWER_CELL_TYPES = ("number", "text", "time", "date")
-# Library answers spec v1.5 (Round 20, Q3d): ``codes`` names the cell's code table — "wmo_weather" on a number (a
-# weather code the engine's ``label`` step turns into words, ni.LABEL_TABLES), or on a text value / row / column cell
-# a Library code table (taxonomy/codes/<name>.json, packed as ``library_codes``): the closed list of values the cell
-# holds, read as a row filter's evidence (ni_query.ground rule 3), never a pipeline step
-_NUMBER_CODES = ("wmo_weather",)
 _CODE_TABLE_RE = re.compile(r"[a-z][a-z0-9_]{0,39}")   # the Library's table slug (its answers._NAME)
 # a whole path segment naming one of the source's parameters: ``rates.{quote}``, ``{coin}.usd``
 _PARAM_SEGMENT_RE = re.compile(r"(?:^|\.)\{([a-z_][a-z0-9_]*)\}(?=$|\.|\[)")  # the dot goes too
 _MAX_ANSWERS = 20
-_MAX_VALUE_ANSWERS = 4
 _MAX_ANSWER_CELLS = 5   # fix round datalayer-r2: Open-Meteo's hourly tonight answer carries conditions, temperature, rain chance and snowfall beside its time (the Library's own cap rose with it)
-_ANSWER_STOP = frozenset({
-    "a", "an", "the", "of", "in", "on", "at", "for", "to", "and", "or", "is", "are", "was", "be", "by",
-    "with", "from", "as", "it", "its", "this", "that", "what", "whats", "how", "when", "where", "who",
-    "which", "my", "me", "i", "show", "get", "give", "tell", "will", "do", "does", "there", "please", "s",
-})
 
 
 def _utc_ok(decl: dict) -> bool:
@@ -1463,79 +1511,16 @@ def _library_answers(source_id: str) -> list[dict]:
     return [a for a in cleaned if not (a.get("type") == "count" and f"{a['name']}_items" in names)]
 
 
-def _answer_tokens(text: str) -> set[str]:
-    """Lowercased words, fillers dropped, a simple plural folded to its singular."""
-    out = set()
-    for word in re.findall(r"[a-z0-9]+", str(text).lower()):  # bounded by the text
-        if word in _ANSWER_STOP:
-            continue
-        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
-            word = word[:-1]
-        out.add(word)
-    return out
 
 
-def _folded_words(text: str) -> list[str]:
-    """Every word in order (fillers kept), a simple plural folded as ``_answer_tokens`` folds it."""
-    words = re.findall(r"[a-z0-9]+", str(text).lower())
-    return [w[:-3] + "y" if len(w) > 4 and w.endswith("ies") else
-            w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words]
 
 
-def _answer_score(answer: dict, ask: set[str]) -> float:
-    """How well an answer's words / label / name cover the ask: one point per ask word it names,
-    plus half a point per multi-word phrase of its ``words`` said in full ("rain tomorrow")."""
-    own: set[str] = set()
-    for text in [*answer["words"], answer["label"], answer["name"].replace("_", " ")]:
-        own |= _answer_tokens(text)
-    phrases = sum(1 for w in answer["words"] if len(_answer_tokens(w)) > 1 and _answer_tokens(w) <= ask)
-    return len(ask & own) + 0.5 * phrases
 
 
-# The words that say WHEN, never WHICH answer (C7): with a window asked, they are taken out of the
-# scoring — "tonight" used to pick whatever answer listed it, on any source.
-_WINDOW_WORDS = frozenset({
-    "today", "todays", "tonight", "tonite", "tomorrow", "tmrw", "tmr", "weekend", "now", "right", "currently",
-    "current", "morning", "afternoon", "evening", "overnight", "later", "week", "day", "hour", "next", "this",
-    "coming", "upcoming", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"})
-# the quantity an ask names (C7), as a closed ``measure`` of the v1.2 answers; a declared answer covers
-# it by its own ``measure`` or by its label / cell labels naming it
-_MEASURE_CUES: dict[str, re.Pattern] = {m: re.compile(rx, re.IGNORECASE) for m, rx in (
-    ("water_temp", r"\b(water|sea|ocean|lake) temp(erature)?s?\b|\bsst\b|\bhow warm is the water\b"),
-    ("temperature", r"\b(temperatures?|temps?|degrees)\b"),
-    ("wind", r"\b(wind|winds|windy|gusts?|gusty)\b"),
-    ("humidity", r"\b(humid|humidity|muggy)\b"),
-    ("uv", r"\buv\b"),
-    ("waves", r"\b(waves?|surf)\b"),
-    ("swell", r"\bswells?\b"),
-    ("precip_chance", r"\b(rain|rainy|precip|precipitation|umbrella|showers?)\b"),
-    ("snow", r"\b(snow|snowfall|flurries)\b"),
-    ("thunderstorm", r"\b(thunderstorms?|t-?storms?|lightning)\b"),
-    ("air_quality", r"\b(air quality|aqi)\b"),
-    ("kp", r"\bkp\b"),
-    ("tide", r"\btides?\b"),
-    ("sunrise", r"\bsunrise\b"),
-    ("sunset", r"\bsunset\b"),
-)}
 
 
-def _covers_measure(a: dict, measure: str) -> bool:
-    """Does this answer report ``measure``? Its declared measure, a weather-code table for the sky's own
-    events (a thunderstorm, snow — ``wmo_weather`` only: a text cell's table, the NWS event names, reports
-    no sky), or a label / cell label that names it."""
-    if a.get("measure") == measure:
-        return True
-    coded = a.get("codes") in _NUMBER_CODES or any(c.get("codes") in _NUMBER_CODES for c in a.get("cells") or [])
-    if measure in ("thunderstorm", "snow") and (a.get("measure") == "conditions" or coded):
-        return True
-    labels = [a["label"], *[c.get("label", "") for c in a.get("cells") or []]]
-    return any(_MEASURE_CUES[measure].search(t) for t in labels)
 
 
-def _v12(answers: list[dict]) -> bool:
-    """Does this source declare what its answers deliver (spec v1.2)? An older record's answers can't say
-    which window they hold — ``_legacy_window_gap`` reads their labels instead."""
-    return any(a.get("window") or a.get("axis") or a.get("measure") for a in answers)
 
 
 def _answer_unit(decl: dict, payload: object, first_row: object = None) -> str:
@@ -2175,26 +2160,6 @@ def _scope_rows_to_state_bbox(answer: dict, place: str, request: str) -> dict:
     return {**answer, "state_scope": {"path": cell["path"], "code": code}}
 
 
-def _scoping_names_place(chosen: list[dict], place: str) -> bool:
-    """True when a chosen list answer's row filter equals (case-folded, whole-word overlap) a
-    word of ``place``: the data IS scoped to the ask's named value, so the subcategory policy's
-    "isn't specific to" note is no longer honest. Bounded by ``chosen`` (few) and the folded
-    word count of each side (``_MAX_WORDS`` only clipped the input texts).
-
-    fix7-lib (2026-10-04): the CBP "San Ysidro" scope and the NHL "Metropolitan" subdivision
-    scope both use the same ``filter.equals`` seal; this check is their shared gate."""
-    assert isinstance(place, str), "place must be a string"
-    place_words = {w.casefold() for w in re.findall(r"[A-Za-z0-9]+", place) if len(w) >= 3}
-    if not place_words:
-        return False
-    for a in chosen[:_MAX_VALUE_ANSWERS]:  # bounded
-        flt = (a.get("filter") or {}).get("equals")
-        if not isinstance(flt, str):
-            continue
-        flt_words = {w.casefold() for w in re.findall(r"[A-Za-z0-9]+", flt) if len(w) >= 3}
-        if flt_words & place_words:
-            return True
-    return False
 
 
 def _other_sources_left(record: dict, url: str) -> bool:
@@ -3004,9 +2969,6 @@ def _try_answers_build(store: ni.NIStore, item_id: str, request: str, intent: di
     return built
 
 
-def _event_time(a: dict) -> bool:
-    """A time an event happens at (not an observation's own "as of", which is window now)."""
-    return a.get("type") in ("time", "date") and a.get("window") != "now"
 
 
 def _swap_stale_next_event(chosen: list[dict], answers: list[dict], sample: object,
@@ -3058,14 +3020,6 @@ def _swap_stale_next_event(chosen: list[dict], answers: list[dict], sample: obje
     return swapped
 
 
-def _window_words(window: str) -> str:
-    """The asked window in the user's words ("the weekend", "Saturday", "the next 3 days")."""
-    if window.startswith("dow:"):
-        return {v: k for k, v in _DAY_NAMES.items()}[window[4:]].capitalize()
-    if window.startswith(("next_days:", "next_hours:")):
-        unit, n = window.split(":")
-        return f"the next {n} {unit[5:]}"
-    return {"now": "right now", "weekend": "the weekend"}.get(window, window)
 
 
 _WANT_SYNONYMS: dict[str, frozenset[str]] = {
@@ -3139,37 +3093,8 @@ def _unanswered_wants(answers: list[dict], request: str, wants: list, filled: li
 # (its gap guesses were false); this is the code check in its place. A rejection never hands off: the
 # pick re-lands without the source, then the web, then an honest gap.
 
-# words too general to say what a source is about ("gas PRICES", "kp INDEX", "the FORECAST")
-_GENERIC_SUBJECT = frozenset({"price", "rate", "index", "level", "value", "status", "data", "info", "information",
-                              "number", "count", "forecast", "report", "latest", "update", "chance", "amount",
-                              "total", "list", "time", "today", "live", "new", "top"})
-# what a result card must carry (a score, who won)
-_SCORE_WORDS = frozenset({"score", "point", "pts", "run", "goal", "result", "final", "won", "winner", "win",
-                          "loss", "lost"})
-# the parameters that carry a place into an address
-_GEO_PARAMS = frozenset({"lat", "lon", "latitude", "longitude", "zip", "place", "city", "station", "point",
-                         "office", "grid_x", "grid_y", "gauge", "buoy", "site", "county", "state"})
-# taxonomy ``expects`` components that are not measures: the words that report them
-_COMPONENT_WORDS: dict[str, frozenset[str]] = {
-    "wave_period": frozenset({"period"}), "score": _SCORE_WORDS,
-    "opponent": frozenset({"opponent", "vs", "versus", "away", "home", "matchup", "game", "match"}),
-    "venue": frozenset({"venue", "stadium", "arena", "field", "where"}),
-    "rank": frozenset({"rank", "standing", "position", "place", "seed", "gb"}),
-    "record": frozenset({"record", "w", "l", "win", "loss", "wins", "losses", "pct"}),
-}
 
 
-def _subcategory(lib: object, sub: str) -> dict:
-    """A taxonomy subcategory's ``kinds`` / ``policy`` / ``expects`` from the Library's ``subcategory()``
-    ({} when unknown, or for an older Library without it)."""
-    fn = getattr(lib, "subcategory", None)
-    if not callable(fn):
-        return {}
-    try:
-        got = fn(sub)
-    except Exception:  # a broken Library: the frame has no category facts, never a crash
-        return {}
-    return got if isinstance(got, dict) else {}
 
 
 def _frame_place(request: str, intent: dict) -> str | None:
@@ -3182,8 +3107,6 @@ def _frame_place(request: str, intent: dict) -> str | None:
     return place[:80]
 
 
-_NOT_A_PLACE = frozenset({"us", "usa", "u.s.", "united states", "america", "nationwide", "national", "here",
-                          "near me", "nearby", "my area", "local", "my location", "current location", "home"})
 
 
 def _frame_of(request: str, intent: dict) -> dict:
@@ -3208,289 +3131,32 @@ def _frame_of(request: str, intent: dict) -> dict:
     return frame
 
 
-def _place_taken(place: str, source: dict, params: dict) -> bool:
-    """Did the address take the asked place? Offered for it (scope), filled from it (a geo parameter),
-    or about it by its own declared coverage."""
-    if source.get("scope") == "place" or set(params) & _GEO_PARAMS:
-        return True
-    own = " ".join([str(source.get("name") or ""), str((source.get("coverage") or {}).get("entity") or "")])
-    return all(t in own.casefold() for t in place.casefold().split())
 
 
-_LABEL_STATE_RE = re.compile(r"\(([A-Z]{2})\)\s*$")
 
 
-def _label_state_code(label: str) -> str | None:
-    """The US state code the Library's ``_label`` suffixed to a place reading ("California (PA)"
-    → "PA"), or None. The resolver appends "(STATE_CODE)" for every place/zip fill so a US-state
-    ask that landed on a same-named city of a different state refuses honestly."""
-    assert isinstance(label, str), "label must be a string"
-    from .library_resolve import US_STATES  # local import: avoid a module cycle
-    m = _LABEL_STATE_RE.search(label.strip())
-    if m is None or m.group(1) not in US_STATES:
-        return None
-    return m.group(1)
 
 
-def _national_us_misses_place(source: dict, place: str, request: str) -> bool:
-    """True iff the source is a national-US series (``coverage.geo == "US"``) and the asked place
-    names a US sub-national area (a state the ask spelled, or a city/county the pack's place
-    resolver lands in a US state). Shipping the national figure as the asked place's reading would
-    be a confidently wrong card ("unemployment rate in Ohio" over the FRED national UNRATE); the
-    verify step refuses so the next source gets a shot. Deterministic; no model."""
-    assert isinstance(source, dict) and isinstance(place, str), "args required"
-    assert isinstance(request, str), "request must be a string"
-    if ((source.get("coverage") or {}).get("geo") or "") != "US":
-        return False
-    return bool(_place_states_via_resolver(place, request))
 
 
-def _resolver_landed_outside_state(source: dict, place: str, request: str) -> bool:
-    """True iff the ask names a US state (direct state-name/state-code match) but the source's
-    place resolver landed on a reading whose ``_label`` suffix is a DIFFERENT state ("earthquakes
-    in california" → California, PA). ``states_in`` only reads words the ask spelled, so an
-    ambiguous "California" won't drag in every California-named town's state. Deterministic; no
-    model."""
-    assert isinstance(source, dict) and isinstance(place, str), "args required"
-    assert isinstance(request, str), "request must be a string"
-    # local import: avoid a module cycle
-    from .library_resolve import US_STATES, states_in
-    label = str(source.get("label") or "")
-    label_state = _label_state_code(label)
-    if label_state is None:
-        return False
-    # only a same-named town of a state the ask names ("California (PA)" for "california"): a reading
-    # whose place is called something else ("Los Angeles (CA)" for "LA", which is also Louisiana's
-    # code) was read from the ask's own place words, not mistaken for a state
-    label_name = label.rsplit(" (", 1)[0].strip().lower()
-    named = {code for code in states_in(f"{request} {place}") if US_STATES[code].lower() == label_name}
-    return bool(named) and label_state not in states_in(f"{request} {place}")
 
 
-def _times_in(value: object, out: list) -> None:
-    """Every time-transform output (it keeps its moment) inside a built value or row (bounded walk)."""
-    if getattr(value, "moment", None) is not None:
-        out.append(value)
-    elif isinstance(value, dict):
-        for v in list(value.values())[:40]:
-            _times_in(v, out)
-    elif isinstance(value, list):
-        for v in value[:60]:
-            _times_in(v, out)
 
 
-def _dated_rows(a: dict) -> bool:
-    """Do a list's rows carry their date: a time / date cell, or the month and the day as numbers (the
-    USNO's moon phases and seasons: "Full Moon · 10 · 6")?"""
-    cells = a.get("cells") or []
-    if any(c["type"] in ("time", "date") for c in cells):
-        return True
-    said = [_answer_tokens(f"{c.get('label') or ''} {c['path']}") for c in cells if c["type"] == "number"]
-    return any("month" in t for t in said) and any("day" in t for t in said)
 
 
-def _frame_gap(kind: str | None, chosen: list[dict], preview: dict, now: datetime,
-                window: str | None = None) -> str | None:
-    """What the chosen answers can't be for this kind of question: a next event needs a time still to
-    come; a result needs a score."""
-    if kind in ("next_event", "schedule"):
-        # an observation's own time ("as of", window now) is not an event still to come
-        typed = [a for a in chosen if _event_time(a) or _dated_rows(a)]
-        if not typed:
-            return "it gives no time for the next event"
-        moments: list = []
-        _times_in(preview, moments)
-        # F5 (2026-10-04): judge the FIRST SHOWN moment — a "next" card whose first row is a past
-        # event is wrong even when later rows are future. The forward cut in _build_rows_answer
-        # removes past rows every refresh; this is the belt-and-braces for a build without one.
-        # R4-6 (2026-10-04): an explicit day/night window on a SCHEDULE ("MLB schedule today")
-        # asks for the WHOLE period including past-but-today rows; the stale-first check skips.
-        # R5-1 (2026-10-04): a NEXT-EVENT ask with the same window ("when is the next tide today")
-        # still wants only upcoming — the stale check must fire so an 8:01 AM low at 22:30 never
-        # leads the card.
-        in_period = kind == "schedule" and window in ("today", "tonight")
-        if moments and not in_period and ni.next_event_stale(moments[0], now):
-            return "its next time has already passed"
-    if kind == "result":
-        words: set[str] = set()
-        for a in chosen:  # bounded by _MAX_VALUE_ANSWERS
-            for text in [*a["words"], a["label"], a["name"].replace("_", " "),
-                         *[c.get("label", "") for c in a.get("cells") or []]]:
-                words |= _answer_tokens(text)
-        if not words & _SCORE_WORDS:
-            return "it gives no score or result"
-    return None
 
 
-def _legacy_window_gap(window: str | None, chosen: list[dict], answers: list[dict]) -> str | None:
-    """An older record's answers can't say their window, but a label can: "High today" is never the
-    answer to "on Saturday"."""
-    if not window or _v12(answers):
-        return None
-    for a in chosen:  # bounded by _MAX_VALUE_ANSWERS
-        said = [w for w in ("today", "tonight", "tomorrow") if w in a["label"].lower()]
-        if a["kind"] == "value" and said and said[0] != window:  # a day-labeled value holds that day only
-            return f"it shows {a['label']}, not {_window_words(window)}"
-    return None
 
 
-def _lacks(expects: list[str], answers: list[dict]) -> list[str]:
-    """The components a complete answer of this kind holds (taxonomy ``expects``) that none of the
-    source's answers reports ("surf" → wind on a wave-only source)."""
-    out = []
-    for comp in expects[:10]:  # bounded by the closed component list
-        if comp in _MEASURE_CUES or comp in _ANSWER_MEASURES:
-            hit = any(a.get("measure") == comp or (comp in _MEASURE_CUES and _covers_measure(a, comp))
-                      for a in answers)
-        elif comp in ("observed_time", "start_time"):
-            hit = any(a.get("type") == "time" or any(c["type"] == "time" for c in a.get("cells") or [])
-                      for a in answers)
-        else:
-            words = _COMPONENT_WORDS.get(comp, frozenset(_answer_tokens(comp.replace("_", " "))))
-            hit = any(words & _answer_tokens(" ".join([*a["words"], a["label"], a["name"].replace("_", " "),
-                                                         *[c.get("label", "") for c in a.get("cells") or []]]))
-                      for a in answers)
-        if not hit:
-            out.append(comp.replace("_", " "))
-    return out
 
 
-def _verify_source(frame: dict, source: dict, params: dict, answers: list[dict], request: str,
-                   intent: dict) -> tuple[list[str], list[str]]:
-    """Source-level verify (R4, 2026-10-04): the checks that need the SOURCE and the ASK but no
-    build output. Returns (reasons, notes). Runs before the declared-answers build AND before the
-    model mapping path, so a wrong-source pick never ships a confidently wrong model-mapped card.
-
-    Refused when: (a) the source is another kind of data than the ask's category; (a2) a different
-    named subject; (b) the ask names a place the address never took; (f) a stray topic word."""
-    reasons: list[str] = []
-    notes: list[str] = []
-    cats = [str(c) for c in source.get("categories") or []]
-    asked = frame["categories"]
-    about_named = _about_named(frame, source, params)
-    tops = {c.split("/")[0] for c in cats}
-    said, meant = frame.get("ask_categories") or [], frame.get("about_categories") or []
-    asked_tops = {c.split("/")[0] for c in said + meant}
-    if said and meant and cats and not about_named and not asked_tops & tops \
-            and not _speaks_to(source, request, intent, params, asked_tops):
-        reasons.append(f"it is {cats[0].split('/')[0]} data, not {asked[0].split('/')[0]}")
-    other = _other_subject(frame, source, params, answers, request, intent, about_named)
-    if other:
-        reasons.append(other)
-    sub = next((c for c in asked if c in cats), None) \
-        or next((c for c in asked if c.split("/")[0] in {x.split("/")[0] for x in cats}), None) \
-        or (asked[0] if asked else "")
-    info = _subcategory(frame["lib"], sub) if frame["lib"] is not None and sub else {}
-    place = frame["place"]
-    if place and not _place_taken(place, source, params):
-        # fix12-lib (2026-10-05): a NAMED US-state (or city the resolver lands in a US state) on a
-        # national-US series ("Unemployment rate (FRED)", coverage.geo="US") is a place the address
-        # never took — the national cut shown as the asked place's reading is a confidently wrong
-        # card. Refuse even when the subcategory's policy says the topic is place-free, so the
-        # next source gets a shot. A truly place-free subject (aurora Kp over a region) still rides
-        # through as a note because its source's coverage isn't US-national.
-        policy_match = (info.get("policy") or {}).get("match")
-        if policy_match in ("none", "name") and not _national_us_misses_place(source, place, request):
-            notes.append(f"{source.get('provider') or 'this source'} isn't specific to {place}")
-        else:
-            reasons.append(f"it isn't for {place}")
-    elif place and _resolver_landed_outside_state(source, place, request):
-        # fix12-lib (2026-10-05): a US-state ask whose ``place`` resolver landed on a same-named
-        # city of A DIFFERENT state ("earthquakes in california" → California, PA) is the wrong
-        # read; the resolver's own ``_label`` suffixes "(STATE_CODE)" so a mismatch tells us to
-        # refuse. The state-bounded sibling source ("USGS earthquakes in a state", us_state
-        # resolver) gets a shot; "earthquakes near Pinnacles CA" keeps the near-a-place source
-        # because its label still says "(CA)".
-        reasons.append(f"it isn't for {place}")
-    stray = sorted(_stray_topics(frame, source, params, answers, request, intent))
-    if stray and not about_named:
-        reasons.append("it isn't about " + ", ".join(stray))
-    return reasons, notes
 
 
-# a text product (the written forecast discussion) is answered only by a genuine ``text``-typed
-# cell — a short category word ("Mostly Clear") is a label, never a written product (G3, set G
-# #50). Only "discussion" names such a product: a summary / outlook / brief IS served by the
-# periods' short forecasts (sets F #49 and G #49, live and partial), and an "advisory" is an
-# alert product served by the alert lists (a one-row alert list binds as a measure and would be
-# refused here).
-_TEXT_PRODUCT_WANTS = frozenset({"discussion"})
 
 
-def _text_product_gap(built: dict, intent: dict) -> str | None:
-    """None, or the text-product word every want the user said names, when the one-row build
-    holds no ``measure`` field of type ``text`` for it — the honest answer is no card, not a
-    numeric stat wearing the asked word (``_verify_frame``)."""
-    assert isinstance(built, dict) and isinstance(intent, dict), "built + intent required"
-    wants = [str(w) for w in intent.get("wants") or []][:_MAX_INTENT_FIELDS]
-    if not wants:
-        return None
-    named = [next(iter(_answer_tokens(w) & _TEXT_PRODUCT_WANTS), None) for w in wants]
-    if not all(named):
-        return None
-    record = built["scene"].get("record") or {}
-    assert isinstance(record, dict), "the sealed scene carries a record dict"
-    if record.get("kind") != "measure":
-        return None
-    if any(f.get("role") == "measure" and f.get("type") == "text" for f in record.get("fields") or []):
-        return None
-    return named[0]
 
 
-def _verify_frame(frame: dict, source: dict, params: dict, built: dict, request: str, intent: dict,
-                  now: datetime) -> tuple[list[str], list[str]]:
-    """Does this declared-answers build answer the ask's frame? Returns (reasons it doesn't — any one
-    refuses the build —, honest notes for a card that does). Deterministic; no model.
-
-    Source-level checks (``_verify_source``: a / a2 / b / f) run first; build-level checks follow:
-    (c) chosen answers can't be this kind of question (a next event without a time still to come,
-    a result without a score); (d) an older record's answer is labeled for another day than the
-    asked window; (e) nothing chosen speaks to the words the user asked about, and some asked want
-    is unanswered — refused also when every want the user said is unanswered."""
-    chosen, answers = built["chosen"], built["answers"]
-    reasons, notes = _verify_source(frame, source, params, answers, request, intent)
-    # fix7-lib (2026-10-04): a chosen answer with a row filter that names the ask's named value
-    # (CBP "San Ysidro", NHL "Metropolitan") scopes the data to it; the "isn't specific to" note
-    # the source-level place check would ship from the subcategory policy is no longer honest,
-    # and a subdivision ask whose rows the source doesn't carry has already refused upstream.
-    if frame["place"] and _scoping_names_place(chosen, frame["place"]):
-        tag_note = f"isn't specific to {frame['place']}"
-        tag_reason = f"it isn't for {frame['place']}"
-        notes = [n for n in notes if tag_note not in n]
-        reasons = [r for r in reasons if r != tag_reason]
-    asked = frame["categories"]
-    cats = [str(c) for c in source.get("categories") or []]
-    sub = next((c for c in asked if c in cats), None) \
-        or next((c for c in asked if c.split("/")[0] in {x.split("/")[0] for x in cats}), None) \
-        or (asked[0] if asked else "")
-    info = _subcategory(frame["lib"], sub) if frame["lib"] is not None and sub else {}
-    gap = _frame_gap(frame["kind"], chosen, built["preview_payload"], now,
-                      window=frame.get("window"))         or _legacy_window_gap(frame["window"], chosen, answers)
-    if gap:
-        reasons.append(gap)
-    text_gap = _text_product_gap(built, intent)
-    if text_gap:
-        reasons.append(f"no source reports a forecast {text_gap} yet")
-    about: set[str] = set()
-    for text in [str(intent.get("subject") or ""), *(str(w) for w in intent.get("wants") or [])]:
-        about |= _answer_tokens(text.replace("_", " "))
-    distinct = (_answer_tokens(request) & about) - _WINDOW_WORDS - _GENERIC_SUBJECT \
-        - _answer_tokens(str((source.get("coverage") or {}).get("entity") or ""))
-    for value in params.values():  # bounded by the params
-        distinct -= _answer_tokens(value)
-    # F12 (2026-10-04): refuse when EVERY want the user said is unanswered — the existing distinct
-    # check passed when one shared subject word scored even with all quantities missing ("gas
-    # inventories this week" scored on "gas" alone and shipped a retail price source).
-    # ISS "coordinates" stays accepted because _WANT_SYNONYMS covers it via lat / lon / position.
-    said_wants = _said_wants(request, intent.get("wants") or [], list(params.values()))
-    all_unanswered = bool(said_wants) and len(built["unanswered"]) >= len(said_wants)
-    if built["unanswered"] and (all_unanswered or (
-            distinct and not any(_answer_score(a, distinct) > 0 for a in chosen))):
-        reasons.append("it doesn't report " + ", ".join(built["unanswered"]))
-    if sub in cats:  # a complete answer of the kind it is filed for: name what the source can't report
-        lacks = [x for x in _lacks(list(info.get("expects") or []), answers) if x not in built["unanswered"]]
-        built["unanswered"] = list(built["unanswered"]) + lacks
-    return reasons, notes
 
 
 def _fit_check(answered: dict, frame: dict, intent: dict, request: str,
@@ -3520,82 +3186,12 @@ def _fit_check(answered: dict, frame: dict, intent: dict, request: str,
         return None
 
 
-def _said_wants(request: str, wants: list, filled: list[str]) -> list[str]:
-    """The wants the user actually said in the request (a want whose tokens overlap the request
-    minus filled values). Used by _verify_frame's F12 branch."""
-    ask = _answer_tokens(request or "")
-    for value in filled:  # bounded by params + place
-        ask -= _answer_tokens(value)
-    out: list[str] = []
-    for want in (wants or [])[:_MAX_INTENT_FIELDS]:
-        if _answer_tokens(str(want).replace("_", " ")) & ask:
-            out.append(str(want))
-    return out
 
 
-# F6-C (blind-5, 2026-10-04): "flu levels in Texas" shipped a mapping-path card
-# whose rows named MS/NJ/VA/AL/KS with no Texas row — the model judge couldn't
-# tell. ``_rows_contradict_place`` is the code check: when the asked place names
-# a US state and the built rows carry state cells for OTHER states but none for
-# the asked one, the pick was wrong, not a useful disclosure. Fires only on
-# clearly state-keyed rows, so a per-hour forecast with no state cells is not
-# affected. The row-filter work (fix6-rows) owns the drop; this refuses when
-# filtering is impossible (nothing for the asked state is on the source today).
-_MAX_CHECKED_ROWS = 50
-_MAX_CHECKED_CELLS = 30
 
 
-def _rows_contradict_place(preview: object, place: str) -> bool:
-    """True iff ``preview['rows']`` names US states OTHER than ``place`` and
-    never the asked one. fix10 (blind-8, 2026-10-04): a ``county`` cell is a
-    state signal too — the NY flu dataset's rows name counties (OTSEGO,
-    NIAGARA, …) that the place resolver maps to NY, so a Texas ask refuses
-    even without a state cell. Bounded, pure-code, no model."""
-    assert isinstance(place, str), "place must be a string"
-    asked_code = _state_code_of(place)
-    if asked_code is None:
-        return False
-    rows = (preview or {}).get("rows") if isinstance(preview, dict) else None
-    if not isinstance(rows, list) or not rows:
-        return False
-    from .library_resolve import US_STATES  # local import: avoid a module cycle
-    seen: set[str] = set()
-    county_cells: list[str] = []
-    for row in rows[:_MAX_CHECKED_ROWS]:
-        if not isinstance(row, dict):
-            continue
-        for key, value in list(row.items())[:_MAX_CHECKED_CELLS]:
-            if not isinstance(value, str):
-                continue
-            raw = value.strip()
-            if len(raw) == 2 and raw.upper() in US_STATES:
-                seen.add(raw.upper())
-                continue
-            code = _state_code_of(raw)
-            if code is not None:
-                seen.add(code)
-                continue
-            if isinstance(key, str) and "county" in key.lower() \
-                    and len(county_cells) < _MAX_CHECKED_CELLS and raw:
-                county_cells.append(raw)
-    if county_cells and asked_code not in seen:
-        for cell in county_cells:
-            seen |= _place_states_via_resolver(cell, "")
-            if asked_code in seen:
-                break
-    return bool(seen) and asked_code not in seen
 
 
-def _state_code_of(place: str) -> str | None:
-    """The two-letter US state code the string names, or None."""
-    assert isinstance(place, str), "place must be a string"
-    from .library_resolve import _STATE_BY_NAME, US_STATES  # local: no cycle
-    raw = place.strip()
-    if not raw:
-        return None
-    if len(raw) == 2 and raw.upper() in US_STATES:
-        return raw.upper()
-    return _STATE_BY_NAME.get(raw.lower())
 
 
 # fix8 (blind-7, 2026-10-04): "covid wastewater levels king county" shipped the
@@ -3635,63 +3231,8 @@ def _place_states_via_resolver(place: str, request: str) -> set[str]:
     return {s for s in found if s}
 
 
-def _source_host_states(source: dict) -> set[str]:
-    """The US states the picked source's publisher host names. Dot-split host
-    labels; a 2-char label whose uppercase is a USPS code (``data.ny.gov``,
-    ``data.pa.gov``) → the code; a lowercase label that is a full state name
-    (``data.texas.gov``, ``data.delaware.gov``) → its code; a ``cityof<city>``
-    label (``data.cityofchicago.org``) → the states the city resolves to via
-    the pack's place resolver. {} when no host or no state recognisable.
-    Bounded by the host's dot labels. (fix10 blind-8, 2026-10-04:
-    health.data.ny.gov shipped a 'flu activity in texas' card.)"""
-    assert isinstance(source, dict), "source must be a dict"
-    from .library_resolve import _STATE_BY_NAME, US_STATES  # local: avoid a cycle
-    host = str((source.get("coverage") or {}).get("entity") or "")
-    if "." not in host:
-        tmpl = str((source.get("access") or {}).get("url_template") or "")
-        try:
-            host = urlparse(tmpl).hostname or ""
-        except (ValueError, TypeError):
-            host = ""
-    if not host:
-        return set()
-    out: set[str] = set()
-    for label in host.lower().split(".")[:8]:  # bounded by dot labels
-        if len(label) == 2 and label.upper() in US_STATES:
-            out.add(label.upper())
-            continue
-        code = _STATE_BY_NAME.get(label)
-        if code:
-            out.add(code)
-            continue
-        m = re.match(r"cityof([a-z]+)$", label)
-        if m:
-            out |= _place_states_via_resolver(m.group(1), "")
-    return out
 
 
-def _source_contradicts_place(source: dict, place: str, request: str) -> bool:
-    """True iff the picked source's own name / coverage / publisher host names
-    a specific US state and the ask's place can't land in it. The row-level
-    fix6-map check reads the preview; this reads the SOURCE record so a
-    single-state dataset with no state-keyed rows is still refused for a
-    different-state ask. fix10 (blind-8, 2026-10-04) adds the publisher-host
-    detection (health.data.ny.gov → NY, data.pa.gov → PA, data.texas.gov → TX,
-    data.cityofchicago.org → IL via the place resolver). Deterministic; no
-    model."""
-    assert isinstance(source, dict) and isinstance(place, str), "args required"
-    assert isinstance(request, str), "request must be a string"
-    from .library_resolve import states_in  # local: avoid a cycle
-    source_text = " ".join([str(source.get("name") or ""),
-                             str((source.get("coverage") or {}).get("entity") or ""),
-                             str((source.get("coverage") or {}).get("geo") or "")])
-    source_states = states_in(source_text) | _source_host_states(source)
-    if len(source_states) != 1:
-        return False  # a nationwide / unknown-coverage source: this check doesn't fire
-    if not place.strip():
-        return False  # no asked place: nothing to contradict
-    ask_states = _place_states_via_resolver(place, request)
-    return bool(ask_states) and bool(source_states.isdisjoint(ask_states))
 
 
 def _judge_wants_unanswered(judge: dict | None, request: str, intent: dict,
@@ -3733,205 +3274,20 @@ def _judge_wants_unanswered(judge: dict | None, request: str, intent: dict,
     return out
 
 
-def _stray_topics(frame: dict, source: dict, params: dict, answers: list[dict], request: str, intent: dict) -> set[str]:
-    """The subject's topic words (taxonomy keywords the user said) that belong only to subcategories this
-    source isn't filed under and that nothing of the source mentions. A word the Library doesn't know as
-    a topic (a place, a nickname) is never stray."""
-    lib = frame.get("lib")
-    try:
-        taxonomy = lib.taxonomy() if lib is not None else []
-    except Exception:  # an older or broken Library: no topic facts
-        return set()
-    filed = {str(c) for c in source.get("categories") or []}
-    words = f" {' '.join(_folded_words(request))} "
-    # where a word belongs: every subcategory whose name or keywords use it; whether it is a topic at all: the
-    # Library uses it as one on its own — a subcategory's name ("TV shows", "Apps & software"), a
-    # one-word keyword, or a phrase the user said whole ("red" alone isn't "red flag warning")
-    topics: dict[str, set[str]] = {}
-    eligible: set[str] = set()
-    for cat in taxonomy:  # bounded by the taxonomy
-        for sub in cat.get("subcategories") or []:
-            sid = f"{cat['id']}/{sub['id']}"
-            kws = list(sub.get("keywords") or [])
-            for tok in _answer_tokens(" ".join([str(cat.get("id") or ""), str(sub.get("label") or ""), *kws])):
-                topics.setdefault(tok, set()).add(sid)
-            eligible |= _answer_tokens(" ".join([str(sub.get("label") or ""), *(
-                kw for kw in kws if len(kw.split()) == 1 or f" {' '.join(_folded_words(kw))} " in words)]))
-    said = (_answer_tokens(str(intent.get("subject") or "")) & _answer_tokens(request)) \
-        - _GENERIC_SUBJECT - _WINDOW_WORDS - _answer_tokens(str(intent.get("place") or ""))
-    own: set[str] = _answer_tokens(" ".join([str(source.get("name") or ""), str(source.get("description") or ""),
-                                             str((source.get("coverage") or {}).get("entity") or ""),
-                                             *(str(x) for x in source.get("examples") or [])]))
-    for a in answers:  # bounded by _MAX_ANSWERS
-        own |= _answer_tokens(" ".join([*a["words"], a["label"], a["name"].replace("_", " "),
-                                        *[c.get("label", "") for c in a.get("cells") or []]]))
-    stray = {t for t in said - own if t in eligible and t in topics and not topics[t] & filed}
-    # F7 (2026-10-04): a proper-noun subject word the user said that no part of this source takes
-    # (own words, readings, params, filter) is stray even when the Library's taxonomy doesn't carry
-    # it ("Ukraine" on a general US headline feed). Scoped to sources that (a) have no single-name
-    # entity (a league / provider "MLB", "CTA" already covers unlisted team / nickname words — the
-    # ask's teams are its subject area), and (b) take no geo parameter — a geo-filled station is
-    # place-specific and the water-body of its area isn't stray. A LIST entity (local-news-metro's
-    # semicolon-separated metros) still runs: the exemption only covers names the entity actually
-    # takes (``own`` already holds them); a brand it doesn't take ("Tribune", "Post") is stray.
-    # F7-B class fix (2026-10-04): the request's RAW casing — never the model's Title-Case subject
-    # (phones auto-capitalize sentence-initial, the model Title-Cases its subject). Named-topics
-    # (2026-10-04): the sentence-initial cap is a name ONLY when the intent's validated ``names``
-    # include it — the local model fills that narrow closed blank, code validates every entry is a
-    # whole-word substring of the ask, and the proper-noun check consumes the result (never guesses
-    # by capitalization alone). Mid-sentence caps and all-caps acronyms stay proper.
-    entity = str((source.get("coverage") or {}).get("entity") or "").strip()
-    if not (set(params) & _GEO_PARAMS) and (not entity or ";" in entity
-                                             or _entity_vocabulary(lib, entity)):
-        # fix6-rows F7-C (2026-10-04): a single-entity league source still refuses a proper token
-        # its entity's domain doesn't take ("NFC East" on MLB standings) — the exemption subtracts
-        # team / league aliases of that league (Yankees, AL East) rather than skipping the whole
-        # check. For non-sports entities the exemption stays as it was (readings / own cover them).
-        proper = _request_proper(request, intent.get("names") or ())
-        proper -= _answer_tokens(" ".join(str(r) for r in (source.get("readings") or [])))
-        proper -= _answer_tokens(str(intent.get("place") or ""))
-        for value in params.values():  # bounded by the params
-            proper -= _answer_tokens(value)
-        proper -= _entity_vocabulary(lib, entity)
-        stray |= (proper & said) - own
-    # fix7-lib (2026-10-04): a Library provider named in the ask that isn't this source's
-    # provider is stray even when the intent's ``names`` blank missed it (a lowercase outlet
-    # the model didn't flag). Reads the pack's own provider vocabulary — no network, no model.
-    # Tokens shared with this source's own words (NPR Business holds "news") never land in
-    # stray; same for a param value or the ask's named place.
-    stray |= _foreign_providers_in(lib, request, source, own, params, intent)
-    return stray
 
 
-def _foreign_providers_in(lib: object, request: str, source: dict, own: set[str],
-                            params: dict, intent: dict) -> set[str]:
-    """The folded tokens of every outlet name the ask carries that doesn't match this source's
-    own provider, less tokens the source already covers (``own``), the filled params, and the
-    ask's named place. The outlet names come from (a) the pack's ``providers_named_in``, (b)
-    intent.names whose words end in a publisher suffix ("Weather Channel"), and (c) a bounded
-    well-known-outlet set the pack hasn't indexed yet ("Axios Denver"). {} when nothing matches
-    or every named outlet IS this source's. Bounded by the pack's providers + intent.names cap.
-
-    fix7-lib (2026-10-04): "reuters business news" shipped from NPR Business because the intent
-    model missed the lowercase outlet; this backstop reads the Library vocabulary so an ask that
-    names any pack-known outlet the pick isn't from refuses honestly.
-    fix8 (blind-7, 2026-10-04): "Weather Channel 10 day for Asheville" shipped NWS; the pack
-    doesn't index Weather Channel. The outlet-suffix set and well-known-outlet set together
-    catch outlet names the pack hasn't indexed yet."""
-    assert isinstance(source, dict) and isinstance(params, dict), "source + params required"
-    getter = getattr(lib, "providers_named_in", None)
-    named: set[str] = set()
-    if callable(getter):
-        try:
-            got = getter(request)
-        except Exception:  # a broken Library: fall through to intent.names
-            got = None
-        if got:
-            named = {str(p) for p in got}
-    for name in (intent.get("names") or [])[:_MAX_INTENT_NAMES]:
-        if not isinstance(name, str) or not name:
-            continue
-        words = {w for w in re.findall(r"[a-z0-9]+", name.lower()) if len(w) >= 2}
-        if words & (_OUTLET_SUFFIX_WORDS | _KNOWN_OUTLET_WORDS):
-            named.add(name)
-    if not named:
-        return set()
-    own_pname = str(source.get("provider") or "").strip().lower()
-    taken = _answer_tokens(str(intent.get("place") or ""))
-    for value in params.values():  # bounded by the params
-        taken |= _answer_tokens(value)
-    out: set[str] = set()
-    for provider in named:  # bounded by the pack's providers (few match any one ask)
-        if provider.strip().lower() == own_pname:
-            continue
-        out |= _answer_tokens(_amp(str(provider))) - _NAME_STOP - own - taken
-    return out
 
 
-def _entity_vocabulary(lib: object, entity: str) -> set[str]:
-    """Tokens the ``entity``'s domain names (team / league aliases for a sports league entity),
-    folded as ``_answer_tokens`` folds them (plurals → singular, filler stop) so the subtraction
-    reads the same vocabulary the proper-noun check does. {} when the Library has no such method
-    or the entity isn't a league. The fix6-rows F7-C class fix (2026-10-04) subtracts these from
-    the proper-noun check so a single-entity league source still accepts a team ask it covers
-    while refusing a foreign conference ask."""
-    assert isinstance(entity, str), "entity must be a string"
-    getter = getattr(lib, "entity_vocabulary", None)
-    if not callable(getter) or not entity:
-        return set()
-    try:
-        got = getter(entity)
-    except Exception:  # a broken Library: the proper check falls back to no league subtraction
-        return set()
-    if not isinstance(got, set):
-        return set()
-    folded: set[str] = set()
-    for word in got:  # bounded by the league's team / sport_league aliases
-        folded |= _answer_tokens(str(word))
-    return folded
 
 
-def _request_proper(request: str, intent_names: list[str] | tuple = ()) -> set[str]:
-    """Proper-noun tokens in the RAW request (never the model's subject casing). Three disjoint
-    sources: (a) the validated intent ``names`` — the model's narrow closed blank (named topics,
-    2026-10-04); (b) capitalized tokens NOT at a sentence start — mid-sentence caps are always
-    proper; (c) all-caps acronyms of two or more letters that aren't a stop word — "FDA", "SEC",
-    "TSA" survive even sentence-initial.
-
-    A sentence-initial capitalized word is proper ONLY when the intent named it: phones auto-
-    capitalize the start of every ask ("Biggest earthquakes today"), and without a corroborating
-    name from the model that cap is no signal on its own. With no intent names (no model, or a
-    hallucinated name was dropped), sentence-initial capitals are not names."""
-    assert isinstance(request, str), "request must be a string"
-    assert isinstance(intent_names, (list, tuple)), "intent_names must be a list"
-    text = _amp(request)
-    named = _answer_tokens(_amp(" ".join(str(n) for n in intent_names)))
-    out: set[str] = set(named)
-    # the start of the ask and anything after a sentence-ending . ! ? begins a sentence; the first
-    # [A-Za-z0-9]+ word that follows is the sentence-initial one.
-    for sentence in re.split(r"[.!?]+\s*", text):  # bounded by the ask length
-        words = re.findall(r"[A-Za-z0-9]+", sentence)
-        for idx, word in enumerate(words):  # bounded by the sentence length
-            if not (word[0].isupper() or any(ch.isdigit() for ch in word)):
-                continue
-            folded = _answer_tokens(word)
-            if word.isupper() and len(word) >= 2 and word.isalpha() and not folded <= _NAME_STOP:
-                out |= folded  # acronym (c): "FDA", "SEC", "TSA" — never a stop word
-                continue
-            if idx == 0 and not (folded <= named):
-                continue  # (a) sentence-initial caps are proper only when the intent named them
-            out |= folded  # (b) mid-sentence cap
-    return out
 
 
-# words that say what KIND of data a source gives (its name's "service alerts", "latest version") or fill an ask
-# out ("did", "doing"), never which subject it is about
-_KIND_WORDS = frozenset(_answer_tokens(
-    "service services alert alerts advisory advisories version versions release releases schedule schedules "
-    "standings update updates outage incident average daily close observations result game games per spot all "
-    "items trains system official api feed did doing done having they their them get got can could should would "
-    "yesterday last night ago past going gonna"))
-_NAME_STOP = _ANSWER_STOP | _GENERIC_SUBJECT | _WINDOW_WORDS | _SCORE_WORDS | _KIND_WORDS | _answer_tokens(
-    " ".join(LIBRARY_ENGLISH))
 
 
-def _amp(text: str) -> str:
-    """"S&P" is one name ("sp"), not the letters s and p."""
-    return re.sub(r"(?<=[A-Za-z])&(?=[A-Za-z])", "", str(text or ""))
 
 
-def _proper_tokens(text: str) -> set[str]:
-    """The words of a record's declared entity that name something (capitalized, an acronym, a number:
-    "CTA", "Chicago", "Win 4"), not the lowercase words that describe it ("trains", "versions")."""
-    words = re.findall(r"[A-Za-z0-9]+", _amp(text))
-    return _answer_tokens(" ".join(w for w in words if w[0].isupper() or any(ch.isdigit() for ch in w)))
 
 
-def _names_hit(said: set[str], names: set[str]) -> bool:
-    """Does a word the user said name one of ``names``? Whole words, or a short form the name begins
-    ("fed" → "federal", "gas" → "gasoline")."""
-    return any(a == n or (len(a) >= 3 and len(n) >= 3 and (a.startswith(n) or n.startswith(a)))
-               for a in said for n in names)
 
 
 def _kind_label_tokens(lib: object, source_id: str) -> set[str]:
@@ -3953,196 +3309,24 @@ def _kind_label_tokens(lib: object, source_id: str) -> set[str]:
     return out
 
 
-def _kind_tokens(lib: object, cats: list[str]) -> set[str]:
-    """The words of the taxonomy keywords of the subcategories a source is filed under (its kind)."""
-    try:
-        taxonomy = lib.taxonomy() if lib is not None else []
-    except Exception:  # an older or broken Library: no kind facts
-        return set()
-    out: set[str] = set()
-    for cat in taxonomy:  # bounded by the taxonomy
-        for sub in cat.get("subcategories") or []:
-            if f"{cat.get('id')}/{sub.get('id')}" in cats:
-                for kw in sub.get("keywords") or []:
-                    out |= _answer_tokens(_amp(kw))
-    return out
 
 
-def _own_words(source: dict, answers: list[dict]) -> set[str]:
-    """Every word the source uses about itself: name, provider, description, entity, examples, answers."""
-    texts = [str(source.get("name") or ""), str(source.get("provider") or ""), str(source.get("description") or ""),
-             str((source.get("coverage") or {}).get("entity") or ""), *(str(x) for x in source.get("examples") or [])]
-    for a in answers:  # bounded by _MAX_ANSWERS
-        texts += [*a["words"], a["label"], a["name"].replace("_", " "), *[c.get("label", "") for c in a.get("cells") or []]]
-    return _answer_tokens(_amp(" ".join(texts)))
 
 
-def _subject_names(source: dict, kind: set[str]) -> set[str]:
-    """What an entity-specific source is called: the naming words of its declared entity, its name, and the
-    words its example asks use for it ("baseball" for MLB, "jobs" for payrolls, the CTA's "red line") that
-    aren't the words of its kind ("delays")."""
-    cov = source.get("coverage") or {}
-    base = _proper_tokens(str(cov.get("entity") or "")) | _answer_tokens(_amp(str(source.get("name") or "")))
-    alias = _answer_tokens(_amp(" ".join(str(x) for x in source.get("examples") or [])))
-    names = base | (alias - kind)
-    return {n for n in names - _NAME_STOP if len(n) >= 2 or n.isdigit()}
 
 
-def _speaks_to(source: dict, request: str, intent: dict, params: dict, asked_tops: set[str]) -> bool:
-    """Is the source known by every naming word of the ask's subject — its name, its example asks, the values
-    its address took ("oil stocks report" is an example ask of the EIA's petroleum stocks)? Not by its
-    description: the Kp forecast's "geomagnetic storm" doesn't make it the answer to "will it storm tonight".
-    Never when the ask names nothing, and never when the intent names the asked kind itself ("weather":
-    "KC storms tonight" is no misfiled hurricane ask)."""
-    about = " ".join([str(intent.get("subject") or ""), *(str(w) for w in intent.get("wants") or [])])
-    if asked_tops & _answer_tokens(about):
-        return False
-    said = (_answer_tokens(_amp(request)) & _answer_tokens(_amp(about))) - _NAME_STOP \
-        - _answer_tokens(str(intent.get("place") or ""))
-    known = _answer_tokens(_amp(" ".join([str(source.get("name") or ""), *(str(x) for x in source.get("examples") or []),
-                                          *(str(v) for v in params.values())])))
-    return bool(said) and said <= known
 
 
-def _about_named(frame: dict, source: dict, params: dict) -> bool:
-    """Was the address filled from a subject the user named, of a kind the ask is about? The filled
-    parameter's resolver must be one the policy of a category the intent's subject + wants classify as
-    resolves (the Library's ``subcategory()``); with no category facts the fill stands."""
-    filled = {n: r for n, r in (source.get("entity_params") or {}).items() if n in params}
-    if not filled:
-        return False
-    meant = frame.get("about_categories") or []
-    if frame.get("lib") is None or not meant:
-        return True
-    takes: set[str] = set()
-    for sub in meant:  # bounded: three categories
-        takes |= {str(r) for r in ((_subcategory(frame["lib"], sub).get("policy") or {}).get("resolvers") or [])}
-    return bool(set(filled.values()) & takes)
 
 
-_SUBNATIONAL_RE = re.compile(r"^[A-Z]{2}-[A-Z0-9]{1,3}$")
 
 
-def _own_readings(source: dict) -> list[str]:
-    """The pick row's OWN reading (R8, 2026-10-04 — revised R9 live 2026-10-04): its row's
-    label alone. A reading sealed from a SIBLING row of the pick names what THAT row's
-    resolver took; a league-wide source without its own label (no team filter) does not own a
-    sibling team row's "Boston Red Sox (mlb)". ``_other_subject``'s sibling-readings check
-    runs separately so this source still has to carry those names or honestly refuse."""
-    assert isinstance(source, dict), "source must be a dict"
-    own_label = str(source.get("label") or "").strip()
-    return [own_label] if own_label else []
 
 
-def _other_subject(frame: dict, source: dict, params: dict, answers: list[dict], request: str, intent: dict,
-                   about_named: bool) -> str | None:
-    """D1: the source is about a named subject the ask doesn't name — Slack for "is zoom having problems",
-    the CTA for "WMATA red line delays", the Dow for "the S&P", Android for "ollama". A source about one
-    named thing serves the ask when the ask names it; else only when every naming word the user said is
-    one of its own words (and it isn't bound to one region: "subway delays" isn't BART's). A source whose
-    address the user's named subject filled (a team, a ticker) must be about THAT subject: its reading
-    ("Miami Marlins") holds every naming word the subject said ("Inter Miami" → refused)."""
-    assert isinstance(source, dict) and isinstance(params, dict), "source + params required"
-    assert isinstance(request, str) and isinstance(intent, dict), "request + intent required"
-    cov = source.get("coverage") or {}
-    entity = " ".join(str(cov.get("entity") or "").split())
-    subject = " ".join([str(intent.get("subject") or ""), *(str(w) for w in intent.get("wants") or [])])
-    taken = _answer_tokens(str(intent.get("place") or ""))
-    for value in params.values():  # bounded by the params
-        taken |= _answer_tokens(value)
-    own = _own_words(source, answers)
-    # R9 (2026-10-04, yen→dollar + Red Sox): a reading sealed from a SIBLING row of the pick (an earlier
-    # pick's resolver label like "Japanese yen · US dollar", "Boston Red Sox (mlb)") names a subject the
-    # ask has resolved; this source must carry it (own words / params / own label) or refuse. A league-
-    # wide source after a team-source re-pick never ships for the named team; a FRED euro series after a
-    # Frankfurter yen re-pick never ships for yen. Its own row's reading is excluded (that is the row's
-    # own filter — the entity_params branch below carries the own-label check).
-    own_label_key = str(source.get("label") or "").split(" (")[0].strip().lower()
-    for reading in (source.get("readings") or [])[:8]:  # bounded: _library_readings cap
-        rkey = str(reading).split(" (")[0].strip()
-        if not rkey or rkey.lower() == own_label_key:
-            continue  # this source's own reading, not a sibling's
-        rtokens = _answer_tokens(_amp(rkey)) - _NAME_STOP - taken
-        if rtokens and not (rtokens <= own):
-            return f"it isn't about {rkey[:60]}"
-    if source.get("entity_params"):
-        label = str(source.get("label") or "").split(" (")[0].strip()
-        if not about_named or not label:
-            return None
-        # fix7-lib (2026-10-04): the stray-subject check reads the words the USER said — never
-        # tokens that only live in the model's subject. The model title-cases a category phrasing
-        # ("Currency Conversion" for "USD to MXN") and the title case alone pulled "conversion"
-        # into named, refusing a right pick. The Rangers hockey (team-row) case still refuses the
-        # Texas Rangers' row from a request "Rangers hockey score": "hockey" is the user's own
-        # word and the Library's keywords for sports/results don't carry it.
-        named = _answer_tokens(_amp(request)) - _NAME_STOP - taken
-        initials = "".join(w[0] for w in re.findall(r"[A-Za-z0-9]+", label)).lower()
-        # R9 (2026-10-04, yen→dollar history): drop stray words that describe the source's KIND
-        # (markets/fx keywords: "currency", "forex") — the model title-cases its subject
-        # ("Currency Conversion") and ``_proper_tokens`` pulls those category words even when the user
-        # never said them. A kind word is not a different-entity signal.
-        kind = _kind_tokens(frame.get("lib"), [str(c) for c in source.get("categories") or []])
-        stray = {t for t in named - own - kind
-                 if t != initials and not _names_hit({t}, _answer_tokens(_amp(label)))}
-        return f"it is about {label}, not {' '.join(sorted(stray))}" if stray else None
-    if not entity:
-        return None
-    cats = [str(c) for c in source.get("categories") or []]
-    kind = _kind_tokens(frame.get("lib"), cats)
-    said = (_answer_tokens(_amp(request)) | _answer_tokens(_amp(subject))) - _NAME_STOP - taken
-    # a name with a day word names something ("Saturday Night Live"), its words are no window or filler
-    said |= {t for m in _DAY_NAME_RE.finditer(f"{request} {subject}".lower()) for t in _answer_tokens(m.group(0))}
-    names = _subject_names(source, kind)
-    # called by its proper name ("Slack", "CTA", not "crude oil"): a kind word its words lack ("degraded")
-    # names nothing else
-    by_name = _names_hit(said, _proper_tokens(f"{entity} {source.get('name') or ''}") - _NAME_STOP)
-    if _names_hit(said, names) and not _other_of_kind(frame, source, said, own, names, cats, by_name):
-        return None
-    # R8 (2026-10-04, revised R9 live): only the source's OWN row's reading subtracts from the
-    # user's naming words. Sibling-row readings (another pick's team / currency) are handled by
-    # the sibling-readings refusal at the top of this function — a league-wide source after a
-    # team re-pick never ships for the team even when its sibling "(mlb)" tag matches.
-    for reading in _own_readings(source):  # bounded: the pick's rows
-        said -= _answer_tokens(_amp(reading.split(" (")[0]))
-    # fix6-rows F7-C (2026-10-04): a league-wide source lists every team of its league in its
-    # rows ("Yankees standings" → the AL East table includes the Yankees' row). The entity's
-    # vocabulary (team_mlb / sports_league aliases) stands for that coverage so a team the ask
-    # names doesn't look like a stray subject. The sibling-readings refusal above still fires
-    # when ANOTHER row of the pick was for the team (a team-source re-pick); this subtraction
-    # only loosens the final name check for the league-wide pick itself.
-    said -= _entity_vocabulary(frame.get("lib"), entity)
-    short = entity.split(",")[0] if len(entity.split(",")[0]) <= 40 else str(source.get("name") or "").split(" (")[0]
-    other = _other_of_kind(frame, source, said, own, names, cats, by_name)
-    if other:
-        return f"it is about {short[:60]}, not {' '.join(other)}"
-    if _names_hit(said, names) or (not (said - own) and not _SUBNATIONAL_RE.match(str(cov.get("geo") or ""))):
-        return None
-    return f"it is about {short[:60]}"
 
 
-def _other_of_kind(frame: dict, source: dict, said: set[str], own: set[str], names: set[str],
-                   cats: list[str], by_name: bool) -> list[str]:
-    """Another one of the source's kind the user named: another number ("2 year yield" on the 10-year), or
-    — when the ask doesn't call the source by its own name — a one-word keyword of its subcategory that none
-    of its own words say ("wmata" on the CTA's alerts), never one its subcategory is named for ("inflation"
-    on the CPI)."""
-    numbers = {t for t in names if t.isdigit()}
-    other = [] if by_name else sorted(t for t in said - own if t in _single_keywords(frame.get("lib"), cats))
-    return other + sorted(t for t in said if t.isdigit() and numbers and t not in numbers)
 
 
-def _single_keywords(lib: object, cats: list[str]) -> set[str]:
-    """The one-word taxonomy keywords of the subcategories a source is filed under ("wmata", "nasdaq"), less
-    the words of those subcategories' own names ("Inflation & CPI")."""
-    try:
-        taxonomy = lib.taxonomy() if lib is not None else []
-    except Exception:  # an older or broken Library: no keyword facts
-        return set()
-    subs = [sub for cat in taxonomy for sub in cat.get("subcategories") or []
-            if f"{cat.get('id')}/{sub.get('id')}" in cats]
-    named = _answer_tokens(_amp(" ".join(str(sub.get("label") or "") for sub in subs)))
-    return {tok for sub in subs for kw in sub.get("keywords") or [] if len(kw.split()) == 1
-            for tok in _answer_tokens(_amp(kw))} - named
 
 
 def _picked_source(live: dict) -> dict:
@@ -5743,25 +4927,6 @@ def _official_hosts(subject: str) -> dict:
     return got if isinstance(got, dict) else {}
 
 
-# fix8 (blind-7, 2026-10-04): "Axios Denver latest" shipped a Rocky Mountain
-# Voice page (that only mentioned Axios Denver); "Fox News headlines" is the
-# same class but is caught via the Library's providers_named_in (fix7-lib).
-# A page card for an ask that NAMES an outlet must be from THAT outlet's own
-# site. The signal is: pack providers_named_in + outlet-shaped intent.names
-# (ends in a publisher word, or is one of a bounded well-known-outlet set
-# the pack hasn't indexed yet).
-_OUTLET_SUFFIX_WORDS: frozenset[str] = frozenset({
-    "news", "times", "post", "journal", "herald", "tribune", "chronicle",
-    "gazette", "daily", "weekly", "observer", "dispatch", "sentinel",
-    "press", "mail", "report", "digest", "media", "channel", "network",
-    "radio", "wire",
-})
-_KNOWN_OUTLET_WORDS: frozenset[str] = frozenset({
-    "axios", "reuters", "bloomberg", "politico", "vox", "vice", "verge",
-    "economist", "forbes", "cnn", "cbs", "nbc", "abc", "msnbc", "npr", "pbs",
-    "huffpost", "cnet", "techcrunch", "engadget", "wired", "nyt", "wsj",
-    "newsweek", "slate", "salon",
-})
 
 
 def _named_outlets(request: str, intent: dict) -> list[str]:
