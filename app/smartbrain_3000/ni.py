@@ -5647,7 +5647,8 @@ def tick(app, pass_budget_seconds: float = 20.0,
                     fired.extend(result.get("alerts") or [])
                     repaired.extend(result.get("repaired") or [])
             except NIError as exc:
-                store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
+                if exc.kind != "model_busy":  # a busy local slot is no attempt: the card stays due
+                    store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
             except Exception:  # last-resort net: one bad item must not stop the pass
                 log.warning("ni item run failed with unexpected error: item=%s", item["id"])
                 store.mark_checked(item["id"], "internal")

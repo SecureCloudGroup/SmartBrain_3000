@@ -4989,3 +4989,22 @@ def test_fetch_model_cloud_without_consent_or_local_raises() -> None:
         _model_fetch(gw)
     assert err.value.kind == "model_consent_required"
     assert gw.used == []
+
+
+def test_tick_model_busy_leaves_the_card_due(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A busy local slot is not a check: ``tick`` must not stamp last_checked, so the card stays due."""
+    store, conn, key = _store()
+    busy_iid = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    bad_iid = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    store.set_state(busy_iid, "live")
+    store.set_state(bad_iid, "live")
+    conn.execute("UPDATE ni_items SET last_checked = NULL;")
+
+    def fake_run_item(_store, item_id, **_kwargs):
+        raise nimod.NIError("model_busy" if item_id == busy_iid else "fetch_failed")
+
+    monkeypatch.setattr(nimod, "run_item", fake_run_item)
+    nimod.tick(_fake_app(conn, key))
+    assert store.get_item(busy_iid)["last_checked"] is None
+    assert busy_iid in {item["id"] for item in store.due_items()}
+    assert store.get_item(bad_iid)["last_status"] == "fetch_failed"
