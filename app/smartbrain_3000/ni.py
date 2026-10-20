@@ -222,7 +222,7 @@ MAX_FEED_CANDIDATES = 5
 _RENDER_INTERVAL_FLOOR = 15  # minutes: about two renders a minute serve ~30 cards
 # A capacity status is never a failure: no run row, no latest / last_failure write, no
 # streak, no L1 hook (busy: the item stays due; unavailable: marked, no streak).
-CAPACITY_KINDS: frozenset[str] = frozenset({"render_busy", "render_unavailable"})
+CAPACITY_KINDS: frozenset[str] = frozenset({"render_busy", "render_unavailable", "model_busy"})
 # Render outcomes that ARE failures (the runner's statuses, renamed host-free).
 _RENDER_FAILURES: dict[str, str] = {
     "refused": "render_refused", "timeout": "render_timeout", "blocked": "render_blocked",
@@ -5813,7 +5813,7 @@ def _render_run(store: NIStore, item: dict, gateway_mod, secrets_store, schedule
     except NIError as exc:
         if exc.kind == "render_unavailable":
             store.mark_checked(item["id"], "render_unavailable")
-        elif exc.kind != "render_busy":
+        elif exc.kind not in ("render_busy", "model_busy"):
             store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
         return {}
     return result if isinstance(result, dict) else {}

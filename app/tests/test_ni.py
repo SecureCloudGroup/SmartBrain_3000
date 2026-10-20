@@ -1156,6 +1156,30 @@ def test_fetch_model_cloud_needs_the_cards_recorded_consent() -> None:
     assert nimod._fetch_model({}, source, local, store) == {"text": "hi"}
 
 
+def test_model_busy_is_a_capacity_status_not_a_failure() -> None:
+    """A busy local model must not count toward a card's failing streak."""
+    assert "model_busy" in nimod.CAPACITY_KINDS
+    store, _, _ = _store()
+    gw = _ModelGateway("ollama/x", local=True, available=False)
+    with pytest.raises(nimod.NIError) as exc:
+        nimod._fetch_model({}, {"instruction": "x"}, gw, store)
+    assert exc.value.kind == "model_busy" and exc.value.kind in nimod.CAPACITY_KINDS
+
+
+def test_busy_local_model_run_leaves_no_failure_streak() -> None:
+    """run_item on a busy local model re-raises as capacity: no failure recorded."""
+    store, conn, key = _store()
+    secrets, schedules = SecretStore(conn, key), ScheduleStore(conn, key)
+    iid = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    store.set_state(iid, "live")
+    gw = _ModelGateway("ollama/x", local=True, available=False)
+    with pytest.raises(nimod.NIError) as exc:
+        nimod.run_item(store, iid, gateway_mod=gw, secrets_store=secrets, schedules_store=schedules)
+    assert exc.value.kind == "model_busy"
+    assert store.get_item(iid)["consecutive_failures"] == 0
+    assert store.get_first_failure_at(iid) is None
+
+
 def test_record_validation_refuses_outside_commissioning() -> None:
     """C: record_validation refuses (ValueError) unless the item is currently commissioning."""
     store, _, _ = _store()

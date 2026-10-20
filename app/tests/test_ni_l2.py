@@ -678,7 +678,9 @@ def test_D1_revert_carries_l2_last_attempt_and_pops_proposal(client: TestClient)
             return True
 
         def local_available(self) -> bool:
-            return False  # keep L1 from firing again — we're testing the L2 marker
+            # The fetch must succeed so the trial fails on extract_miss: a busy local
+            # model is capacity, never a failure, so it can no longer stand in for one.
+            return True
 
         def chat(self, _m, _model, **_k) -> dict:
             return {"choices": [{"message": {"content": "hi"}}]}
