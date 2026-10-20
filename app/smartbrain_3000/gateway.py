@@ -634,6 +634,54 @@ def chat_stream(
             client.close()
 
 
+# --- Bounded retries --------------------------------------------------------
+# 429 / 5xx / connection-level failures are retried at most twice, honoring Retry-After.
+# Timeouts are NOT retried (a cold local model would triple the wait) and other 4xx never are.
+_MAX_RETRIES = 2
+_BACKOFF_BASE = 0.5       # seconds; doubles per attempt when no Retry-After is given
+_RETRY_AFTER_CAP = 30.0   # never sleep longer than this on a server's say-so
+
+
+def _sleep(seconds: float) -> None:
+    """Indirection over time.sleep so tests can run retries instantly."""
+    time.sleep(seconds)
+
+
+def _retry_delay(resp: httpx.Response | None, attempt: int) -> float:
+    """Seconds to wait before retry ``attempt`` (0-based): Retry-After (delta-seconds) else exponential."""
+    assert attempt >= 0, "attempt must be non-negative"
+    raw = resp.headers.get("retry-after") if resp is not None else None
+    try:
+        wait = float(raw) if raw is not None else _BACKOFF_BASE * (2 ** attempt)
+    except ValueError:
+        wait = _BACKOFF_BASE * (2 ** attempt)  # HTTP-date form: ignore, use backoff
+    return max(0.0, min(wait, _RETRY_AFTER_CAP))
+
+
+def _post_json(client: httpx.Client, path: str, payload: dict, timeout: float) -> httpx.Response:
+    """POST ``payload``; retry 429/5xx/connection errors (<= _MAX_RETRIES), return the final response.
+
+    After the retries are spent the last response is returned (callers turn it into a
+    GatewayError) or the last transport error is re-raised. Timeouts propagate immediately."""
+    assert path.startswith("/"), "path must be absolute"
+    assert isinstance(payload, dict), "payload must be a dict"
+    for attempt in range(_MAX_RETRIES + 1):  # fixed bound
+        last = attempt == _MAX_RETRIES
+        try:
+            resp = client.post(path, json=payload, timeout=timeout)
+        except httpx.TimeoutException:
+            raise
+        except httpx.TransportError:
+            if last:
+                raise
+            _sleep(_retry_delay(None, attempt))
+            continue
+        if last or not (resp.status_code == 429 or resp.status_code >= 500):
+            return resp
+        _sleep(_retry_delay(resp, attempt))
+    raise AssertionError("unreachable: final attempt returns or raises")
+
+
 def _set_max_tokens(payload: dict, max_tokens: int | None) -> None:
     """Add a validated ``max_tokens`` to ``payload``; None leaves the payload untouched."""
     assert isinstance(payload, dict), "payload must be a dict"
@@ -681,7 +729,7 @@ def chat(
     client, owns_client = _resolve_client(client, timeout)
     try:
         with _serialized(model):  # serialize local-provider calls (no-op for cloud)
-            resp = client.post("/v1/chat/completions", json=payload, timeout=timeout)
+            resp = _post_json(client, "/v1/chat/completions", payload, timeout)
         try:
             data = resp.json()
         except ValueError:
@@ -759,7 +807,7 @@ def chat_with_tools(
         # fixed default, so only a per-call override lets the agent/scheduled path wait
         # out a cold local-model load. Serialize local-provider calls (no-op for cloud).
         with _serialized(model):
-            resp = client.post("/v1/chat/completions", json=payload, timeout=timeout)
+            resp = _post_json(client, "/v1/chat/completions", payload, timeout)
         try:
             data = resp.json()
         except ValueError:
@@ -863,7 +911,7 @@ def embed(
         # far past a pooled/short client default — only the per-call value lets a backfill wait it
         # out. Serialize local-provider calls so a background embed can't overlap a foreground chat.
         with _serialized(model, acquire_timeout=acquire_timeout):
-            resp = client.post("/v1/embeddings", json={"model": model, "input": input_text}, timeout=timeout)
+            resp = _post_json(client, "/v1/embeddings", {"model": model, "input": input_text}, timeout)
         try:
             data = resp.json()
         except ValueError:

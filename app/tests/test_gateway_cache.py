@@ -96,6 +96,79 @@ def test_max_tokens_passthrough_and_default_unchanged() -> None:
     assert "max_tokens" not in json.loads(d[0])
 
 
+def _flaky(script: list, calls: list[int], sleeps: list[float], monkeypatch) -> httpx.Client:
+    """Client whose Nth request replays script[N] (an int status, a Response, or an exception)."""
+    monkeypatch.setattr(gateway, "_sleep", sleeps.append)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        item = script[min(len(calls), len(script) - 1)]
+        calls.append(1)
+        if isinstance(item, Exception):
+            raise item
+        if isinstance(item, httpx.Response):
+            return item
+        return httpx.Response(item, json=_OK if item == 200 else {"error": {"message": "boom"}})
+    return httpx.Client(base_url="http://bifrost:8080", transport=httpx.MockTransport(handler))
+
+
+def test_retry_5xx_then_success_with_backoff(monkeypatch) -> None:
+    calls: list[int] = []
+    sleeps: list[float] = []
+    client = _flaky([503, 500, 200], calls, sleeps, monkeypatch)
+    assert gateway.completion_text(gateway.chat([{"role": "user", "content": "q"}], "openai/x", client=client)) == "hi"
+    assert len(calls) == 3 and sleeps == [0.5, 1.0]
+
+
+def test_retry_honors_retry_after_and_stops_at_two_retries(monkeypatch) -> None:
+    calls: list[int] = []
+    sleeps: list[float] = []
+    limited = httpx.Response(429, headers={"Retry-After": "3"}, json={"error": {"message": "slow down"}})
+    client = _flaky([limited], calls, sleeps, monkeypatch)
+    try:
+        gateway.chat([{"role": "user", "content": "q"}], "openai/x", client=client)
+        raise AssertionError("expected GatewayError")
+    except gateway.GatewayError as exc:
+        assert exc.status_code == 429 and exc.message == "slow down"
+    assert len(calls) == 3 and sleeps == [3.0, 3.0]  # 1 try + 2 retries, Retry-After honored
+
+
+def test_4xx_is_never_retried(monkeypatch) -> None:
+    calls: list[int] = []
+    sleeps: list[float] = []
+    client = _flaky([400], calls, sleeps, monkeypatch)
+    try:
+        gateway.chat_with_tools([{"role": "user", "content": "q"}], "openai/x", [_TOOL], client=client)
+        raise AssertionError("expected GatewayError")
+    except gateway.GatewayError as exc:
+        assert exc.status_code == 400
+    assert len(calls) == 1 and sleeps == []
+
+
+def test_connection_error_retried_but_timeout_is_not(monkeypatch) -> None:
+    calls: list[int] = []
+    sleeps: list[float] = []
+    client = _flaky([httpx.ConnectError("down"), 200], calls, sleeps, monkeypatch)
+    assert gateway.chat([{"role": "user", "content": "q"}], "openai/x", client=client)["choices"]
+    assert len(calls) == 2 and len(sleeps) == 1
+    calls.clear()
+    sleeps.clear()
+    client = _flaky([httpx.ReadTimeout("slow")], calls, sleeps, monkeypatch)
+    try:
+        gateway.chat([{"role": "user", "content": "q"}], "openai/x", client=client)
+        raise AssertionError("expected GatewayError")
+    except gateway.GatewayError as exc:
+        assert exc.status_code == 504
+    assert len(calls) == 1 and sleeps == []
+
+
+def test_local_semaphore_released_after_retries(monkeypatch) -> None:
+    calls: list[int] = []
+    client = _flaky([502, 200], calls, [], monkeypatch)
+    gateway.chat([{"role": "user", "content": "q"}], "ollama/x", client=client)
+    assert len(calls) == 2
+    assert gateway.local_available()  # serializer free again (no leaked acquire)
+
+
 def test_non_text_blocks_survive_flatten_without_marker() -> None:
     img = {"type": "image_url", "image_url": {"url": "data:x"}, "cache": True}
     out = gateway._wire_messages([{"role": "user", "content": [img]}], "openai/x")
