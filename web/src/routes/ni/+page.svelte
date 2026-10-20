@@ -11,6 +11,7 @@
   import CardShell from "$lib/components/CardShell.svelte";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import { cardText, withoutCardText, type CardText } from "$lib/ni/cardText";
   import FeedOffer from "$lib/components/FeedOffer.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import Modal from "$lib/components/Modal.svelte";
@@ -143,9 +144,9 @@
   let credentialError = $state("");
 
   // P3: source-pick + edit-modal state.
-  let pickUrlText = $state("");
-  let accessKeyText = $state("");
-  let accessEmailText = $state("");
+  let pickUrlText = $state<CardText>({});
+  let accessKeyText = $state<CardText>({});
+  let accessEmailText = $state<CardText>({});
   let editFor = $state<NiBoardItem | null>(null);
   let editTitle = $state("");
   let editInterval = $state("");
@@ -186,20 +187,20 @@
   // G1: per-card action errors render ON the card (a page-bottom error next
   // to a form you just used reads as "nothing happened" — field lesson).
   let flowActionError = $state<Record<string, string>>({});
-  let answerDateText = $state("");
+  let answerDateText = $state<CardText>({});
 
   async function pickSource(item: NiBoardItem, urlOverride?: string): Promise<void> {
     console.assert(item.flow?.state === "source", "pickSource: pause required");
     // A Library-row tap submits the sealed URL verbatim — the tap IS the consent.
     // No urlOverride = the paste form: the user's own link (it builds even when the
     // card offered the same page as a link; that card then waits for their YES).
-    const url = (urlOverride ?? pickUrlText).trim();
+    const url = (urlOverride ?? cardText(pickUrlText, item.id)).trim();
     if (url.length < 8) return;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
       const out = await api.niFlowPickSource(item.id, url, urlOverride === undefined);
-      pickUrlText = "";
+      pickUrlText = withoutCardText(pickUrlText, item.id);
       toast(out.needs && out.needs.length > 0
         ? "This source needs one more thing — see the card."
         : out.started === false
@@ -219,16 +220,16 @@
     console.assert(item.flow?.state === "awaiting_access", "giveAccess: pause required");
     const access = item.flow?.access;
     if (!access) return;
-    const key = accessKeyText.trim();
-    const email = accessEmailText.trim();
+    const key = cardText(accessKeyText, item.id).trim();
+    const email = cardText(accessEmailText, item.id).trim();
     if ((access.key && !key) || (access.contact && !email)) return;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
       const out = await api.niFlowAccess(item.id, access.key ? key : undefined,
                                          access.contact ? email : undefined);
-      accessKeyText = "";
-      accessEmailText = "";
+      accessKeyText = withoutCardText(accessKeyText, item.id);
+      accessEmailText = withoutCardText(accessEmailText, item.id);
       toast(out.started ? "Thanks — building the card now." : "Saved.");
       await load();
     } catch (err) {
@@ -240,13 +241,13 @@
 
   async function answerDate(item: NiBoardItem): Promise<void> {
     console.assert(typeof item.id === "string", "answerDate: id required");
-    const value = answerDateText.trim();
+    const value = cardText(answerDateText, item.id).trim();
     if (!value) return;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
       await api.niFlowAnswer(item.id, "supply_date", value);
-      answerDateText = "";
+      answerDateText = withoutCardText(answerDateText, item.id);
       toast("Date set — building the card.");
       await load();
     } catch (err) {
@@ -1416,12 +1417,12 @@
                   >
                     <input
                       type="date"
-                      bind:value={answerDateText}
+                      bind:value={answerDateText[item.id]}
                       disabled={busyId === item.id}
                       aria-label="Supply the date"
                     />
                     <button type="submit" class="secondary"
-                      disabled={busyId === item.id || !answerDateText}
+                      disabled={busyId === item.id || !cardText(answerDateText, item.id)}
                     >Use this date</button>
                   </form>
                 {/if}
@@ -1524,7 +1525,7 @@
                   >
                     <input
                       type="url"
-                      bind:value={pickUrlText}
+                      bind:value={pickUrlText[item.id]}
                       placeholder={pick.links.length > 0
                         ? "Found the data? Paste its link (https://…)"
                         : "Or paste any web page or API URL (https://…)"}
@@ -1538,7 +1539,7 @@
                       <p class="muted ni-note">{clause}</p>
                     {/if}
                     <button type="submit" class="secondary"
-                      disabled={busyId === item.id || pickUrlText.trim().length < 8}
+                      disabled={busyId === item.id || cardText(pickUrlText, item.id).trim().length < 8}
                     >Use this URL</button>
                   </form>
                   {#if flowActionError[item.id]}
@@ -1568,7 +1569,7 @@
                     <input
                       type="password"
                       autocomplete="off"
-                      bind:value={accessKeyText}
+                      bind:value={accessKeyText[item.id]}
                       placeholder="Your {access.provider || access.host} key"
                       maxlength="400"
                       disabled={busyId === item.id}
@@ -1583,7 +1584,7 @@
                     <input
                       type="email"
                       autocomplete="email"
-                      bind:value={accessEmailText}
+                      bind:value={accessEmailText[item.id]}
                       placeholder="you@example.com"
                       maxlength="254"
                       disabled={busyId === item.id}
@@ -1592,8 +1593,8 @@
                   {/if}
                   <button type="submit" class="secondary"
                     disabled={busyId === item.id
-                      || (!!access.key && accessKeyText.trim().length === 0)
-                      || (access.contact && accessEmailText.trim().length < 6)}
+                      || (!!access.key && cardText(accessKeyText, item.id).trim().length === 0)
+                      || (access.contact && cardText(accessEmailText, item.id).trim().length < 6)}
                   >{busyId === item.id ? "Saving…" : "Continue"}</button>
                   {#if flowActionError[item.id]}
                     <p class="error ni-note">{flowActionError[item.id]}</p>
