@@ -8339,6 +8339,8 @@ def _shape_kb_hit(hit: object) -> dict:
 def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore) -> dict:
     """Run one chat completion on the ``ni`` route (or item override); return {'text': ...}.
 
+    A non-local model runs only when ``spec['_model_consent']`` names that exact model.
+
     ``gateway_mod.load_routes`` requires the store's cursor (B): the previous
     ``load_routes(None)`` tripped the module's own ``conn is not None`` assertion.
     """
@@ -8351,6 +8353,10 @@ def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore) -> dict:
     model = override or gateway_mod.resolve_model("ni", routes) or gateway_mod.resolve_model("chat", routes)
     if not model:
         raise NIError("model_unrouted")
+    if not gateway_mod.is_local(model) and spec.get("_model_consent") != model:
+        # Ruling 2: a model off this computer needs THIS card's recorded consent for THAT
+        # model (build path: ni_flow._model_consent_of) - a refresh never silently calls the cloud.
+        raise NIError("model_consent_required", model)
     if gateway_mod.is_local(model) and not gateway_mod.local_available():
         # Yield to a foreground chat — the tick's per-item budget makes this cheap to retry.
         raise NIError("model_busy")

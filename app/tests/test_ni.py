@@ -1111,6 +1111,51 @@ def test_fetch_model_passes_conn_to_load_routes() -> None:
     assert store.get_item(iid)["state"] == "commissioning"
 
 
+class _ModelGateway:
+    """Minimal gateway double for _fetch_model: route -> `model`, locality per flag."""
+
+    class GatewayError(Exception):
+        status_code = 500
+
+    def __init__(self, model: str, local: bool, available: bool = True) -> None:
+        self.model, self.local, self.available, self.calls = model, local, available, 0
+
+    def load_routes(self, conn) -> dict:
+        return {"ni": self.model}
+
+    def resolve_model(self, capability: str, routes: dict) -> str | None:
+        return routes.get(capability)
+
+    def is_local(self, model: str) -> bool:
+        return self.local
+
+    def local_available(self) -> bool:
+        return self.available
+
+    def chat(self, _messages, _model, **_kwargs) -> dict:
+        self.calls += 1
+        return {"choices": [{"message": {"content": "hi"}}]}
+
+    def completion_text(self, data: dict) -> str:
+        return data["choices"][0]["message"]["content"]
+
+
+def test_fetch_model_cloud_needs_the_cards_recorded_consent() -> None:
+    """Refresh must never silently send a card's instruction to a cloud model."""
+    store, _, _ = _store()
+    source = {"instruction": "say hi"}
+    gw = _ModelGateway("openai/gpt-x", local=False)
+    with pytest.raises(nimod.NIError) as exc:
+        nimod._fetch_model({}, source, gw, store)
+    assert exc.value.kind == "model_consent_required" and gw.calls == 0
+    with pytest.raises(nimod.NIError):  # consent for a DIFFERENT model does not carry
+        nimod._fetch_model({"_model_consent": "other/model"}, source, gw, store)
+    assert gw.calls == 0
+    assert nimod._fetch_model({"_model_consent": "openai/gpt-x"}, source, gw, store) == {"text": "hi"}
+    local = _ModelGateway("ollama/x", local=True)
+    assert nimod._fetch_model({}, source, local, store) == {"text": "hi"}
+
+
 def test_record_validation_refuses_outside_commissioning() -> None:
     """C: record_validation refuses (ValueError) unless the item is currently commissioning."""
     store, _, _ = _store()
