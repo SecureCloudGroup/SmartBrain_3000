@@ -113,6 +113,13 @@ class _FakeNet:
         return self.payload
 
 
+@pytest.fixture(autouse=True)
+def _days_from_today():
+    # The forecast days start today; re-dated per test, since a suite collected before
+    # midnight runs these after it, when import-time days would already be yesterday's.
+    _DAYS[:] = [(datetime.now().date() + timedelta(days=i)).isoformat() for i in range(7)]
+
+
 @pytest.fixture()
 def lib(tmp_path):
     src = tmp_path / "src.duckdb"
