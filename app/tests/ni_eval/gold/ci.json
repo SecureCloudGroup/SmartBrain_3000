@@ -1,0 +1,131 @@
+[
+ {
+  "id": "CI1",
+  "set": "CI",
+  "ask": "show me AAPL every 5 minutes",
+  "kind": "current_value",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "query1.finance.yahoo.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "url",
+   "source_url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d"
+  }
+ },
+ {
+  "id": "CI2",
+  "set": "CI",
+  "ask": "what's bitcoin worth right now, keep it updated",
+  "kind": "current_value",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "api.kraken.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "url",
+   "source_url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+  }
+ },
+ {
+  "id": "CI3",
+  "set": "CI",
+  "ask": "show me the latest earthquakes above magnitude 5",
+  "kind": "count",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": 5.0,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "url",
+   "source_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
+  }
+ },
+ {
+  "id": "CI4",
+  "set": "CI",
+  "ask": "my countdown to Christmas - days left",
+  "kind": "lookup",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": "decline",
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "url",
+   "source_url": null
+  }
+ },
+ {
+  "id": "CI5",
+  "set": "CI",
+  "ask": "track my custom sensor feed please",
+  "kind": "lookup",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "url",
+   "source_url": null
+  }
+ }
+]

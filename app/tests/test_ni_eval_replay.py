@@ -1,0 +1,215 @@
+"""NI eval harness (plan S0): scoring unit tests + an offline replay of a small committed cassette.
+
+``tools/ni-eval.py`` is loaded by path (it lives outside the package; the shipped image carries
+``app/`` only, so everything skips cleanly when the tool is absent). The replay tests drive the
+REAL ``ni_flow.run_flow`` with the recorded model replies and fetch responses served from
+``tests/ni_eval/cassettes/ci`` (built by hand from ``fixtures/ni_flow`` — see docs/internal/ni-eval.md).
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import pathlib
+import sys
+
+import pytest
+
+_REPO = pathlib.Path(__file__).resolve().parents[2]
+_TOOL = _REPO / "tools" / "ni-eval.py"
+_EVAL = pathlib.Path(__file__).parent / "ni_eval"
+
+pytestmark = pytest.mark.skipif(not _TOOL.exists(), reason="ni-eval tool not shipped in the app image")
+
+
+def _load():
+    if not _TOOL.exists():
+        return None
+    spec = importlib.util.spec_from_file_location("_ni_eval_tool", _TOOL)
+    assert spec is not None and spec.loader is not None, "spec load must succeed"
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["_ni_eval_tool"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+ne = _load()
+
+
+@pytest.fixture(autouse=True)
+def _local_route(monkeypatch):
+    from smartbrain_3000 import gateway
+    monkeypatch.setattr(gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
+
+
+def _gold(**over) -> dict:
+    base = {"id": "T1", "kind": "count", "ask": "x", "expected_outcome": "card", "forbidden_outcomes": [],
+            "acceptable_sources": None, "human_verdict": None, "baseline": {},
+            "constraints": {"places": [], "window": None, "threshold": None, "compare_n": None,
+                            "units": None, "entities": []}}
+    cons = {**base["constraints"], **over.pop("constraints", {})}
+    return {**base, **over, "constraints": cons}
+
+
+def _card(text: list[str], url: str = "https://a.example/x?min=4.0", **extra) -> dict:
+    return {"outcome": "live", "scene_text": text, "preview": None, "source": "",
+            "tapped": [{"title": "", "label": "", "url": url, "params": {}}], **extra}
+
+
+# --- scoring: outcome classes ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("outcome,cls", [("links", "links"), ("source", "links"), ("needs-key", "links"),
+                                         ("unsupported", "declined"), ("crash", "error"),
+                                         ("failed", "error"), ("built-no-run", "error")])
+def test_non_card_outcomes_map_to_their_class(outcome: str, cls: str) -> None:
+    res = ne.score_ask({"outcome": outcome}, _gold())
+    assert res["cls"] == cls, res
+    assert res["cls"] in ne.CLASSES, "class is one of the six"
+
+
+def test_forbidden_or_declined_expectation_makes_a_card_wrong() -> None:
+    assert ne.score_ask(_card(["7"]), _gold(expected_outcome="decline"))["cls"] == "wrong"
+    assert ne.score_ask(_card(["7"]), _gold(forbidden_outcomes=["card"]))["cls"] == "wrong"
+
+
+# --- scoring: constraint checks -------------------------------------------------------------------
+
+def test_threshold_missing_from_the_request_is_wrong_and_present_is_right() -> None:
+    gold = _gold(constraints={"threshold": 4.0})
+    assert ne.score_ask(_card(["12"], url="https://q/2.5_day.geojson"), gold)["cls"] == "wrong"
+    assert ne.score_ask(_card(["12"], url="https://q/q?minmagnitude=4"), gold)["cls"] == "right"
+
+
+def test_compare_needs_every_entity_named_on_the_card() -> None:
+    gold = _gold(kind="compare", constraints={"compare_n": 2, "entities": ["Denver", "Salt Lake City"]})
+    assert ne.score_ask(_card(["Denver 61 F"]), gold)["cls"] == "wrong"
+    assert ne.score_ask(_card(["Denver 61 F", "Salt Lake City 55 F"]), gold)["cls"] == "right"
+
+
+def test_places_partial_when_only_some_are_named() -> None:
+    gold = _gold(constraints={"places": ["Boise", "Nampa"]})
+    res = ne.score_ask(_card(["Boise 68"]), gold)
+    assert res["cls"] == "partial" and "1/2" in res["reason"], res
+
+
+def test_acceptable_source_mismatch_is_wrong() -> None:
+    assert ne.score_ask(_card(["1"]), _gold(acceptable_sources=["other.example"]))["cls"] == "wrong"
+    assert ne.score_ask(_card(["1"]), _gold(acceptable_sources=["a.example"]))["cls"] == "right"
+
+
+def test_nothing_checkable_is_partial_and_flagged_for_review() -> None:
+    res = ne.score_ask(_card(["1"]), _gold())
+    assert (res["cls"], res["needs_review"]) == ("partial", True), res
+
+
+def test_human_verdict_carries_only_for_the_same_card() -> None:
+    run = _card(["Denver 61 F"])
+    gold = _gold(human_verdict="wrong", baseline={"card_sha": ne._sha(ne.card_text(run))})
+    assert ne.score_ask(run, gold)["cls"] == "wrong"
+    changed = ne.score_ask(_card(["Denver 61 F", "Salt Lake City"]), gold)
+    assert changed["cls"] == "partial" and changed["needs_review"], changed
+
+
+# --- aggregation ----------------------------------------------------------------------------------
+
+def test_aggregate_counts_per_kind_and_overall() -> None:
+    scored = [{"kind": "a", "cls": "right"}, {"kind": "a", "cls": "wrong"},
+              {"kind": "b", "cls": "links"}, {"kind": "b", "cls": "declined"}]
+    table = ne.aggregate(scored)
+    assert table["a"]["R"] == 0.5 and table["a"]["W"] == 0.5, table["a"]
+    assert table["b"]["L"] == 1.0 and table["ALL"]["n"] == 4, table
+    assert "ALL" in ne.format_table(table)
+
+
+# --- cassette mechanics ---------------------------------------------------------------------------
+
+def test_redact_url_hides_secret_query_values() -> None:
+    assert ne.redact_url("https://h/p?q=1&api_key=SECRET&x=2") == "https://h/p?q=1&api_key=REDACTED&x=2"
+    assert ne.redact_url("https://h/p") == "https://h/p"
+
+
+def test_record_then_replay_round_trips_fetch_model_and_failures(tmp_path) -> None:
+    from smartbrain_3000 import netguard
+    rec = ne.Session("R1", recording=True)
+
+    def real_json(url, **kw):
+        if "dead" in url:
+            raise netguard.FetchError("HTTP 404", status=404, kind="http")
+        return {"url": url}
+
+    original = netguard.safe_fetch_json
+    netguard.safe_fetch_json = real_json
+    try:
+        with ne.patched_netguard(rec):
+            assert netguard.safe_fetch_json("https://ok/x") == {"url": "https://ok/x"}
+            with pytest.raises(netguard.FetchError):
+                netguard.safe_fetch_json("https://dead/x")
+        assert rec.model_call("p", lambda p: "reply:" + p) == "reply:p"
+    finally:
+        netguard.safe_fetch_json = original
+    ne.save_session(tmp_path, rec)
+    rep = ne.load_session(tmp_path, "R1")
+    with ne.patched_netguard(rep):
+        assert netguard.safe_fetch_json("https://ok/x") == {"url": "https://ok/x"}
+        with pytest.raises(netguard.FetchError) as err:
+            netguard.safe_fetch_json("https://dead/x")
+        assert err.value.status == 404
+        with pytest.raises(ne.CassetteMiss):
+            netguard.safe_fetch_json("https://never/recorded")
+    assert netguard.safe_fetch_json is original, "patch must be undone"
+    assert rep.model_call("p") == "reply:p"
+    with pytest.raises(ne.CassetteMiss):
+        rep.model_call("again")
+
+
+# --- gold + end-to-end replay ---------------------------------------------------------------------
+
+def test_committed_gold_is_well_formed_and_matches_the_blind50_review() -> None:
+    gold = ne.load_gold()
+    ids = [g["id"] for g in gold]
+    assert len(ids) == len(set(ids)) >= 170, len(ids)
+    for g in gold:
+        assert {"id", "ask", "kind", "constraints", "acceptable_sources", "expected_outcome",
+                "forbidden_outcomes", "human_verdict"} <= set(g), g["id"]
+    blind = [g for g in gold if g["set"] == "A"]
+    tally = {v: sum(1 for g in blind if g["human_verdict"] == v) for v in ("right", "partial", "wrong")}
+    assert tally == {"right": 13, "partial": 6, "wrong": 4}, tally  # review.md: 13 / 6 / 4 of 23 live
+
+
+def test_blind50_baseline_results_rescore_to_the_human_review() -> None:
+    results = json.loads((pathlib.Path(__file__).parent / "fixtures" / "ni_blind" / "2026-10-05"
+                          / "results.json").read_text())
+    gold = ne.load_gold()
+    by_ask = {g["ask"]: g["id"] for g in gold if g["set"] == "A"}
+    for r in results:
+        r["id"] = by_ask[r["ask"]]
+    _, table = ne.score_all(gold, results)
+    total = table["ALL"]
+    assert (total["right"], total["partial"], total["wrong"], total["links"]) == (13, 6, 4, 27), total
+
+
+def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
+    gold = ne.load_gold(_EVAL / "gold" / "ci.json")
+    runs = ne.replay_all(gold, _EVAL / "cassettes" / "ci")
+    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5"], runs
+    assert all(r["cassette_drift"] == 0 for r in runs), "scripted cassette has no prompt hashes"
+    scored, table = ne.score_all(gold, runs)
+    got = {s["id"]: s["cls"] for s in scored}
+    assert got == {"CI1": "right", "CI2": "wrong", "CI3": "wrong", "CI4": "declined", "CI5": "links"}, got
+    assert (table["ALL"]["n"], table["ALL"]["right"]) == (5, 1), table["ALL"]
+
+
+def test_replay_is_deterministic() -> None:
+    gold = ne.load_gold(_EVAL / "gold" / "ci.json")
+    first = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
+    second = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
+    assert first == second, "two replays must score identically"
+    assert len(first) == 5, first
+
+
+def test_missing_cassette_entry_surfaces_as_an_error_not_a_pass(tmp_path) -> None:
+    gold = [g for g in ne.load_gold(_EVAL / "gold" / "ci.json") if g["id"] == "CI1"]
+    sess = ne.Session("CI1", {"ask_id": "CI1", "meta": {}, "fetches": [], "model": []})
+    run = ne.run_entry(gold[0], sess)
+    assert run["outcome"] != "live", run
+    assert ne.score_ask(run, gold[0])["cls"] in ("error", "links", "declined"), run

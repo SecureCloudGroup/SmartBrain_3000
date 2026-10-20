@@ -1,0 +1,5423 @@
+[
+ {
+  "id": "A1",
+  "set": "A",
+  "ask": "how warm is it in Boise right now",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Boise"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "api.open-meteo.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: Open-Meteo forecast — api.open-meteo.com",
+   "source_host": "api.open-meteo.com",
+   "card_sha": "225681fb62f5a0c5"
+  },
+  "harness": null
+ },
+ {
+  "id": "A2",
+  "set": "A",
+  "ask": "what is platinum trading at today",
+  "kind": "current_value",
+  "constraints": {
+   "places": [],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A3",
+  "set": "A",
+  "ask": "water temperature at Virginia Beach",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Virginia Beach"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "api.tidesandcurrents.noaa.gov"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: NOAA water temperature — api.tidesandcurrents.noaa.gov → library: NOAA water temperature — api.tidesandcurrents.noaa.gov",
+   "source_host": "api.tidesandcurrents.noaa.gov",
+   "card_sha": "38ab681bb7f55575"
+  },
+  "harness": null
+ },
+ {
+  "id": "A4",
+  "set": "A",
+  "ask": "rain chances in Nashville this week",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Nashville"
+   ],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "api.open-meteo.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right (data); flat label/value presentation",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: Open-Meteo forecast — api.open-meteo.com",
+   "source_host": "api.open-meteo.com",
+   "card_sha": "4df61f03654ef026"
+  },
+  "harness": null
+ },
+ {
+  "id": "A5",
+  "set": "A",
+  "ask": "snow forecast for Tahoe this weekend",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Tahoe"
+   ],
+   "window": "this weekend",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "api.weather.gov"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: NWS 7-day forecast — api.weather.gov → library: Open-Meteo forecast — api.open-meteo.com",
+   "source_host": "api.weather.gov",
+   "card_sha": "fd2ca02e98977f35"
+  },
+  "harness": null
+ },
+ {
+  "id": "A6",
+  "set": "A",
+  "ask": "surf forecast Huntington Beach",
+  "kind": "forecast",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "marine-api.open-meteo.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right (hourly series as raw columns)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: Open-Meteo marine — marine-api.open-meteo.com",
+   "source_host": "marine-api.open-meteo.com",
+   "card_sha": "f0de957e7711ca21"
+  },
+  "harness": null
+ },
+ {
+  "id": "A7",
+  "set": "A",
+  "ask": "hourly temps in Minneapolis today",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Minneapolis"
+   ],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial: times shown in the container's zone (UTC \"3:00 AM\" for 10 pm CDT)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: NWS hourly forecast — api.weather.gov",
+   "source_host": "api.weather.gov",
+   "card_sha": "378e7f7d6cbc91d3"
+  },
+  "harness": null
+ },
+ {
+  "id": "A8",
+  "set": "A",
+  "ask": "when does the next rocket launch from Vandenberg",
+  "kind": "next_event",
+  "constraints": {
+   "places": [
+    "Vandenberg"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial: list not filtered to Vandenberg (known gap: pad filter)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: Upcoming rocket launches (Launch Library 2) — ll.thespacedevs.com",
+   "source_host": "ll.thespacedevs.com",
+   "card_sha": "e377971d623f5e03"
+  },
+  "harness": null
+ },
+ {
+  "id": "A9",
+  "set": "A",
+  "ask": "what day is the next new moon",
+  "kind": "next_event",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "aa.usno.navy.mil"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: USNO upcoming moon phases — aa.usno.navy.mil",
+   "source_host": "aa.usno.navy.mil",
+   "card_sha": "97409c2b32f0777f"
+  },
+  "harness": null
+ },
+ {
+  "id": "A10",
+  "set": "A",
+  "ask": "next Bears game",
+  "kind": "next_event",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "www.thesportsdb.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: Team's next matchup (TheSportsDB) — www.thesportsdb.com",
+   "source_host": "www.thesportsdb.com",
+   "card_sha": "6cf6cdc1c251e21b"
+  },
+  "harness": null
+ },
+ {
+  "id": "A11",
+  "set": "A",
+  "ask": "next Amtrak departure from Boston to New York",
+  "kind": "next_event",
+  "constraints": {
+   "places": [
+    "Boston"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A12",
+  "set": "A",
+  "ask": "Cubs schedule this week",
+  "kind": "schedule",
+  "constraints": {
+   "places": [],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "source",
+   "source": "library: MLB team schedule — statsapi.mlb.com → library: MLB schedule and scores — statsapi.mlb.com → library: Team's next matchup (TheSportsDB) — www.thesportsdb.com",
+   "source_host": "statsapi.mlb.com",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A13",
+  "set": "A",
+  "ask": "NHL games tonight",
+  "kind": "schedule",
+  "constraints": {
+   "places": [],
+   "window": "tonight",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG: shows tomorrow's games under \"tonight\" (no window cut)",
+  "defect_class": "window cut",
+  "baseline": {
+   "outcome": "live",
+   "source": "library: TheSportsDB next league events — www.thesportsdb.com",
+   "source_host": "www.thesportsdb.com",
+   "card_sha": "2b9aa5e3535c3a8f"
+  },
+  "harness": null
+ },
+ {
+  "id": "A14",
+  "set": "A",
+  "ask": "when are the next Federal Reserve meetings",
+  "kind": "schedule",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A15",
+  "set": "A",
+  "ask": "who won the Dolphins game",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A16",
+  "set": "A",
+  "ask": "Celtics final score last night",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": "last night",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A17",
+  "set": "A",
+  "ask": "last night's Mariners result",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": "last night",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "statsapi.mlb.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "honest empty (no game)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: MLB team recent results — statsapi.mlb.com",
+   "source_host": "statsapi.mlb.com",
+   "card_sha": "afed005b41060dff"
+  },
+  "harness": null
+ },
+ {
+  "id": "A18",
+  "set": "A",
+  "ask": "latest NPR headlines",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "feeds.npr.org"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: NPR News — feeds.npr.org",
+   "source_host": "feeds.npr.org",
+   "card_sha": "648aacdace594fba"
+  },
+  "harness": null
+ },
+ {
+  "id": "A19",
+  "set": "A",
+  "ask": "new posts on r/homelab",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A20",
+  "set": "A",
+  "ask": "recent FDA recalls",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "source",
+   "source": "library: FDA food recalls — api.fda.gov → library: FDA drug recalls — api.fda.gov → library: FDA device recalls — api.fda.gov",
+   "source_host": "api.fda.gov",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A21",
+  "set": "A",
+  "ask": "NFC West standings right now",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "source",
+   "source": "library: MLB standings — statsapi.mlb.com → library: MLB wild card standings — statsapi.mlb.com → library: NHL standings — api-web.nhle.com",
+   "source_host": "statsapi.mlb.com",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A22",
+  "set": "A",
+  "ask": "top 10 cryptocurrencies by market cap",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "api.coingecko.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: CoinGecko top coins — api.coingecko.com",
+   "source_host": "api.coingecko.com",
+   "card_sha": "0b09c7b84e6e86d5"
+  },
+  "harness": null
+ },
+ {
+  "id": "A23",
+  "set": "A",
+  "ask": "most downloaded Python packages this week",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A24",
+  "set": "A",
+  "ask": "US gas price trend this year",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": "this year",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial: latest value only, no series",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: US regular gasoline price (FRED) — fred.stlouisfed.org",
+   "source_host": "fred.stlouisfed.org",
+   "card_sha": "6e941f502a3aff8e"
+  },
+  "harness": null
+ },
+ {
+  "id": "A25",
+  "set": "A",
+  "ask": "30 year mortgage rate history",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial: latest value only, no series",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: 30-year fixed mortgage rate (FRED) — fred.stlouisfed.org",
+   "source_host": "fred.stlouisfed.org",
+   "card_sha": "3b4ae331cd777ed8"
+  },
+  "harness": null
+ },
+ {
+  "id": "A26",
+  "set": "A",
+  "ask": "Bitcoin price over the last month",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": "last month",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A27",
+  "set": "A",
+  "ask": "is Cloudflare having issues",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "library: Slack status — slack-status.com → links",
+   "source_host": "slack-status.com",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A28",
+  "set": "A",
+  "ask": "Amtrak Northeast Corridor status",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A29",
+  "set": "A",
+  "ask": "Discord status",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "discordstatus.com"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: Service status (Statuspage) — discordstatus.com",
+   "source_host": "discordstatus.com",
+   "card_sha": "a4fc89bdd7df34b0"
+  },
+  "harness": null
+ },
+ {
+  "id": "A30",
+  "set": "A",
+  "ask": "any flood warnings in Houston",
+  "kind": "alerts",
+  "constraints": {
+   "places": [
+    "Houston"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "api.weather.gov"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right (honest empty)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: NWS active alerts for a location — api.weather.gov",
+   "source_host": "api.weather.gov",
+   "card_sha": "f3cf9f86f20ba5fd"
+  },
+  "harness": null
+ },
+ {
+  "id": "A31",
+  "set": "A",
+  "ask": "tornado watches in Oklahoma right now",
+  "kind": "alerts",
+  "constraints": {
+   "places": [
+    "Oklahoma"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "api.weather.gov"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right (honest empty)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: NWS active alerts by state — api.weather.gov",
+   "source_host": "api.weather.gov",
+   "card_sha": "91ff2b5b471d5ef5"
+  },
+  "harness": null
+ },
+ {
+  "id": "A32",
+  "set": "A",
+  "ask": "air quality alerts for Salt Lake City",
+  "kind": "alerts",
+  "constraints": {
+   "places": [
+    "Salt Lake City"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "library: NWS active alerts for a location — api.weather.gov → links",
+   "source_host": "api.weather.gov",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A33",
+  "set": "A",
+  "ask": "how many earthquakes above 4.0 today",
+  "kind": "count",
+  "constraints": {
+   "places": [],
+   "window": "today",
+   "threshold": 4.0,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG: counts M2.5+, the 4.0 threshold is ignored",
+  "defect_class": "threshold on a count",
+  "baseline": {
+   "outcome": "live",
+   "source": "library: USGS M2.5+ earthquakes, past day — earthquake.usgs.gov",
+   "source_host": "earthquake.usgs.gov",
+   "card_sha": "b665483c6abf0a7e"
+  },
+  "harness": null
+ },
+ {
+  "id": "A34",
+  "set": "A",
+  "ask": "how many active hurricanes in the Pacific",
+  "kind": "count",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG: wrong source class; \"0\" from a point feed",
+  "defect_class": "category too coarse",
+  "baseline": {
+   "outcome": "live",
+   "source": "library: NWS hurricane and tropical storm alerts for a location — api.weather.gov",
+   "source_host": "api.weather.gov",
+   "card_sha": "f35cb19ebafababd"
+  },
+  "harness": null
+ },
+ {
+  "id": "A35",
+  "set": "A",
+  "ask": "how many open issues on the kubernetes repo",
+  "kind": "count",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A36",
+  "set": "A",
+  "ask": "what time zone is Phoenix in",
+  "kind": "lookup",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "library: Current time in a time zone — timeapi.io → links",
+   "source_host": "timeapi.io",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A37",
+  "set": "A",
+  "ask": "population of Austin Texas",
+  "kind": "lookup",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A38",
+  "set": "A",
+  "ask": "when is Thanksgiving this year",
+  "kind": "lookup",
+  "constraints": {
+   "places": [],
+   "window": "this year",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial: upcoming-holidays list, the asked one not selected",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: US public holidays — date.nager.at",
+   "source_host": "date.nager.at",
+   "card_sha": "50dca255535dc01b"
+  },
+  "harness": null
+ },
+ {
+  "id": "A39",
+  "set": "A",
+  "ask": "map of wildfires in Oregon",
+  "kind": "map",
+  "constraints": {
+   "places": [
+    "Oregon"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "library: NIFC current wildfire incidents — services3.arcgis.com → links",
+   "source_host": "services3.arcgis.com",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A40",
+  "set": "A",
+  "ask": "where is the ISS right now on a map",
+  "kind": "map",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial: lat/lon values, no map",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": "library: ISS position now — api.wheretheiss.at",
+   "source_host": "api.wheretheiss.at",
+   "card_sha": "f4fbba63f3091661"
+  },
+  "harness": null
+ },
+ {
+  "id": "A41",
+  "set": "A",
+  "ask": "earthquakes near Los Angeles on a map",
+  "kind": "map",
+  "constraints": {
+   "places": [
+    "Los Angeles"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "library: USGS earthquakes near a place — earthquake.usgs.gov → links",
+   "source_host": "earthquake.usgs.gov",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A42",
+  "set": "A",
+  "ask": "latest GOES satellite image of the Gulf",
+  "kind": "image",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A43",
+  "set": "A",
+  "ask": "today's picture from the Mars rover",
+  "kind": "image",
+  "constraints": {
+   "places": [],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "needs-key",
+   "source": "needs-key (NASA Astronomy Picture of the Day)",
+   "source_host": "api.nasa.gov",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A44",
+  "set": "A",
+  "ask": "radar for Atlanta",
+  "kind": "image",
+  "constraints": {
+   "places": [
+    "Atlanta"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A45",
+  "set": "A",
+  "ask": "summarize today's top story from AP",
+  "kind": "text_brief",
+  "constraints": {
+   "places": [
+    "AP"
+   ],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A46",
+  "set": "A",
+  "ask": "today's word and its definition",
+  "kind": "text_brief",
+  "constraints": {
+   "places": [],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "library: Merriam-Webster word of the day — www.merriam-webster.com → links",
+   "source_host": "www.merriam-webster.com",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A47",
+  "set": "A",
+  "ask": "today in history",
+  "kind": "text_brief",
+  "constraints": {
+   "places": [],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A48",
+  "set": "A",
+  "ask": "compare Nvidia and AMD stock prices",
+  "kind": "compare",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": 2,
+   "units": null,
+   "entities": [
+    "Nvidia",
+    "AMD"
+   ]
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "links",
+   "source": "links",
+   "source_host": null,
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "A49",
+  "set": "A",
+  "ask": "weather in Denver vs Salt Lake City",
+  "kind": "compare",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": 2,
+   "units": null,
+   "entities": [
+    "Denver",
+    "Salt Lake City"
+   ]
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG: one unnamed city's weather for a two-city compare",
+  "defect_class": "compare unsupported",
+  "baseline": {
+   "outcome": "live",
+   "source": "library: Open-Meteo forecast — api.open-meteo.com",
+   "source_host": "api.open-meteo.com",
+   "card_sha": "bc0247f451be8dc7"
+  },
+  "harness": null
+ },
+ {
+  "id": "A50",
+  "set": "A",
+  "ask": "compare Ethereum and Solana prices",
+  "kind": "compare",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": 2,
+   "units": null,
+   "entities": [
+    "Ethereum",
+    "Solana"
+   ]
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": "source",
+   "source": "library: Coinbase spot price — api.coinbase.com → library: Coinbase spot price — api.coinbase.com → library: CoinGecko coin price — api.coingecko.com",
+   "source_host": "api.coinbase.com",
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B1",
+  "set": "B",
+  "ask": "how hot is it in Tucson right now",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Tucson"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "32.153036",
+    "lon": "-110.870773"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B2",
+  "set": "B",
+  "ask": "current wind speed at Chicago O'Hare",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Chicago O'Hare"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "41.837045",
+    "lon": "-87.684939"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B3",
+  "set": "B",
+  "ask": "what's the UV index in Miami now",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Miami"
+   ],
+   "window": "now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-uv"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-uv",
+   "params": {
+    "lat": "25.775163",
+    "lon": "-80.208615"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B5",
+  "set": "B",
+  "ask": "price of gold today",
+  "kind": "current_value",
+  "constraints": {
+   "places": [],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "goldapi-spot",
+   "params": {
+    "metal": "XAU"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B6",
+  "set": "B",
+  "ask": "chance of rain in Portland tomorrow",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Portland"
+   ],
+   "window": "tomorrow",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "45.536951",
+    "lon": "-122.649971"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B7",
+  "set": "B",
+  "ask": "this week's high temperatures in Phoenix",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Phoenix"
+   ],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "33.572154",
+    "lon": "-112.090132"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B9",
+  "set": "B",
+  "ask": "will it snow in Buffalo this weekend",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Buffalo"
+   ],
+   "window": "this weekend",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "42.892492",
+    "lon": "-78.859686"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B14",
+  "set": "B",
+  "ask": "Yankees games this week",
+  "kind": "schedule",
+  "constraints": {
+   "places": [],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "mlb-team-schedule",
+   "params": {
+    "team": "147",
+    "start": "2026-10-07",
+    "end": "2026-11-06"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B18",
+  "set": "B",
+  "ask": "how did the Dodgers do last night",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": "last night",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "mlb-team-results",
+   "params": {
+    "team": "119",
+    "since": "2026-09-30",
+    "until": "2026-10-07"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B22",
+  "set": "B",
+  "ask": "recent earthquakes in Alaska",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [
+    "Alaska"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "usgs-quakes-state"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-state",
+   "params": {
+    "min_lat": "51.179",
+    "max_lat": "71.435",
+    "min_lon": "-187.651",
+    "max_lon": "-129.974",
+    "min_mag": "2.5",
+    "start": "2026-09-07"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B24",
+  "set": "B",
+  "ask": "biggest movers in crypto today",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "coingecko-markets",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B26",
+  "set": "B",
+  "ask": "unemployment rate over the last year",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-unrate",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B27",
+  "set": "B",
+  "ask": "consumer price index over the past 12 months",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-cpiaucsl",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B28",
+  "set": "B",
+  "ask": "10 year treasury yield this year",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": "this year",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-dgs10",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B29",
+  "set": "B",
+  "ask": "is GitHub down",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "statuspage-summary"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "statuspage-summary",
+   "params": {
+    "status_host": "www.githubstatus.com"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B30",
+  "set": "B",
+  "ask": "Slack status right now",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "slack-status-current"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "slack-status-current",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B32",
+  "set": "B",
+  "ask": "winter storm warnings in Colorado",
+  "kind": "alerts",
+  "constraints": {
+   "places": [
+    "Colorado"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nws-alerts-point"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "params_wrong: the resolved point is in Wisconsin, not Colorado",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-point",
+   "params": {
+    "lat": "45.822142",
+    "lon": "-91.013043"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B36",
+  "set": "B",
+  "ask": "how many active wildfires in California right now",
+  "kind": "count",
+  "constraints": {
+   "places": [
+    "California"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nifc-current-fires",
+   "params": {
+    "state": "CA"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B40",
+  "set": "B",
+  "ask": "what time is sunrise in Boston tomorrow",
+  "kind": "lookup",
+  "constraints": {
+   "places": [
+    "Boston"
+   ],
+   "window": "tomorrow",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-sun",
+   "params": {
+    "lat": "42.338551",
+    "lon": "-71.018253"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B44",
+  "set": "B",
+  "ask": "show lightning strikes near Dallas on a map",
+  "kind": "map",
+  "constraints": {
+   "places": [
+    "Dallas"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": "source_wrong: no lightning data; thunderstorm codes are the nearest",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "32.793333",
+    "lon": "-96.766513"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "B45",
+  "set": "B",
+  "ask": "earthquakes near San Francisco on a map",
+  "kind": "map",
+  "constraints": {
+   "places": [
+    "San Francisco"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "map presentation",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-near",
+   "params": {
+    "lat": "37.727239",
+    "lon": "-123.032229",
+    "radius_km": "200",
+    "min_mag": "2.5",
+    "start": "2026-09-07"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C1",
+  "set": "C",
+  "ask": "how cold is it in Anchorage right now",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Anchorage"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "61.17425",
+    "lon": "-149.284329"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C2",
+  "set": "C",
+  "ask": "humidity in New Orleans at the moment",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "New Orleans"
+   ],
+   "window": "at the moment",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "30.05342",
+    "lon": "-89.934502"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C6",
+  "set": "C",
+  "ask": "how windy is it at Mount Washington",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Mount Washington"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "params_wrong: resolved to Kentucky",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "38.042622",
+    "lon": "-85.556024"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C7",
+  "set": "C",
+  "ask": "will it rain in Seattle on Friday",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Seattle"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "47.619335",
+    "lon": "-122.351538"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C9",
+  "set": "C",
+  "ask": "swell forecast for Ocean Beach San Francisco",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Ocean Beach San Francisco"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-marine"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-marine",
+   "params": {
+    "lat": "37.727239",
+    "lon": "-123.032229"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C10",
+  "set": "C",
+  "ask": "heat index forecast for Houston this week",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Houston"
+   ],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "quantity_unavailable: heat index",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-forecast",
+   "params": {
+    "lat": "29.785743",
+    "lon": "-95.388806"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C11",
+  "set": "C",
+  "ask": "how much snow is expected in Salt Lake City this week",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Salt Lake City"
+   ],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nws-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-forecast",
+   "params": {
+    "lat": "40.776928",
+    "lon": "-111.930991"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C15",
+  "set": "C",
+  "ask": "Knicks schedule this month",
+  "kind": "schedule",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "list_unavailable: source holds only the next game",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "thesportsdb-team-next",
+   "params": {
+    "team": "134862"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C16",
+  "set": "C",
+  "ask": "when do the Eagles play next week",
+  "kind": "schedule",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "list_unavailable",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "thesportsdb-team-next",
+   "params": {
+    "team": "134936"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C18",
+  "set": "C",
+  "ask": "did the Yankees win last night",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": "last night",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "mlb-team-results",
+   "params": {
+    "team": "147",
+    "since": "2026-09-30",
+    "until": "2026-10-07"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C21",
+  "set": "C",
+  "ask": "latest posts on Hacker News",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "hn-search"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "hn-search",
+   "params": {
+    "topic": "posts"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C27",
+  "set": "C",
+  "ask": "gasoline prices over the past month",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-gasregw",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C31",
+  "set": "C",
+  "ask": "Zoom service status",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "statuspage-summary"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "statuspage-summary",
+   "params": {
+    "status_host": "status.zoom.us"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C32",
+  "set": "C",
+  "ask": "any delays on the Washington Metro right now",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": "source_wrong: FAA airport feed, not Metro",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "faa-nas-status",
+   "params": {
+    "airport": "DCA"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C34",
+  "set": "C",
+  "ask": "red flag warnings in California",
+  "kind": "alerts",
+  "constraints": {
+   "places": [
+    "California"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-state",
+   "params": {
+    "state": "CA"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C38",
+  "set": "C",
+  "ask": "number of flights delayed at JFK right now",
+  "kind": "count",
+  "constraints": {
+   "places": [
+    "JFK"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "quantity_unavailable: flight counts",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "faa-nas-status",
+   "params": {
+    "airport": "JFK"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C45",
+  "set": "C",
+  "ask": "show active wildfires in Colorado on a map",
+  "kind": "map",
+  "constraints": {
+   "places": [
+    "Colorado"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "map presentation",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nifc-current-fires",
+   "params": {
+    "state": "CO"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "C50",
+  "set": "C",
+  "ask": "weather summary for Denver this weekend",
+  "kind": "text_brief",
+  "constraints": {
+   "places": [
+    "Denver"
+   ],
+   "window": "this weekend",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "39.76185",
+    "lon": "-104.881105"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D1",
+  "set": "D",
+  "ask": "how humid is it in Savannah right now",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Savannah"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "32.018043",
+    "lon": "-81.196492"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D2",
+  "set": "D",
+  "ask": "wind speed at the Golden Gate at the moment",
+  "kind": "current_value",
+  "constraints": {
+   "places": [],
+   "window": "at the moment",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "params_wrong: resolved to Illinois",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "38.358877",
+    "lon": "-88.204677"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D3",
+  "set": "D",
+  "ask": "how strong is the sun's UV in Honolulu at noon",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Honolulu"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-uv"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-uv",
+   "params": {
+    "lat": "21.324347",
+    "lon": "-157.84764"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D7",
+  "set": "D",
+  "ask": "any snow expected in Duluth midweek",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Duluth"
+   ],
+   "window": "now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": "midweek read as Wednesday",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "46.774458",
+    "lon": "-92.134135"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D8",
+  "set": "D",
+  "ask": "hourly temperature in Tucson tomorrow",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Tucson"
+   ],
+   "window": "tomorrow",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-forecast-hourly",
+   "params": {
+    "lat": "32.153036",
+    "lon": "-110.870773"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D10",
+  "set": "D",
+  "ask": "chance of thunderstorms in Atlanta tonight",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Atlanta"
+   ],
+   "window": "tonight",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "33.762909",
+    "lon": "-84.422675"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D11",
+  "set": "D",
+  "ask": "aurora forecast for Fairbanks this week",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Fairbanks"
+   ],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "swpc-kp-forecast",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D12",
+  "set": "D",
+  "ask": "when is the next low tide in Bar Harbor",
+  "kind": "next_event",
+  "constraints": {
+   "places": [
+    "Bar Harbor"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "coops-tide-hilo",
+   "params": {
+    "station": "8413320",
+    "begin": "20261008"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D13",
+  "set": "D",
+  "ask": "when do the Bruins play next",
+  "kind": "next_event",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nhl-club-schedule"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nhl-club-schedule",
+   "params": {
+    "team": "BOS"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D14",
+  "set": "D",
+  "ask": "next SpaceX launch from Cape Canaveral",
+  "kind": "next_event",
+  "constraints": {
+   "places": [
+    "Cape Canaveral"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "ll2-upcoming-launches"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "ll2-upcoming-launches",
+   "params": {
+    "site": "12,27",
+    "provider": "121"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D17",
+  "set": "D",
+  "ask": "tide times for Galveston on Friday",
+  "kind": "schedule",
+  "constraints": {
+   "places": [
+    "Galveston"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "coops-tide-hilo"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "coops-tide-hilo",
+   "params": {
+    "station": "8771486",
+    "begin": "20261008"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D18",
+  "set": "D",
+  "ask": "result of the latest Sharks game",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": "gameState codes undeclared",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nhl-score-now",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D21",
+  "set": "D",
+  "ask": "latest tech news from Ars Technica",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [
+    "Ars Technica"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "ars-technica"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "ars-technica",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D22",
+  "set": "D",
+  "ask": "newest earthquakes above magnitude 3 in Nevada",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [
+    "Nevada"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "usgs-quakes-state"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-state",
+   "params": {
+    "min_lat": "35.002",
+    "max_lat": "41.995",
+    "min_lon": "-120.001",
+    "max_lon": "-114.041",
+    "min_mag": "2.5",
+    "start": "2026-09-08"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D24",
+  "set": "D",
+  "ask": "biggest ten coins ranked by trading volume",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "coingecko-markets",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D25",
+  "set": "D",
+  "ask": "NHL standings in the Pacific division",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nhl-standings-now"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "filter_unavailable: division is not a cell",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nhl-standings-now",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D27",
+  "set": "D",
+  "ask": "unemployment rate over the last two years",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-unrate",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D30",
+  "set": "D",
+  "ask": "is GitHub having an outage right now",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "statuspage-summary"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "statuspage-summary",
+   "params": {
+    "status_host": "www.githubstatus.com"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D33",
+  "set": "D",
+  "ask": "any winter storm warnings for Minnesota",
+  "kind": "alerts",
+  "constraints": {
+   "places": [
+    "Minnesota"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nws-alerts-point"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "params_wrong: point in Wisconsin",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-point",
+   "params": {
+    "lat": "45.822142",
+    "lon": "-91.013043"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D36",
+  "set": "D",
+  "ask": "how many active wildfires are burning in Oregon",
+  "kind": "count",
+  "constraints": {
+   "places": [
+    "Oregon"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nifc-current-fires",
+   "params": {
+    "state": "OR"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D37",
+  "set": "D",
+  "ask": "how many earthquakes hit Japan this week",
+  "kind": "count",
+  "constraints": {
+   "places": [],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": "params_wrong: Japan resolved to Louisiana",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-near",
+   "params": {
+    "lat": "31.566074",
+    "lon": "-93.477234",
+    "radius_km": "200",
+    "min_mag": "2.5",
+    "start": "2026-09-08"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D45",
+  "set": "D",
+  "ask": "plot where the space station is over the Pacific right now",
+  "kind": "map",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "people-in-space"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "source_wrong: no position data",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "people-in-space",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "D49",
+  "set": "D",
+  "ask": "summary of today's NWS forecast discussion for Seattle",
+  "kind": "text_brief",
+  "constraints": {
+   "places": [
+    "Seattle"
+   ],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "text_unavailable: the area forecast discussion is another product",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-forecast",
+   "params": {
+    "lat": "47.619335",
+    "lon": "-122.351538"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E2",
+  "set": "E",
+  "ask": "how hard is the wind blowing at Cape Hatteras right now",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Cape Hatteras"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "35.219928",
+    "lon": "-75.687947"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E3",
+  "set": "E",
+  "ask": "current water temperature off Santa Monica",
+  "kind": "current_value",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "coops-water-temp"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "coops-water-temp",
+   "params": {
+    "station": "9410840"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E5",
+  "set": "E",
+  "ask": "price of silver per ounce right now",
+  "kind": "current_value",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "goldapi-spot"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "goldapi-spot",
+   "params": {
+    "metal": "XAG"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E7",
+  "set": "E",
+  "ask": "is rain coming to Portland Oregon on Sunday",
+  "kind": "forecast",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "45.536951",
+    "lon": "-122.649971"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E8",
+  "set": "E",
+  "ask": "wave heights at Ocean City Maryland for the weekend",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Ocean City Maryland"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-marine"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-marine",
+   "params": {
+    "lat": "38.393125",
+    "lon": "-75.071208"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E10",
+  "set": "E",
+  "ask": "fog expected in San Francisco tomorrow morning",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "San Francisco"
+   ],
+   "window": "tomorrow",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (engine)",
+  "defect_class": "morning not expressible; conditions cell leads",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "37.727239",
+    "lon": "-123.032229"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E12",
+  "set": "E",
+  "ask": "when is the next high tide at Kennebunkport",
+  "kind": "next_event",
+  "constraints": {
+   "places": [
+    "Kennebunkport"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "coops-tide-hilo",
+   "params": {
+    "station": "8418150",
+    "begin": "20261009"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E13",
+  "set": "E",
+  "ask": "Dolphins next game date and time",
+  "kind": "next_event",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "thesportsdb-team-next"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "thesportsdb-team-next",
+   "params": {
+    "team": "134919"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E14",
+  "set": "E",
+  "ask": "when does the first quarter moon fall this month",
+  "kind": "next_event",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usno-moon-phases",
+   "params": {
+    "date": "2026-10-09"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E18",
+  "set": "E",
+  "ask": "Astros result from last night",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": "last night",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "mlb-team-results"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "mlb-team-results",
+   "params": {
+    "team": "117",
+    "since": "2026-10-02",
+    "until": "2026-10-09"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E22",
+  "set": "E",
+  "ask": "recent quakes stronger than magnitude 4 in Alaska",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [
+    "Alaska"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-state",
+   "params": {
+    "min_lat": "51.179",
+    "max_lat": "71.435",
+    "min_lon": "-187.651",
+    "max_lon": "-129.974",
+    "min_mag": "2.5",
+    "start": "2026-09-09"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E24",
+  "set": "E",
+  "ask": "top 5 cryptocurrencies by price right now",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "coingecko-markets",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E26",
+  "set": "E",
+  "ask": "largest wildfires burning in California by acres",
+  "kind": "ranking",
+  "constraints": {
+   "places": [
+    "California"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nifc-current-fires"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nifc-current-fires",
+   "params": {
+    "state": "CA"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E27",
+  "set": "E",
+  "ask": "consumer price index over the last year",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-cpiaucsl",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E31",
+  "set": "E",
+  "ask": "is the CTA Blue Line running normally",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "cta-alerts",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E32",
+  "set": "E",
+  "ask": "are there ground stops at JFK right now",
+  "kind": "status",
+  "constraints": {
+   "places": [
+    "JFK"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "faa-nas-status"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "ground stop ≈ ground delay program",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "faa-nas-status",
+   "params": {
+    "airport": "JFK"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E33",
+  "set": "E",
+  "ask": "flash flood watches around Louisville",
+  "kind": "alerts",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nws-alerts-point"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-point",
+   "params": {
+    "lat": "38.165376",
+    "lon": "-85.647377"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E34",
+  "set": "E",
+  "ask": "heat advisories in Phoenix right now",
+  "kind": "alerts",
+  "constraints": {
+   "places": [
+    "Phoenix"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nws-alerts-point"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-point",
+   "params": {
+    "lat": "33.572154",
+    "lon": "-112.090132"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E36",
+  "set": "E",
+  "ask": "how many tropical storms are active in the Atlantic right now",
+  "kind": "count",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "source_wrong: point alert feed; point in Iowa",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-tropical-alerts-point",
+   "params": {
+    "lat": "41.392994",
+    "lon": "-95.021882"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E37",
+  "set": "E",
+  "ask": "how many earthquakes above magnitude 2 hit Oklahoma this week",
+  "kind": "count",
+  "constraints": {
+   "places": [],
+   "window": "this week",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-state",
+   "params": {
+    "min_lat": "33.616",
+    "max_lat": "37.0",
+    "min_lon": "-103.002",
+    "max_lon": "-94.431",
+    "min_mag": "2.5",
+    "start": "2026-09-09"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E38",
+  "set": "E",
+  "ask": "number of NWS alerts currently active in Florida",
+  "kind": "count",
+  "constraints": {
+   "places": [
+    "Florida"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nws-alerts-state"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-state",
+   "params": {
+    "state": "FL"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E39",
+  "set": "E",
+  "ask": "when is Thanksgiving in 2027",
+  "kind": "lookup",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (data)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nager-holidays-year",
+   "params": {
+    "year": "2026"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E44",
+  "set": "E",
+  "ask": "mortgage rates now versus a year ago",
+  "kind": "compare",
+  "constraints": {
+   "places": [],
+   "window": "now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "compare: two points of one series",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-mortgage30us",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E45",
+  "set": "E",
+  "ask": "where is the ISS over the Atlantic right now on a map",
+  "kind": "map",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "wheretheiss-now"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "map presentation",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "wheretheiss-now",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "E49",
+  "set": "E",
+  "ask": "summarize today's NWS area forecast discussion for Denver",
+  "kind": "text_brief",
+  "constraints": {
+   "places": [
+    "Denver"
+   ],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "text_unavailable: area forecast discussion",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-forecast",
+   "params": {
+    "lat": "39.76185",
+    "lon": "-104.881105"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F1",
+  "set": "F",
+  "ask": "how chilly is it in Fargo at the moment",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Fargo"
+   ],
+   "window": "at the moment",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "46.8647",
+    "lon": "-96.82908"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F4",
+  "set": "F",
+  "ask": "current price of platinum per ounce",
+  "kind": "current_value",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "goldapi-spot"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "goldapi-spot",
+   "params": {
+    "metal": "XPT"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F5",
+  "set": "F",
+  "ask": "air quality index in Fresno this hour",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Fresno"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-air-quality"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-air-quality",
+   "params": {
+    "lat": "36.782684",
+    "lon": "-119.793359"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F6",
+  "set": "F",
+  "ask": "how fast is the wind at Point Reyes right now",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Point Reyes"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "38.084647",
+    "lon": "-122.809226"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F7",
+  "set": "F",
+  "ask": "will there be frost in Burlington Vermont tomorrow morning",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Burlington Vermont"
+   ],
+   "window": "tomorrow",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "open-meteo-forecast"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "frost is not a cell; the temperature series answers it",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "44.491927",
+    "lon": "-73.238882"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F11",
+  "set": "F",
+  "ask": "will it be sunny in Tucson this weekend",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Tucson"
+   ],
+   "window": "this weekend",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "32.153036",
+    "lon": "-110.870773"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F14",
+  "set": "F",
+  "ask": "when do the Packers play next",
+  "kind": "next_event",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "thesportsdb-team-next"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "thesportsdb-team-next",
+   "params": {
+    "team": "134940"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F16",
+  "set": "F",
+  "ask": "sunrise and sunset times in Anchorage for the coming week",
+  "kind": "schedule",
+  "constraints": {
+   "places": [
+    "Anchorage"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-sun",
+   "params": {
+    "lat": "61.17425",
+    "lon": "-149.284329"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F17",
+  "set": "F",
+  "ask": "upcoming SpaceX launches from Vandenberg this month",
+  "kind": "schedule",
+  "constraints": {
+   "places": [
+    "Vandenberg"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "ll2-upcoming-launches"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "ll2-upcoming-launches",
+   "params": {
+    "site": "11",
+    "provider": "121"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F18",
+  "set": "F",
+  "ask": "did the Blue Jays win last night",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": "last night",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "mlb-team-results"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "mlb-team-results",
+   "params": {
+    "team": "141",
+    "since": "2026-10-05",
+    "until": "2026-10-12"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F19",
+  "set": "F",
+  "ask": "final score of the latest Canucks game",
+  "kind": "result",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (silent)",
+  "defect_class": "gameState codes undeclared",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nhl-score-now",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F21",
+  "set": "F",
+  "ask": "newest posts on Hacker News about Rust",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (presentation)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "hn-search",
+   "params": {
+    "topic": "posts rust"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F22",
+  "set": "F",
+  "ask": "latest earthquakes above magnitude 5 anywhere in the world",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (flagged)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-25-day",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F24",
+  "set": "F",
+  "ask": "ten biggest cryptocurrencies by trading volume today",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (silent)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "coingecko-markets",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F25",
+  "set": "F",
+  "ask": "NHL standings in the Atlantic division",
+  "kind": "ranking",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nhl-standings-now"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "division is not a declared cell",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nhl-standings-now",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F26",
+  "set": "F",
+  "ask": "largest active wildfires in Oregon by size",
+  "kind": "ranking",
+  "constraints": {
+   "places": [
+    "Oregon"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "wrong",
+  "human_verdict_raw": "WRONG (flagged)",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nifc-current-fires",
+   "params": {
+    "state": "OR"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F27",
+  "set": "F",
+  "ask": "US unemployment rate over the past three years",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-unrate",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F28",
+  "set": "F",
+  "ask": "price of regular gas over the last six months",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "fred-gasregw"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-gasregw",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F29",
+  "set": "F",
+  "ask": "30 year mortgage rate trend this year",
+  "kind": "trend",
+  "constraints": {
+   "places": [],
+   "window": "this year",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "fred-mortgage30us"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "fred-mortgage30us",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F30",
+  "set": "F",
+  "ask": "is Cloudflare down right now",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "statuspage-summary"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "statuspage-summary",
+   "params": {
+    "status_host": "www.cloudflarestatus.com"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F31",
+  "set": "F",
+  "ask": "are there delays at Atlanta airport at the moment",
+  "kind": "status",
+  "constraints": {
+   "places": [
+    "Atlanta"
+   ],
+   "window": "at the moment",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "faa-nas-status"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": "ground_delay is an acceptable alternative",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "faa-nas-status",
+   "params": {
+    "airport": "ATL"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F32",
+  "set": "F",
+  "ask": "is the BART system running normally",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "bart-advisories"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "bart-advisories",
+   "params": {},
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F33",
+  "set": "F",
+  "ask": "any flood watches around Nashville",
+  "kind": "alerts",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nws-alerts-point"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-point",
+   "params": {
+    "lat": "36.1718",
+    "lon": "-86.785002"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F35",
+  "set": "F",
+  "ask": "winter weather advisories for Vermont",
+  "kind": "alerts",
+  "constraints": {
+   "places": [
+    "Vermont"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nws-alerts-state"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-state",
+   "params": {
+    "state": "VT"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F36",
+  "set": "F",
+  "ask": "how many earthquakes above magnitude 3 hit California in the past week",
+  "kind": "count",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-state",
+   "params": {
+    "min_lat": "32.53",
+    "max_lat": "42.01",
+    "min_lon": "-124.481",
+    "max_lon": "-114.131",
+    "min_mag": "2.5",
+    "start": "2026-09-12"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F37",
+  "set": "F",
+  "ask": "number of active NWS warnings in Texas right now",
+  "kind": "count",
+  "constraints": {
+   "places": [
+    "Texas"
+   ],
+   "window": "right now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-alerts-state",
+   "params": {
+    "state": "TX"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F38",
+  "set": "F",
+  "ask": "how many wildfires are currently burning in Idaho",
+  "kind": "count",
+  "constraints": {
+   "places": [
+    "Idaho"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "nifc-current-fires"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": "right",
+  "human_verdict_raw": "right",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nifc-current-fires",
+   "params": {
+    "state": "ID"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F45",
+  "set": "F",
+  "ask": "show recent quakes near Anchorage on a map",
+  "kind": "map",
+  "constraints": {
+   "places": [
+    "Anchorage"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "map presentation",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "usgs-quakes-near",
+   "params": {
+    "lat": "61.17425",
+    "lon": "-149.284329",
+    "radius_km": "200",
+    "min_mag": "2.5",
+    "start": "2026-09-12"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F46",
+  "set": "F",
+  "ask": "plot current wildfires in Montana on a map",
+  "kind": "map",
+  "constraints": {
+   "places": [
+    "Montana"
+   ],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "map presentation",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nifc-current-fires",
+   "params": {
+    "state": "MT"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F49",
+  "set": "F",
+  "ask": "summary of today's forecast discussion for Boston",
+  "kind": "text_brief",
+  "constraints": {
+   "places": [
+    "Boston"
+   ],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": "text_unavailable: the area forecast discussion",
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "nws-forecast",
+   "params": {
+    "lat": "42.338551",
+    "lon": "-71.018253"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "F50",
+  "set": "F",
+  "ask": "brief weather outlook for Phoenix this weekend",
+  "kind": "text_brief",
+  "constraints": {
+   "places": [
+    "Phoenix"
+   ],
+   "window": "this weekend",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": "partial",
+  "human_verdict_raw": "partial",
+  "defect_class": null,
+  "baseline": {
+   "outcome": "live",
+   "source": null,
+   "source_id": "open-meteo-forecast",
+   "params": {
+    "lat": "33.572154",
+    "lon": "-112.090132"
+   },
+   "card_sha": null
+  },
+  "harness": null
+ },
+ {
+  "id": "G5",
+  "set": "G",
+  "ask": "UV index in Phoenix this afternoon",
+  "kind": "current_value",
+  "constraints": {
+   "places": [
+    "Phoenix"
+   ],
+   "window": "this afternoon",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": null
+  },
+  "harness": null
+ },
+ {
+  "id": "G8",
+  "set": "G",
+  "ask": "chance of snow in Denver on Thursday",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Denver"
+   ],
+   "window": "now",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": null
+  },
+  "harness": null
+ },
+ {
+  "id": "G9",
+  "set": "G",
+  "ask": "hourly rain forecast for Orlando today",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Orlando"
+   ],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": null
+  },
+  "harness": null
+ },
+ {
+  "id": "G10",
+  "set": "G",
+  "ask": "will it be foggy in Portland Oregon tomorrow morning",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Portland Oregon"
+   ],
+   "window": "tomorrow",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": null
+  },
+  "harness": null
+ },
+ {
+  "id": "G40",
+  "set": "G",
+  "ask": "what time does the sun set in Denver tomorrow",
+  "kind": "next_event",
+  "constraints": {
+   "places": [
+    "Denver"
+   ],
+   "window": "tomorrow",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": null
+  },
+  "harness": null
+ },
+ {
+  "id": "G49",
+  "set": "G",
+  "ask": "short weather summary for Seattle tomorrow",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Seattle"
+   ],
+   "window": "tomorrow",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": null
+  },
+  "harness": null
+ },
+ {
+  "id": "G50",
+  "set": "G",
+  "ask": "today's forecast discussion for Kansas City",
+  "kind": "forecast",
+  "constraints": {
+   "places": [
+    "Kansas City"
+   ],
+   "window": "today",
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": null,
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {
+   "outcome": null
+  },
+  "harness": null
+ }
+]
