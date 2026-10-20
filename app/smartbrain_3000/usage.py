@@ -32,11 +32,39 @@ def record(conn, model: str, prompt_tokens: int, completion_tokens: int,
     )
 
 
-def record_response(conn, model: str, response: object) -> None:
+def cache_tokens(usage: object) -> tuple[int, int]:
+    """(cache_creation_input_tokens, cache_read_input_tokens) from a usage block; 0 when absent/invalid."""
+    if not isinstance(usage, dict):
+        return 0, 0
+    out = []
+    for key in ("cache_creation_input_tokens", "cache_read_input_tokens"):
+        val = usage.get(key)
+        out.append(val if isinstance(val, int) and not isinstance(val, bool) and val > 0 else 0)
+    return out[0], out[1]
+
+
+def prompt_total(usage: dict) -> int:
+    """Total prompt tokens for a usage block, cache included.
+
+    Anthropic-native usage reports ``input_tokens`` EXCLUDING cached tokens, so the total is
+    input_tokens + cache_creation_input_tokens + cache_read_input_tokens. OpenAI-style usage
+    (``prompt_tokens``) is already a total and is used as-is."""
+    assert isinstance(usage, dict), "usage must be a dict"
+    created, read = cache_tokens(usage)
+    native = usage.get("input_tokens")
+    if "prompt_tokens" not in usage and isinstance(native, int) and not isinstance(native, bool):
+        return max(native, 0) + created + read
+    return usage.get("prompt_tokens") or 0
+
+
+def record_response(conn, model: str, response: object, purpose: str | None = None) -> None:
     """Best-effort: record token usage from an OpenAI-style chat response.
 
     A response without a ``usage`` block is ignored; any failure is swallowed
-    (logged at debug) so usage logging can never fail a turn.
+    (logged at debug) so usage logging can never fail a turn. Prompt-cache tokens
+    (``cache_creation_input_tokens`` / ``cache_read_input_tokens``) count toward the
+    prompt total. ``purpose`` is a caller label (e.g. "ni.fit") kept in the debug log:
+    usage_log has no purpose column, so rows aggregate by model in /api/usage.
     """
     if conn is None or not model or not isinstance(response, dict):
         return
@@ -45,8 +73,12 @@ def record_response(conn, model: str, response: object) -> None:
         return
     cost = usage.get("cost_usd")
     try:
-        record(conn, model, usage.get("prompt_tokens") or 0, usage.get("completion_tokens") or 0,
+        created, read = cache_tokens(usage)
+        record(conn, model, prompt_total(usage), usage.get("completion_tokens") or 0,
                cost_usd=float(cost) if isinstance(cost, (int, float)) else None)
+        if purpose:
+            log.debug("usage recorded purpose=%s model=%s cache_creation=%d cache_read=%d",
+                      purpose, model, created, read)
     except Exception as exc:  # never fail a turn over telemetry
         log.debug("usage record skipped: %s", exc)
     _warn_if_server_is_reloading(model, usage)

@@ -747,6 +747,18 @@ def chat(
     return data
 
 
+def chat_recorded(conn, purpose: str, messages: list[dict], model: str, **kwargs) -> dict:
+    """``chat`` plus best-effort usage recording (cache tokens included) under a purpose label.
+
+    The hook for callers that want their calls to appear in /api/usage; ``kwargs`` go to ``chat``."""
+    from . import usage  # local import: keeps usage free of gateway at import time
+
+    assert purpose, "purpose label required"
+    data = chat(messages, model, **kwargs)
+    usage.record_response(conn, model, data, purpose=purpose)
+    return data
+
+
 def completion_text(data: dict) -> str:
     """Extract the assistant message text from a ``chat`` response (choices[0].message.content).
 
