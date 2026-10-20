@@ -634,6 +634,16 @@ def chat_stream(
             client.close()
 
 
+def _set_max_tokens(payload: dict, max_tokens: int | None) -> None:
+    """Add a validated ``max_tokens`` to ``payload``; None leaves the payload untouched."""
+    assert isinstance(payload, dict), "payload must be a dict"
+    if max_tokens is None:
+        return
+    assert isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > 0, \
+        "max_tokens must be a positive int"
+    payload["max_tokens"] = max_tokens
+
+
 def chat(
     messages: list[dict],
     model: str,
@@ -641,8 +651,12 @@ def chat(
     client: httpx.Client | None = None,
     timeout: float = 60.0,
     temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> dict:
     """Send a chat completion through Bifrost; return the parsed JSON response.
+
+    ``max_tokens`` is opt-in like ``temperature``: when None the payload is unchanged
+    (the provider's own default applies).
 
     ``temperature`` is opt-in: when None (every existing caller), the payload stays
     byte-identical to before — user-facing chat keeps the model server's default.
@@ -657,11 +671,13 @@ def chat(
     assert model, "model must be specified"
     if claudecli.is_claudecode(model):  # served by the user's claude CLI, not Bifrost
         assert temperature is None, "claudecode does not honor temperature — refuse loudly"
+        assert max_tokens is None, "claudecode does not honor max_tokens — refuse loudly"
         return claudecli.chat(_wire_messages(messages, model), model, timeout=max(timeout, claudecli.MIN_TIMEOUT))
     payload: dict = {"model": model, "messages": _wire_messages(messages, model)}
     if temperature is not None:
         assert 0.0 <= temperature <= 2.0, "temperature out of range"
         payload["temperature"] = float(temperature)
+    _set_max_tokens(payload, max_tokens)
     client, owns_client = _resolve_client(client, timeout)
     try:
         with _serialized(model):  # serialize local-provider calls (no-op for cloud)
@@ -712,8 +728,11 @@ def chat_with_tools(
     client: httpx.Client | None = None,
     timeout: float = 60.0,
     session: claudecli.TurnSession | None = None,
+    max_tokens: int | None = None,
 ) -> dict:
     """Chat completion with OpenAI tool-calling enabled; return parsed JSON.
+
+    ``max_tokens`` is opt-in (None leaves the payload unchanged).
 
     Additive sibling of ``chat`` (which never sends a tools field). On an
     upstream error, raises GatewayError with ``tools_unsupported`` set when the
@@ -728,20 +747,19 @@ def chat_with_tools(
     assert model, "model must be specified"
     assert tools_spec, "tools spec must be non-empty"
     if claudecli.is_claudecode(model):  # tool offers ride the text protocol (see claudecli)
+        assert max_tokens is None, "claudecode does not honor max_tokens — refuse loudly"
         return claudecli.chat(_wire_messages(messages, model), model, timeout=max(timeout, claudecli.MIN_TIMEOUT),
                               tools_spec=tools_spec, session=session)
+    payload: dict = {"model": model, "messages": _wire_messages(messages, model),
+                     "tools": _wire_tools(tools_spec, model), "tool_choice": "auto"}
+    _set_max_tokens(payload, max_tokens)
     client, owns_client = _resolve_client(client, timeout)
     try:
         # Pass timeout per-request: the pooled client (always installed in prod) has a
         # fixed default, so only a per-call override lets the agent/scheduled path wait
         # out a cold local-model load. Serialize local-provider calls (no-op for cloud).
         with _serialized(model):
-            resp = client.post(
-                "/v1/chat/completions",
-                json={"model": model, "messages": _wire_messages(messages, model),
-                      "tools": _wire_tools(tools_spec, model), "tool_choice": "auto"},
-                timeout=timeout,
-            )
+            resp = client.post("/v1/chat/completions", json=payload, timeout=timeout)
         try:
             data = resp.json()
         except ValueError:

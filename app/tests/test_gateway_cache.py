@@ -80,6 +80,22 @@ def test_tool_result_breakpoint_and_sorted_tools_on_anthropic() -> None:
     assert again == bodies  # deterministic prefix
 
 
+def test_max_tokens_passthrough_and_default_unchanged() -> None:
+    msgs = [{"role": "user", "content": "q"}]
+    a: list[bytes] = []
+    b: list[bytes] = []
+    gateway.chat(msgs, "openai/x", client=_client(a))
+    gateway.chat(msgs, "openai/x", client=_client(b), max_tokens=64)
+    assert "max_tokens" not in json.loads(a[0])  # default payload unchanged
+    assert json.loads(b[0])["max_tokens"] == 64
+    c: list[bytes] = []
+    gateway.chat_with_tools(msgs, "openai/x", [_TOOL], client=_client(c), max_tokens=32)
+    assert json.loads(c[0])["max_tokens"] == 32
+    d: list[bytes] = []
+    gateway.chat_with_tools(msgs, "openai/x", [_TOOL], client=_client(d))
+    assert "max_tokens" not in json.loads(d[0])
+
+
 def test_non_text_blocks_survive_flatten_without_marker() -> None:
     img = {"type": "image_url", "image_url": {"url": "data:x"}, "cache": True}
     out = gateway._wire_messages([{"role": "user", "content": [img]}], "openai/x")
