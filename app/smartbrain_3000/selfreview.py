@@ -406,9 +406,9 @@ def _local_model(conn: duckdb.DuckDBPyConnection) -> str | None:
     """
     from . import gateway
     routes = gateway.load_routes(conn)
-    model = (gateway.resolve_model("self_review", routes)
-             or gateway.resolve_model("agent", routes)
-             or gateway.resolve_model("chat", routes))
+    # "self_review" is not a routed capability (not in gateway.KNOWN_CAPABILITIES): ask
+    # for the real slots explicitly, agent first, then chat.
+    model = gateway.resolve_model("agent", routes) or gateway.resolve_model("chat", routes)
     if not model or not gateway.is_local(model):
         log.debug("self-review: critique skipped (no local model routed)")
         return None
