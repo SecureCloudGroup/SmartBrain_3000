@@ -7850,6 +7850,10 @@ def sweep_stranded_flows(store: ni.NIStore) -> int:
             # (claims audit 2026-09-21). A bare ``source`` (no pick marker) is
             # the locating window — work in progress that a restart can strand.
             continue
+        with _INFLIGHT_LOCK:
+            live_worker = item["id"] in _INFLIGHT
+        if live_worker:
+            continue  # a worker is still running this card — slow, not stranded
         updated_at = record.get("updated_at")
         if not isinstance(updated_at, str) or not updated_at:
             continue

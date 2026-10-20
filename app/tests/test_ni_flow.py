@@ -3056,6 +3056,22 @@ def test_sweep_strands_locating_source_but_keeps_pick_pause() -> None:
     assert (ni_flow._flow_read(store, picking) or {})["state"] == "source"
 
 
+def test_sweep_skips_flow_with_live_worker() -> None:
+    """A slow but live worker (id in _INFLIGHT) must not be failed as stale."""
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "slow worker")
+    record = ni_flow._flow_read(store, item_id) or {}
+    record["updated_at"] = "2020-01-01T00:00:00+00:00"
+    ni_flow._flow_write(store, item_id, record)
+    assert ni_flow._claim(item_id)
+    try:
+        assert ni_flow.sweep_stranded_flows(store) == 0
+    finally:
+        ni_flow._release(item_id)
+    assert (ni_flow._flow_read(store, item_id) or {})["state"] != "failed"
+    assert ni_flow.sweep_stranded_flows(store) == 1
+
+
 def test_board_keeps_terminal_slot_that_carries_a_question() -> None:
     """A finished card whose terminal asks model_consent must keep asking.
 
