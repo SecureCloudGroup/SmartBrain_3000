@@ -3037,6 +3037,25 @@ def test_remap_keeps_the_born_marker_on_api_cards(monkeypatch) -> None:
     assert store.get_item(iid)["spec"].get("_born") == "flow"
 
 
+def test_sweep_strands_locating_source_but_keeps_pick_pause() -> None:
+    """A bare state=source (locating, no pick marker) can be stranded by a restart.
+
+    The sweep used to skip every ``source``, leaving "Finding a source…" forever
+    with retry/reopen answering 409. The real pick pause must still survive.
+    """
+    store, _conn = _store()
+    old = "2020-01-01T00:00:00+00:00"
+    locating = ni_flow.create_shell_item(store, "locating")
+    picking = ni_flow.create_shell_item(store, "picking")
+    for iid, error in ((locating, None), (picking, ni_flow.AWAITING_SOURCE_PICK)):
+        record = ni_flow._flow_read(store, iid) or {}
+        record.update(state="source", error=error, updated_at=old)
+        ni_flow._flow_write(store, iid, record)
+    assert ni_flow.sweep_stranded_flows(store) == 1
+    assert (ni_flow._flow_read(store, locating) or {})["state"] == "failed"
+    assert (ni_flow._flow_read(store, picking) or {})["state"] == "source"
+
+
 def test_board_keeps_terminal_slot_that_carries_a_question() -> None:
     """A finished card whose terminal asks model_consent must keep asking.
 
