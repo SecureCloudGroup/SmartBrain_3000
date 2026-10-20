@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from .. import ni
+from .classes import shadow_reasons
 from .places import (
     _national_us_misses_place,
     _place_taken,
     _resolver_landed_outside_state,
     _scoping_names_place,
 )
+from .rows import SourceInfo, read_result
 from .subject import (
     _about_named,
     _other_subject,
@@ -272,3 +276,23 @@ def _said_wants(request: str, wants: list, filled: list[str]) -> list[str]:
         if _answer_tokens(str(want).replace("_", " ")) & ask:
             out.append(str(want))
     return out
+
+
+def verify_shadow(source: dict, params: dict, built: dict, request: str, now: datetime) -> dict[str, list[str]]:
+    """Shadow mode (plan S2): the four constraint classes (``classes``) over this build — reasons per class,
+    {} when none object. The caller records them and never refuses on them. Never raises."""
+    assert isinstance(source, dict) and isinstance(built, dict), "source + build required"
+    assert now.tzinfo is not None, "now must be aware"
+    try:
+        zone = now.tzinfo if isinstance(now.tzinfo, ZoneInfo) else ZoneInfo(ni.user_timezone_name())
+        preview = built.get("preview_payload")
+        moments: list = []
+        _times_in(preview, moments)
+        texts = [*(str(x) for x in built.get("labels") or []), str(source.get("label") or ""),
+                 *(str(x) for x in source.get("readings") or []), json.dumps(preview, default=str)[:20000]]
+        result = read_result(preview, texts, zone, [(m.moment, m.moment) for m in moments])
+        info = SourceInfo(name=str(source.get("name") or ""), url=str(built.get("url") or ""),
+                          scope=source.get("scope"), params=frozenset(str(k) for k in params))
+        return shadow_reasons(request, result, info, now, zone)
+    except Exception as exc:  # shadow only: a bug here must never touch the build
+        return {"error": [type(exc).__name__]}

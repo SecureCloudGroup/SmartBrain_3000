@@ -57,6 +57,7 @@ from .ni_verify.frame import (  # noqa: F401  (re-exported: the flow and its tes
     _times_in,
     _verify_frame,
     _verify_source,
+    verify_shadow,
 )
 from .ni_verify.places import (  # noqa: F401  (re-exported: the flow and its tests reach them here)
     _LABEL_STATE_RE,
@@ -5416,9 +5417,15 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     if answered is not None:
         url = str(answered.get("url") or url)  # Round 20 (Q3b): the address the asked stretch rebound
         frame = {**_frame_of(request, intent), "window": answered.get("window")}
-        reasons, frame_notes = _verify_frame(frame, _picked_source(live),
-                                             _clean_params(live.get("_library_params")), answered, request,
+        picked_source, picked_params = _picked_source(live), _clean_params(live.get("_library_params"))
+        reasons, frame_notes = _verify_frame(frame, picked_source, picked_params, answered, request,
                                              intent, ni._clock())
+        # S2 (shadow): the four constraint classes (window, threshold, compare count, source scope) judge
+        # the same build; their reasons are only recorded on the flow record (``_verify_shadow``), a build
+        # is never refused on them yet
+        shadow = verify_shadow(picked_source, picked_params, answered, request, ni._clock())
+        if shadow:
+            log.info("ni_flow: verify shadow %s", json.dumps(shadow)[:300])
         if reasons:
             # C8: it can't answer this ask — the next source, the web, or an honest gap; never a handoff
             why = "doesn't answer this (" + "; ".join(reasons)[:140] + ")"
@@ -5440,7 +5447,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # to move on or refuse.
         fit = _fit_check(answered, frame, intent, request, call_model)
         note += "; fit: " + (f"{fit.answers_ask} (model)" if fit is not None else "rules")
-        _transition(store, item_id, "assembling", source_url=url, note=note)
+        _transition(store, item_id, "assembling", source_url=url, note=note, _verify_shadow=shadow)
         _try_journal(store, item_id, "updated", note)
         # no model judge on a deterministic build: its gap guesses were wrong on cards that showed
         # the very thing (live 2026-09-29); what the source can't answer is computed above

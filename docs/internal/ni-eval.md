@@ -79,3 +79,36 @@ Fix rounds add a class to the gold, never a named example.
   `netguard`, which cannot replay binary or page fetches);
 - a `run_flow` result that exposes the final card text and chosen source, so scoring need not
   rebuild them from snapshots.
+
+## S2 shadow (verify constraint classes, recorded not enforced)
+
+`app/smartbrain_3000/ni_verify/` now holds the verify step (moved out of `ni_flow.py`) and four constraint
+classes in `classes.py`, each a pure function over (the ask's constraints, the built result, the source):
+
+| class | reads from the ask | objects when |
+|---|---|---|
+| window | tonight, today, tomorrow, yesterday, last night, this weekend, in the user's zone (tonight is 17:00-06:00 and after midnight is still last evening's night) | the result shows moments and none falls in the window |
+| threshold | above / over / at least / below / under / `M4.5+` | a column the bound is about (earthquakes read `mag`) has a value that fails it; with no column, a feed whose own floor (`M2.5+`, `2.5_day`) is below an "above" bound |
+| compare count | `A vs B`, `compare A and B`, `difference between A and B` | fewer of the N named things appear in the result's words |
+| source scope | a count ("how many", "number of", "total") over a basin, region, the nation or the world | the source answers for one point (place scope, lat/lon/zip/station params) |
+
+A class stays silent when the result carries nothing it can judge. In the flow the reasons ride the flow
+record as `_verify_shadow` (a dict class -> reasons, `{}` when none object) next to the existing verify; a
+build is never refused on them in this phase. Measure offline:
+
+```
+cd app && PYTHONPATH=. python3 tests/ni_eval/shadow_replay.py     # tests/test_ni_verify_blind50.py asserts it
+```
+
+The 2026-10-05 results carry no clock; the replay uses 02:45 UTC Oct 6 (= 21:45 America/Chicago), read from
+the newest USGS quake and the Minneapolis hourly card's first row, and Chicago as the user zone.
+
+| blind-50 live cards (23) | result |
+|---|---|
+| right (13) with any reason (false rejects) | 0 |
+| wrong (4) with a reason | 4 of 4: NHL tonight -> window, earthquakes above 4.0 -> threshold (18 of 38 mag values below 4), Denver vs Salt Lake City -> compare (1 of 2), Pacific hurricanes -> scope |
+| partial (6) with a reason | 0 (none of their defects is in these four classes) |
+
+Also: the 54 builds the `test_ni_flow_frame_verify` table accepts (recorded Library samples, frozen clock)
+record `_verify_shadow == {}`. Not measured: sets B-G have no recorded card text, and the held-out 100 is
+not yet written; rerun this table when `ni-eval.py record` produces cassettes for them.
