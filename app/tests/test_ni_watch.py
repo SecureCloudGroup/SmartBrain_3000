@@ -100,3 +100,20 @@ def test_watch_create_survives_a_poisoned_record(store: ni.NIStore, monkeypatch)
     monkeypatch.setattr(ni_flow, "_flow_read", poisoned)
     summary = ni_watch.watch_create(store)  # must not raise
     assert isinstance(summary, dict)
+
+
+def test_watch_create_dead_end_check_fires_on_what_the_board_returns(
+        store: ni.NIStore, monkeypatch) -> None:
+    iid = ni_flow.create_shell_item(store, "dead end case")
+    ni_flow._fail(store, iid, "mapping", "mapping stage failed")
+    # A normal terminal card offers a reason and a way out: the check stays quiet.
+    quiet = ni_watch.watch_create(store)
+    assert quiet["high"] == 0
+    assert not [f for f in ni_watch.list_findings(store.conn) if f["severity"] == "high"]
+    # The board surface loses its way out: the check must now fire.
+    monkeypatch.setattr(ni_flow, "board_flow_field",
+                        lambda _store, _iid: {"state": "failed", "reason": "it failed"})
+    fired = ni_watch.watch_create(store)
+    assert fired["high"] == 1 and fired["filed"] >= 1
+    titles = [f["title"] for f in ni_watch.list_findings(store.conn)]
+    assert any("offers no reason or way out" in t for t in titles), titles
