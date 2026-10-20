@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An approved action interrupted by a restart no longer parks its turn for good.**
+  The approval row is marked as running before the action starts; if the app stopped
+  before the result was recorded, that row counted as still running forever, so the
+  chat turn could never be resumed and a scheduled turn never finished. After 15
+  minutes with no result the turn now resumes, and the model is told the action was
+  interrupted and its outcome is unknown.
+
 ## [0.26.0] - 2026-10-14
 
 ### Added
