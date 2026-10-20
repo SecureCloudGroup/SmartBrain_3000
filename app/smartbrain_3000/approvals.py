@@ -152,7 +152,8 @@ class ApprovalStore:
         """Return all rows for a turn (this session) — for agent resume (H4c)."""
         assert turn_id, "turn id required"
         rows = self._conn.execute(
-            "SELECT id, tool_call_id, tool_name, tier, status, nonce, ciphertext FROM pending_actions "
+            "SELECT id, tool_call_id, tool_name, tier, status, nonce, ciphertext, "
+            "date_diff('second', resolved_at, now()) FROM pending_actions "
             "WHERE turn_id = ? ORDER BY created_at ASC LIMIT ?;",
             [turn_id, _LIST_LIMIT],
         ).fetchall()
@@ -171,6 +172,9 @@ class ApprovalStore:
                     "args": body["args"],
                     "result": body.get("result"),
                     "turn_state": body.get("turn_state"),
+                    # seconds since the last status change (the claim, for an executed row);
+                    # None while pending. agent.in_flight bounds a result-less executed row by it.
+                    "claimed_s": None if row[7] is None else int(row[7]),
                 }
             )
         return out

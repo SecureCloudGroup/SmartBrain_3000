@@ -1372,6 +1372,29 @@ def test_resume_waits_for_an_in_flight_executed_row(monkeypatch) -> None:
     assert not any(_EXEC_FAILED in c for c in tool_msgs) and any('"stored": "one"' in c for c in tool_msgs)
 
 
+def test_a_claim_older_than_the_in_flight_ttl_resumes_with_an_interrupted_result(monkeypatch) -> None:
+    # The claim is written before the handler runs; if the process dies in between, no
+    # result is ever stored and the expiry sweep never touches an executed row. The turn
+    # must not park forever: past the TTL it resumes, telling the model the outcome is
+    # unknown (never a forged success, never a plain "failed" for an action that may have run).
+    ctx, audit, approvals = _wired()
+    _script(monkeypatch, [_toolcalls(("remember_fact", {"text": "x"}))])
+    pid = _run(ctx, audit, approvals, turn_id="t-stale")["pending"][0]["id"]
+    assert approvals.approve(pid) and approvals.claim(pid)
+    calls = _recorder(monkeypatch, [_text("ok")])
+    assert agent.resume_turn(ctx, audit, approvals, "t-stale")["status"] == "awaiting_approval"  # fresh claim: in flight
+    assert agent_routes._all_pending_resolved(approvals, "t-stale") is False
+    stale = agent._IN_FLIGHT_TTL_SECONDS + 1
+    approvals._conn.execute(
+        "UPDATE pending_actions SET resolved_at = resolved_at - to_seconds(?) WHERE id = ?;", [stale, pid])
+    assert agent_routes._all_pending_resolved(approvals, "t-stale") is True
+    r = agent.resume_turn(ctx, audit, approvals, "t-stale")
+    assert r["status"] == "complete" and len(calls) == 1
+    tool_msgs = [m["content"] for m in calls[0] if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1 and agent._INTERRUPTED_TOOL_RESULT in tool_msgs[0]
+    assert "stored" not in tool_msgs[0] and _EXEC_FAILED not in tool_msgs[0]
+
+
 def test_scheduled_sibling_denied_mid_execution_resumes_once_with_real_result(sched_client, monkeypatch) -> None:
     client, sid = sched_client
     from smartbrain_3000 import gateway as gwmod

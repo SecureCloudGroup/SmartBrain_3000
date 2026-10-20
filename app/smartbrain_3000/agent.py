@@ -682,15 +682,30 @@ _DENIED_TOOL_RESULT = (
 )
 
 
+# How long a claimed row with no stored result still counts as "running". The approve
+# route claims the row BEFORE the handler runs and stores the result after; if the
+# process dies in between, nothing ever stores a result and the row would block its
+# turn for good (the expiry sweep only touches pending rows). Past this age the turn
+# resumes and the model is told the outcome is unknown. Longer than any tool handler.
+_IN_FLIGHT_TTL_SECONDS = 15 * 60
+_INTERRUPTED_TOOL_RESULT = "tool execution was interrupted before a result was recorded; its outcome is unknown"
+
+
 def in_flight(row: dict) -> bool:
     """True for an approved tool still running: claimed ('executed') but no result stored.
 
     The approve route claims BEFORE the handler runs and stores the result after, so
     this window is real; resuming inside it would feed the model a false failure.
+    Bounded by _IN_FLIGHT_TTL_SECONDS since the claim (``claimed_s``, from
+    approvals.list_for_turn), so a crash mid-tool cannot park the turn forever.
     """
     assert isinstance(row, dict), "row must be a dict"
     assert "status" in row, "row must carry a status"
-    return row["status"] == "executed" and row.get("result") is None
+    if row["status"] != "executed" or row.get("result") is not None:
+        return False
+    age = row.get("claimed_s")
+    assert age is None or age >= 0, "claim age is non-negative"
+    return age is None or age <= _IN_FLIGHT_TTL_SECONDS
 
 
 def unresolved(row: dict) -> bool:
@@ -735,8 +750,8 @@ def resume_turn(ctx, audit, approvals, turn_id: str, *, conn=None, usage_sink=No
     for r in batch:  # one tool-result message per call in the latest park (server-reconstructed)
         if r["status"] == "executed" and r["result"] is not None:
             content = json.dumps(r["result"], default=str)
-        elif r["status"] == "executed":
-            content = json.dumps({"error": "tool execution failed"})  # never claim a forged success
+        elif r["status"] == "executed":  # claimed, never stored: the process died mid-tool (see in_flight)
+            content = json.dumps({"error": _INTERRUPTED_TOOL_RESULT})  # never claim a forged success
         else:
             content = json.dumps({"error": _DENIED_TOOL_RESULT})
         messages.append({"role": "tool", "tool_call_id": r["tool_call_id"], "content": content[:result_cap]})
