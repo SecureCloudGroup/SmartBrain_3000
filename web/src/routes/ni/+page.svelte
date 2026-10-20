@@ -3,7 +3,7 @@
   // scene (§4.3, delivered by GET /api/ni/board) through <NiScene>; nothing here
   // touches the untrusted payload except to pass it to the validated renderer.
   //
-  // Polls softly (10s, visible tab + unlocked only, errors swallowed). The card CTAs
+  // Polls softly (10s, visible tab + unlocked only; see lib/ni/board.svelte.ts). The card CTAs
   // — Run now, Pause/Resume, Delete, and the commissioning C2 "Looks right/Something's
   // wrong" strip — mirror ni-format §10 verbs exactly.
   import { onDestroy, onMount, untrack } from "svelte";
@@ -53,21 +53,27 @@
   } from "$lib/ni/library";
   import { formatStageJson, stagesFromSpec } from "$lib/ni/proposal";
   import { bodyShowsPanel, cardSpan, cardState, footerText, formBoxChrome, interpretationOf } from "$lib/ni/shell";
+  import { createBoard } from "$lib/ni/board.svelte";
   import { isStale, relTime } from "$lib/ni/time";
   import { runStatusLabel } from "$lib/runs";
   import { toast } from "$lib/toast.svelte";
 
-  let items = $state<NiBoardItem[]>([]);
-  let loaded = $state(false);
   let error = $state("");
   let busyId = $state<string | null>(null);
   // Set while the "Something's wrong" verdict POST is in flight — disables the modal
   // Send button so a double-tap can't fire two /validate calls for the same item.
   let sendingNote = $state(false);
-  let timer: ReturnType<typeof setInterval> | null = null;
-  // Request-generation counter — a stale load() response never overwrites newer state
-  // (e.g. a delete + re-poll racing an earlier slow board fetch would resurrect the card).
-  let gen = 0;
+  // Board items + load/poll machinery live in the store (lib/ni/board.svelte.ts).
+  const board = createBoard({
+    fetchBoard: () => api.niBoard(),
+    isUnlocked: () => !!account.status?.unlocked,
+    onLoad: (err) => {
+      if (err === null) { error = ""; return; }
+      const msg = describeError(err);
+      if (msg) error = msg;
+    },
+  });
+  const load = board.load;
   // Small "Something's wrong" note prompt (C2 verdict, §6).
   let noteFor = $state<NiBoardItem | null>(null);
   let noteText = $state("");
@@ -906,33 +912,6 @@
     historyError = "";
   }
 
-  async function load() {
-    console.assert(typeof api.niBoard === "function", "load: niBoard method present");
-    console.assert(Array.isArray(items), "load: items array");
-    if (!account.status?.unlocked) return;
-    const g = ++gen;
-    try {
-      const r = await api.niBoard();
-      if (g !== gen) return; // a newer load() started while we awaited — drop this response
-      // position asc — the spec orders the board that way; the server MAY already sort,
-      // but a client-side re-sort keeps a mid-migration server honest.
-      items = [...r.items].sort((a, b) => a.position - b.position);
-      error = "";
-    } catch (err) {
-      if (g !== gen) return; // stale failure — the newer request will paint the truth
-      const msg = describeError(err);
-      if (msg) error = msg;
-    } finally {
-      if (g === gen) loaded = true;
-    }
-  }
-
-  function onVisible() {
-    console.assert(typeof document !== "undefined", "onVisible: DOM available");
-    console.assert(document.visibilityState !== undefined, "onVisible: visibilityState present");
-    if (document.visibilityState === "visible") void load();
-  }
-
   onMount(async () => {
     // Mount guard mirrors schedules/+page.svelte: without the account status, a cold
     // navigation would sit on the spinner until the next 10s tick (load() bails when
@@ -941,12 +920,9 @@
     const s = account.status;
     if (s && !s.initialized) return goto("/setup");
     if (s && !s.unlocked) return goto("/unlock");
-    void load();
+    // First load comes from the unlock effect below (one fetch on open, not two).
     // Poll only while the tab is visible AND the vault is unlocked (guarded inside load).
-    timer = setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, 10_000);
-    document.addEventListener("visibilitychange", onVisible);
+    board.start();
     // "Card templates" link on /ni/library sends the user back here with #templates;
     // open the template-install sheet, then clear the hash so a reload doesn't
     // re-open it on top of an intentional navigation.
@@ -956,38 +932,23 @@
     }
   });
   onDestroy(() => {
-    if (timer) clearInterval(timer);
-    document.removeEventListener("visibilitychange", onVisible);
+    board.stop();
   });
 
   // Cold-navigate → unlock flow: when the vault flips from locked to unlocked in this
   // tab, re-trigger load() so the board paints immediately instead of waiting up to 10s.
   // The ONLY dependency is the unlocked flag: load() is called under `untrack`, because its
-  // synchronous prefix reads `items` (a `$state` this effect would otherwise track) and then
+  // synchronous prefix reads the board items (a `$state` this effect would otherwise track) and then
   // reassigns it after the fetch — tracked, that re-ran the effect on every reload and the
   // page hammered GET /api/ni/board back to back, forever (found 2026-10-14 recording the
   // Neural Interface clip; the board's first-card crash, fixed in #517, had hidden it).
   $effect(() => {
     console.assert(typeof account.status?.unlocked !== "undefined" || account.status === null, "$effect: unlocked accessed");
-    console.assert(gen >= 0, "$effect: gen counter present");
+    console.assert(typeof board.load === "function", "$effect: board store present");
     if (account.status?.unlocked) untrack(() => { void load(); });
   });
 
-  // Bounded fast-poll: while ANY item is walking a creation/remap flow (seconds-to-
-  // a-minute in the backend), poll every 3s so the card's stage label tracks the
-  // engine's progress. The effect's cleanup tears the timer down the moment the last
-  // flow settles — no perpetual 3s poll on an idle board. Visible-tab + unlocked
-  // guards mirror the primary 10s timer's guard (load() itself bails if locked).
-  $effect(() => {
-    console.assert(Array.isArray(items), "$effect fast-poll: items array");
-    console.assert(typeof isFlowActive === "function", "$effect fast-poll: helper present");
-    const anyActive = items.some((it) => isFlowActive(it.flow ?? null));
-    if (!anyActive) return;
-    const fast = setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, 3_000);
-    return () => clearInterval(fast);
-  });
+  // The bounded 3s fast poll (while any card walks a creation flow) lives in the board store.
 
   // Health chip: state (+ stale check) collapses to one calm pill on the card header.
   type ChipDescriptor = { kind: "" | "accent" | "ok" | "warn" | "danger"; label: string };
@@ -1073,7 +1034,7 @@
     busyId = item.id;
     try {
       await api.niDelete(item.id);
-      items = items.filter((x) => x.id !== item.id);
+      board.items = board.items.filter((x) => x.id !== item.id);
     } catch (err) {
       const msg = describeError(err);
       if (msg) error = msg;
@@ -1280,9 +1241,9 @@
   </form>
   {#if composerError}<p class="error" style="margin:var(--s-2) 0 0">{composerError}</p>{/if}
 
-  {#if !loaded}
+  {#if !board.loaded}
     <Spinner block />
-  {:else if items.length === 0}
+  {:else if board.items.length === 0}
     <EmptyState
       icon="monitor"
       title="Nothing on your Neural Interface yet"
@@ -1295,7 +1256,7 @@
     </EmptyState>
   {:else}
     <div class="ni-grid2">
-      {#each items as item (item.id)}
+      {#each board.items as item (item.id)}
         {@const health = healthChip(item)}
         {@const preview = item.state === "draft"}
         {@const formClir = pickClir(item.payload)}
