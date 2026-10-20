@@ -7856,7 +7856,7 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
     if stype == "http_image":
         return _fetch_http_image(source, item_id, secrets_store)
     if stype == "model":
-        return _fetch_model(spec, source, gateway_mod, store), None
+        return _fetch_model(spec, source, gateway_mod, store, item_id), None
     if stype == "internal.schedule":
         return _fetch_internal_schedule(source, schedules_store), None
     if stype == "internal.kb":
@@ -8336,8 +8336,49 @@ def _shape_kb_hit(hit: object) -> dict:
             "doc_id": doc_id[:_MAX_KB_QUERY]}
 
 
-def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore) -> dict:
-    """Run one chat completion on the ``ni`` route (or item override); return {'text': ...}.
+def _first_local_model(gateway_mod, routes: dict) -> str | None:
+    """The first LOCAL model on the ni / chat / agent routes, or None."""
+    assert gateway_mod is not None and isinstance(routes, dict), "gateway + routes required"
+    for capability in ("ni", "chat", "agent"):  # bounded to 3
+        candidate = gateway_mod.resolve_model(capability, routes)
+        if candidate and gateway_mod.is_local(candidate):
+            return candidate
+    return None
+
+
+def _card_model(spec: dict, gateway_mod, routes: dict, store: NIStore, item_id: str) -> str | None:
+    """The model a model-source card refreshes on, mirroring the build path.
+
+    An item-level ``spec.model`` wins. Else the ``ni`` route, then a LOCAL chat / agent model,
+    then whatever chat / agent is. A model off this computer needs this card's consent
+    (``spec._model_consent``); without it, or when the owner chose local (flow ``_use_local``),
+    the card refreshes on the first local model, and only with none does it raise.
+    """
+    assert isinstance(spec, dict) and isinstance(routes, dict), "spec + routes required"
+    assert store is not None, "store required"
+    if spec.get("model"):
+        return spec["model"]
+    resolve = gateway_mod.resolve_model
+    model = resolve("ni", routes)
+    if not model:
+        chat, agent = resolve("chat", routes), resolve("agent", routes)
+        model = next((c for c in (chat, agent) if c and gateway_mod.is_local(c)), chat or agent)
+    if not model or gateway_mod.is_local(model):
+        return model
+    local = _first_local_model(gateway_mod, routes)
+    snap = store.read_snapshot(item_id, "flow") if item_id else None
+    flow = snap.get("payload") if isinstance(snap, dict) else None
+    if isinstance(flow, dict) and flow.get("_use_local") and local:
+        return local
+    if spec.get("_model_consent") == model:
+        return model
+    if local:
+        return local
+    raise NIError("model_consent_required")
+
+
+def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore, item_id: str = "") -> dict:
+    """Run one chat completion on the card's model (see ``_card_model``); return {'text': ...}.
 
     A non-local model runs only when ``spec['_model_consent']`` names that exact model.
 
@@ -8349,8 +8390,7 @@ def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore) -> dict:
     routes: dict = {}
     if hasattr(gateway_mod, "load_routes"):
         routes = gateway_mod.load_routes(store.conn)
-    override = spec.get("model")
-    model = override or gateway_mod.resolve_model("ni", routes) or gateway_mod.resolve_model("chat", routes)
+    model = _card_model(spec, gateway_mod, routes, store, item_id)
     if not model:
         raise NIError("model_unrouted")
     if not gateway_mod.is_local(model) and spec.get("_model_consent") != model:

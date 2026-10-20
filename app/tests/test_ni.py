@@ -4109,7 +4109,7 @@ def test_L8_recovery_run_clears_alert_active_flag(
     )
     # Force parse of the model reply as JSON: fetch_model returns {"text": "..."}
     # so we need extract path 'text' → wait, that's not right. Use a fake fetch instead:
-    def fake_fetch_model(spec_arg, source, gateway_mod_arg, store_arg):
+    def fake_fetch_model(spec_arg, source, gateway_mod_arg, store_arg, item_id=""):
         return {"price": 5}
     monkeypatch.setattr(nimod, "_fetch_model", fake_fetch_model)
 
@@ -4925,3 +4925,67 @@ def test_quote_grounding_drops_invented_numbers() -> None:
     cleaned2, dropped2 = nimod.ground_llm_outputs(
         {"p": "pressure 1,004 mb"}, "Pressure 1004.", {"p"})
     assert dropped2 == []
+
+
+class _RoutedGateway:
+    """Route-table gateway fake: records the model each chat call used."""
+
+    class GatewayError(Exception):
+        status_code = 500
+
+    def __init__(self, routes: dict, local_models: tuple = ("ollama/small",)) -> None:
+        self.routes, self.local_models, self.used = routes, local_models, []
+
+    def load_routes(self, _conn) -> dict:
+        return dict(self.routes)
+
+    def resolve_model(self, capability: str, routes: dict) -> str | None:
+        return routes.get(capability)
+
+    def is_local(self, model: str) -> bool:
+        return model in self.local_models
+
+    def local_available(self) -> bool:
+        return True
+
+    def chat(self, _messages, model, **_kwargs) -> dict:
+        self.used.append(model)
+        return {"text": "ok"}
+
+    def completion_text(self, data: dict) -> str:
+        return data["text"]
+
+
+def _model_fetch(gw: _RoutedGateway, *, spec_extra: dict | None = None, use_local: bool = False) -> None:
+    store, _conn, _key = _store()
+    spec = {**_fetching_scene_spec(), **(spec_extra or {})}
+    iid = store.add_item(spec, _fetching_preview())
+    if use_local:
+        store.write_snapshot(iid, "flow", {"state": "live", "_use_local": True}, ok=True)
+    nimod._fetch_model(spec, spec["source"], gw, store, iid)
+
+
+def test_fetch_model_use_local_card_refreshes_on_local_model() -> None:
+    gw = _RoutedGateway({"ni": "openai/gpt", "chat": "ollama/small"})
+    _model_fetch(gw, use_local=True)
+    assert gw.used == ["ollama/small"]
+
+
+def test_fetch_model_cloud_chat_with_local_agent_refreshes_locally() -> None:
+    gw = _RoutedGateway({"chat": "openai/gpt", "agent": "ollama/small"})
+    _model_fetch(gw)
+    assert gw.used == ["ollama/small"]
+
+
+def test_fetch_model_consented_cloud_card_stays_on_cloud() -> None:
+    gw = _RoutedGateway({"ni": "openai/gpt", "agent": "ollama/small"})
+    _model_fetch(gw, spec_extra={"_model_consent": "openai/gpt"})
+    assert gw.used == ["openai/gpt"]
+
+
+def test_fetch_model_cloud_without_consent_or_local_raises() -> None:
+    gw = _RoutedGateway({"chat": "openai/gpt"})
+    with pytest.raises(nimod.NIError) as err:
+        _model_fetch(gw)
+    assert err.value.kind == "model_consent_required"
+    assert gw.used == []
