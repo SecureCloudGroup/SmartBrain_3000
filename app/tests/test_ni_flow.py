@@ -3035,3 +3035,22 @@ def test_remap_keeps_the_born_marker_on_api_cards(monkeypatch) -> None:
         lambda url: sample)
     assert result["state"] == "ready", result
     assert store.get_item(iid)["spec"].get("_born") == "flow"
+
+
+def test_board_keeps_terminal_slot_that_carries_a_question() -> None:
+    """A finished card whose terminal asks model_consent must keep asking.
+
+    The H2 hiding used to delete that terminal slot, so the question vanished.
+    """
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "asks consent")
+    spec = dict(store.get_item(item_id)["spec"])
+    spec.pop("_shell", None)
+    store.update_spec(item_id, spec, origin="user")
+    store.write_snapshot(item_id, "latest", {"value": 1}, ok=True)
+    ni_flow._terminate_unsupported(
+        store, item_id, "building would use a cloud model",
+        question={"kind": "model_consent", "model": "cloud-x", "local": ""})
+    field = ni_flow.board_flow_field(store, item_id)
+    assert field is not None and field["question"]["kind"] == "model_consent"
+    assert ni_flow._flow_read(store, item_id) is not None, "slot must survive the read"

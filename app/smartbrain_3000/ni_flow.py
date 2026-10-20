@@ -7452,6 +7452,7 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     item = store.get_item(item_id)
     shell = bool(item and item["spec"].get("_shell"))
     if (state in _TERMINAL_STATES and not shell
+            and ni_master.question_for(state, record) is None
             and _item_has_renderable_payload(store, item_id)):
         # Terminal flow record hiding — FINALIZED tiles only (H2's original
         # intent): a failed remap must not mask the working card. G1 field
