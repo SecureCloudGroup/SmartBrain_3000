@@ -301,7 +301,6 @@ def test_a_v1_declared_card_is_still_not_held(lib, monkeypatch) -> None:  # noqa
     ni_flow._flow_write(store, item_id, ni_flow._make_record(_REQUEST, "source"))
     ni_flow.seal_library_pick(store, item_id, WEATHER_URL,
                               {"source_id": "open-meteo-forecast", "url": WEATHER_URL, "format": "json", "params": {}})
-    ni_flow._transition(store, item_id, "source", _auto_picked=True)  # even a stray marker cannot hold a v1 card
     out = ni_flow._sample_and_map(store, item_id, _REQUEST, _INTENT, WEATHER_URL, _model,
                                   lambda _u: copy.deepcopy(OPEN_METEO))
     assert out["state"] == "ready"
@@ -351,3 +350,18 @@ def test_a_held_card_refuses_the_chat_tool_run_and_the_manual_run_route(client, 
     assert store.get_item(item_id)["last_checked"] is None and store.read_snapshot(item_id, "latest") is None
     store.record_validation(item_id, True)  # Keep
     assert tools._run_ni_item_now(tools.ToolContext(ni=store), {"item_id": item_id})["ok"] is True
+
+
+def test_a_flag_flip_mid_build_still_holds_the_auto_card(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    base = _fetcher(fetched, {WEATHER_URL: OPEN_METEO})
+
+    def fetch(url: str) -> object:
+        monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")  # the flag flips while the fetch is out
+        return base(url)
+
+    wrap = _Wrap(lib, [_row("open-meteo-forecast", WEATHER_URL)])
+    item_id, out = _run(store, wrap, monkeypatch, fetch)
+    item = store.get_item(item_id)
+    assert out["state"] == "ready" and item["spec"]["_built_from"]["path"] == "auto"
+    assert nimod.awaits_yes(item)  # held for Keep: it does not run on cadence

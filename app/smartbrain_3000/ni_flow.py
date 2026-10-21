@@ -5575,7 +5575,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                         remap=remap, keep_source=keep_source, keep_params=keep_params,
                         fetch_now=fetch_now, fit=fit, query=answered.get("query"),
                         # v2: a source SmartBrain picked itself is held for the user's Keep (``auto``)
-                        path="auto" if live.get("_auto_picked") and _is_v2(store) else "declared")
+                        path="auto" if live.get("_auto_picked") else "declared")
     # The model mapping path below now serves only a link the user pasted (held for their YES, §33)
     # and a Fix / remap of an existing card — a tapped Library row never reaches it (above).
     def misfit(stage: str, message: str) -> dict:
