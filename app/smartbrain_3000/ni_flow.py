@@ -164,6 +164,7 @@ _MAX_ERROR = 200
 _MAX_CONCURRENT = 2
 _INFLIGHT: set[str] = set()
 _INFLIGHT_LOCK = threading.Lock()
+_FLOW_LOCK = threading.RLock()  # v2 Cancel: cancel_flow and every flow-slot write take it, so a stage cannot undo a cancel
 
 # Downsampling caps (§29 sampling): trim every list to 2 exemplars; if the
 # downsampled JSON still exceeds 30KB, re-trim to 1 exemplar.
@@ -239,18 +240,34 @@ def _flow_read(store: ni.NIStore, item_id: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _flow_write(store: ni.NIStore, item_id: str, record: dict) -> None:
+def _flow_lock_is_reentrant() -> bool:
+    """True when the flow lock can be taken twice by one thread (``cancel_flow`` -> ``_transition`` -> ``_flow_write``)."""
+    with _FLOW_LOCK:
+        got = _FLOW_LOCK.acquire(blocking=False)
+        assert got, "the flow lock must be reentrant"
+        _FLOW_LOCK.release()
+    return got
+
+
+def _flow_write(store: ni.NIStore, item_id: str, record: dict, *, revive: bool = False) -> None:
     """Seal a full flow record into the ``flow`` slot (upsert).
 
     ``ok`` is always True on the flow slot — it is a status record, not a
     payload success signal (the board's latest-if-ok-else-last_good fallback
     never consults this slot).
+
+    v2 Cancel: under the flow lock, a stored record that carries ``_cancel`` is never overwritten by one
+    that lacks it (a stage that read before the Cancel and writes after it). Only a true re-seed passes
+    ``revive=True``. Nothing sets ``_cancel`` under v1, so v1 writes are unchanged.
     """
     assert store is not None and item_id, "store + id required"
     assert isinstance(record, dict) and "state" in record, "record must carry a state"
     if record["state"] not in FLOW_STATES:
         raise ValueError(f"flow state must be one of {sorted(FLOW_STATES)}")
-    store.write_snapshot(item_id, "flow", record, ok=True)
+    with _FLOW_LOCK:
+        if not revive and not record.get("_cancel") and (_flow_read(store, item_id) or {}).get("_cancel"):
+            return  # the user stopped this flow: a stale stage write must not undo it
+        store.write_snapshot(item_id, "flow", record, ok=True)
 
 
 def _make_record(request: str, state: str, *, source_url: str | None = None,
@@ -3536,7 +3553,7 @@ def create_shell_item(store: ni.NIStore, request: str, *,
     preview = _preview_for_shell(shell)
     item_id = store.add_item(shell, preview, origin="agent")
     _flow_write(store, item_id, _make_record(request, "intent",
-                                             notes=["shell item created"]))
+                                             notes=["shell item created"]), revive=True)
     _try_journal(store, item_id, "created",
                  "created via flow; source pending selection")
     return item_id
@@ -6467,14 +6484,17 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     fit = visible_fit(spec, bound)  # the visible FIT advisory rides the C2 preview beside ``alternatives``
     if fit is not None:
         bound["fit"] = fit
-    try:
-        store.update_spec(item_id, spec, origin="agent")
-        store.write_snapshot(item_id, "preview", bound, ok=True)
-        # the stored outputs keep their instants (a time text's moment) so a §34 form rebuilt
-        # from the JSON snapshot — export, a later preview bind — still reads its time cells
-        store.write_snapshot(item_id, "preview_data", ni.json_instants(preview), ok=True)
-    except (ValueError, ni.NIError) as exc:
-        return _fail(store, item_id, "assembly", f"store update failed: {exc}")
+    with _FLOW_LOCK:
+        if (_flow_read(store, item_id) or {}).get("_cancel"):  # a Cancel landed since the first check
+            return _flow_read(store, item_id) or {}
+        try:
+            store.update_spec(item_id, spec, origin="agent")
+            store.write_snapshot(item_id, "preview", bound, ok=True)
+            # the stored outputs keep their instants (a time text's moment) so a §34 form rebuilt
+            # from the JSON snapshot — export, a later preview bind — still reads its time cells
+            store.write_snapshot(item_id, "preview_data", ni.json_instants(preview), ok=True)
+        except (ValueError, ni.NIError) as exc:
+            return _fail(store, item_id, "assembly", f"store update failed: {exc}")
     landing = _landing_state(spec)
     if ni.render_needs_consent(spec):
         # B3a (R6): the page loads other sites — a draft listing them until the user Activates
@@ -6709,11 +6729,12 @@ def cancel_flow(store: ni.NIStore, item_id: str) -> bool:
     The item keeps its spec (a shell stays a shell; a Fix leaves the working card). False when there is
     no active flow to stop."""
     assert store is not None and item_id, "store + id required"
-    record = _flow_read(store, item_id)
-    if record is None or str(record.get("state") or "") in _TERMINAL_STATES | {"ready"}:
-        return False
-    _transition(store, item_id, "failed", error="cancelled: stopped by you", note="cancelled by you",
-                _cancel=True, _question=None)
+    with _FLOW_LOCK:
+        record = _flow_read(store, item_id)
+        if record is None or str(record.get("state") or "") in _TERMINAL_STATES | {"ready"}:
+            return False
+        _transition(store, item_id, "failed", error="cancelled: stopped by you", note="cancelled by you",
+                    _cancel=True, _question=None)
     assert (_flow_read(store, item_id) or {}).get("_cancel") is True, "the cancel is sealed"
     return True
 
@@ -6918,7 +6939,7 @@ def begin_switch_feed(store: ni.NIStore, item: dict, url: str) -> bool:
     record = _make_record(request, "intent", source_url=url,
                           notes=["switching to the site's data feed you picked"])
     record["_pasted"] = url
-    _flow_write(store, item["id"], record)
+    _flow_write(store, item["id"], record, revive=True)
     _try_journal(store, item["id"], "source_changed",
                  f"switched to the data feed on {_host_hint(url)} you picked")
     return start_flow_worker(store, item["id"], source_url=url)
@@ -6991,7 +7012,7 @@ def start_remap(store: ni.NIStore, item_id: str, request: str, url: str) -> bool
     record = _make_record(request, "sampling", source_url=url,
                            notes=["remap re-entering flow at sampling"])
     record["_remap"] = True
-    _flow_write(store, item_id, record)
+    _flow_write(store, item_id, record, revive=True)
     return start_flow_worker(store, item_id, source_url=url)
 
 
@@ -7009,7 +7030,7 @@ def reseed_for_retry(store: ni.NIStore, item_id: str, record: dict,
     for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
         if record.get(key) is not None:
             fresh[key] = record[key]
-    _flow_write(store, item_id, fresh)
+    _flow_write(store, item_id, fresh, revive=True)
     return start_flow_worker(
         store, item_id, source_url=source_url if keep_url else None)
 
@@ -7179,7 +7200,7 @@ def decline_reading(store: ni.NIStore, item_id: str) -> dict:
         current = (_flow_read(store, item_id) or {}).get(key)
         if current is not None:
             fresh[key] = current
-    _flow_write(store, item_id, fresh)
+    _flow_write(store, item_id, fresh, revive=True)
     start_flow_worker(store, item_id)
     return {"kind": "relocate"}
 
@@ -7261,7 +7282,7 @@ def begin_refine(store: ni.NIStore, item: dict, note: str) -> dict:
                            notes=[f"rebuilding from your note: {text[:120]}"])
     record["_remap"] = True
     record["_refine_note"] = text
-    _flow_write(store, item["id"], record)
+    _flow_write(store, item["id"], record, revive=True)
     _try_journal(store, item["id"], "c2_wrong", f"refine note: {text}")
     start_flow_worker(store, item["id"], source_url=url)
     return {"kind": "rebuild"}

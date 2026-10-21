@@ -152,3 +152,34 @@ def test_f1_a_board_read_keeps_the_cancel_while_the_worker_is_still_fetching() -
         ni_flow._INFLIGHT.discard(item_id)
     ni_flow.board_flow_field(store, item_id)  # the worker has ended: the poll may now tidy the record
     assert ni_flow._flow_read(store, item_id) is None
+
+
+def test_f2_a_stale_stage_write_cannot_overwrite_a_cancel_but_a_reseed_can() -> None:
+    store = _store()
+    item_id = ni_flow.create_shell_item(store, _REQUEST_FIX)
+    ni_flow._transition(store, item_id, "sampling")
+    stale = ni_flow._flow_read(store, item_id)  # a stage helper read the record before the Cancel
+    assert ni_flow.cancel_flow(store, item_id) is True
+    ni_flow._flow_write(store, item_id, {**stale, "_format": "json"})  # ... and writes it back after
+    now = ni_flow._flow_read(store, item_id)
+    assert now["_cancel"] is True and now["state"] == "failed" and "_format" not in now
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(_REQUEST_FIX, "intent"), revive=True)
+    assert "_cancel" not in ni_flow._flow_read(store, item_id)  # a true re-seed (Retry, Fix) is allowed
+    assert ni_flow._flow_lock_is_reentrant()
+
+
+def test_f2_a_cancel_between_the_last_check_and_update_spec_seals_nothing(monkeypatch) -> None:
+    store = _store()
+    item_id = _fix_card(store)
+    before = copy.deepcopy(store.get_item(item_id)["spec"])
+    real = ni_flow.ni.bind_scene
+
+    def bind(*a, **k):
+        out = real(*a, **k)
+        assert ni_flow.cancel_flow(store, item_id) is True  # lands after _finalize's first check
+        return out
+
+    monkeypatch.setattr(ni_flow.ni, "bind_scene", bind)
+    built = {**copy.deepcopy(before), "title": "Rebuilt by the stopped worker"}
+    out = ni_flow._finalize(store, item_id, built, {"x": 1}, note="built")
+    assert out.get("_cancel") is True and store.get_item(item_id)["spec"] == before
