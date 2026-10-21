@@ -11,6 +11,17 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+
+- **A new Neural Interface flow, off by default (`ni_flow = v2`).** A new card tries the
+  best SmartBrain Library source by itself, falling through to the next ones when a
+  source fails its checks. It shows the real card as a preview. SmartBrain reads that
+  source once to build the preview and doesn't read it again, or refresh it, until you
+  tap Keep. "Try another source" moves on to the next one. While it builds, the card
+  shows its progress and a Cancel button. Sources that need your key are tried last,
+  and only after you type the key. If no Library source answers, the card lists the
+  Library's links and nothing else is fetched. Turn it on with `SMARTBRAIN_NI_FLOW=v2`.
+
 ### Fixed
 
 - **An approved action interrupted by a restart no longer parks its turn for good.**
