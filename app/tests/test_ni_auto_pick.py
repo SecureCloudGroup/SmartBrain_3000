@@ -304,3 +304,18 @@ def test_a_v1_declared_card_is_still_not_held(lib, monkeypatch) -> None:  # noqa
     assert out["state"] == "ready"
     item = store.get_item(item_id)
     assert item["spec"]["_built_from"]["path"] == "declared" and not nimod.awaits_yes(item)
+
+
+def _held(source: dict) -> dict:
+    return {"state": "commissioning", "spec": {"source": source, "_built_from": {"path": "auto", "host": "h", "title": "t"}}}
+
+
+def test_awaiting_yes_names_a_key_or_email_the_preview_fetch_used() -> None:
+    plain = ni_routes._awaiting_yes_of(_held({"kind": "http_json", "url": "https://h/x"}))
+    assert plain == {"from": "library", "host": "h", "title": "t"} and "used_key" not in plain
+    keyed = ni_routes._awaiting_yes_of(_held({"url": "https://h/x", "secret_query": {"k": {"$secret": "ni:i:api_key"}}}))
+    assert keyed["used_key"] is True
+    header = ni_routes._awaiting_yes_of(_held({"url": "https://h/x", "headers": {"X-Key": {"$secret": "ni:i:api_key"}}}))
+    assert header["used_key"] is True
+    emailed = ni_routes._awaiting_yes_of(_held({"url": "https://h/x", "contact_ua": True}))
+    assert emailed["used_key"] is True

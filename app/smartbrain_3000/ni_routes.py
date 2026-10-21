@@ -124,8 +124,19 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     block = ({"from": {"page": "page", "auto": "library"}.get(built_from.get("path"), "dataset"),
               "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
              if ni.awaits_yes(item) else None)
-    assert block is None or set(block) == {"from", "host", "title"}, "closed keys"
+    if block is not None and _used_access(item["spec"].get("source")):
+        block["used_key"] = True  # the preview fetch spent a key or contact email the user typed
+    assert block is None or set(block) <= {"from", "host", "title", "used_key"}, "closed keys"
     return block
+
+
+def _used_access(source: object) -> bool:
+    """True when a source carries a typed key (a ``$secret`` ref in its headers or query) or the contact email."""
+    assert source is None or isinstance(source, dict), "source is a dict"
+    if not isinstance(source, dict):
+        return False
+    refs = [*(source.get("headers") or {}).values(), *(source.get("secret_query") or {}).values()]
+    return bool(source.get("contact_ua")) or any(isinstance(r, dict) and "$secret" in r for r in refs)
 
 
 def _board_row(store: ni.NIStore, item: dict, *,
