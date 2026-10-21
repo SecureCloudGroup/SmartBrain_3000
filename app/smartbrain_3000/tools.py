@@ -1207,7 +1207,7 @@ def _explain_state(item: dict) -> tuple[str, str]:
             )
         if ni.awaits_yes(item):
             built = spec.get("_built_from") or {}
-            origin = "a web page" if built.get("path") == "page" else "a dataset"
+            origin = {"page": "a web page", "auto": "a SmartBrain Library source"}.get(built.get("path"), "a dataset")
             return (
                 f"this card was built from {origin} ({built.get('host') or 'unknown host'}) and is "
                 "WAITING FOR THE USER'S YES — it does not refresh and is NOT live until they confirm "

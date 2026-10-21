@@ -654,8 +654,8 @@ def _validate_born_marker(value: object) -> None:
 # ``declared`` = a Library source's declared answers (goes live as before); ``page`` (a web page,
 # compiled or interpreted) and ``mapping`` (the model mapped a dataset / any source without
 # declared answers) are OPEN paths: the card waits for the user's YES (``awaits_yes``).
-_BUILT_FROM_PATHS: frozenset[str] = frozenset({"declared", "page", "mapping"})
-_OPEN_PATHS: frozenset[str] = frozenset({"page", "mapping"})
+_BUILT_FROM_PATHS: frozenset[str] = frozenset({"declared", "page", "mapping", "auto"})
+_OPEN_PATHS: frozenset[str] = frozenset({"page", "mapping", "auto"})
 _MAX_BUILT_FROM_HOST = 253
 _MAX_BUILT_FROM_TITLE = 200
 
@@ -671,7 +671,7 @@ def _validate_built_from(value: object) -> None:
             and value["path"] in _BUILT_FROM_PATHS
             and isinstance(value["host"], str) and len(value["host"]) <= _MAX_BUILT_FROM_HOST
             and isinstance(value["title"], str) and len(value["title"]) <= _MAX_BUILT_FROM_TITLE):
-        raise ValueError("spec._built_from must be {path: declared|page|mapping, host, title} or absent")
+        raise ValueError("spec._built_from must be {path: declared|page|mapping|auto, host, title} or absent")
 
 
 _PRESENTATION_IDS: frozenset[str] = frozenset({"pick", "second"})

@@ -1,16 +1,19 @@
-"""S3 BE-4: v2 auto-pick. A new card fetches the top buildable Library source once, before any tap,
-falls through the remaining rows and prefers rows that need no key.
+"""S3 BE-4/5: v2 auto-pick. A new card fetches the top buildable Library source once, before any tap,
+falls through the remaining rows, prefers rows that need no key, and is held for the user's Keep.
 
-Security posture (``test_security_*``): the only pre-Keep fetch is of an installed Library row through
-the flow's own fetcher; a row needing a key or contact email is never fetched (no secret is read).
+Security posture (the three tests named ``test_security_*``): the only pre-Keep fetch is of an installed
+Library row through the flow's own fetcher; a row needing a key or contact email is never fetched (no
+secret is read) and goes last; and nothing recurs on cadence until Keep.
 """
 
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterator
 
 import duckdb
 import pytest
+from fastapi.testclient import TestClient
 from test_ni_answers import (  # noqa: F401  (lib is a fixture)
     _INTENT,
     _QUERY_MARK,
@@ -22,7 +25,7 @@ from test_ni_answers import (  # noqa: F401  (lib is a fixture)
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ni as nimod
-from smartbrain_3000 import ni_flow
+from smartbrain_3000 import ni_flow, ni_routes, tools
 from smartbrain_3000.secrets import gen_master_key
 
 _QUAKE_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson"
@@ -107,7 +110,10 @@ def test_v2_builds_the_top_row_before_any_tap_and_holds_it_for_keep(lib, monkeyp
     item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {WEATHER_URL: OPEN_METEO}))
     assert out["state"] == "ready" and fetched == [WEATHER_URL]
     assert wrap.limits == [5]  # v2 looks five rows deep
-    assert store.get_item(item_id)["spec"]["_built_from"]["host"] == "api.open-meteo.com"
+    item = store.get_item(item_id)
+    assert item["spec"]["_built_from"]["path"] == "auto" and item["spec"]["_built_from"]["host"] == "api.open-meteo.com"
+    assert item["state"] == "commissioning" and nimod.awaits_yes(item)  # the real card, as a preview, until Keep
+    assert store.read_snapshot(item_id, "preview") is not None
     assert (ni_flow._flow_read(store, item_id) or {}).get("_try", {}).get("n") == 1
 
 
@@ -121,6 +127,7 @@ def test_the_first_row_that_does_not_fit_falls_through_to_the_second(lib, monkey
     assert search.queries == []  # a move-on with a row left never searches the web
     record = ni_flow._flow_read(store, item_id)
     assert record["_try"] == {"n": 2, "of": 2, "host": "api.open-meteo.com"}
+    assert store.get_item(item_id)["spec"]["_built_from"]["path"] == "auto"
 
 
 def test_exhausting_every_row_searches_the_web_once_and_stops_honestly(lib, monkeypatch) -> None:  # noqa: F811
@@ -214,3 +221,86 @@ def test_security_a_row_that_needs_a_key_is_never_fetched_and_no_secret_is_read(
     wrap = _Wrap(lib, [_row("fx-rates", _RATES_URL, needs_contact=True)])
     _item2, out2 = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), request="SEC filings for Apple")
     assert fetched == [] and out2["state"] == "awaiting_access"
+
+
+def test_security_nothing_recurs_before_keep_and_keep_releases_it(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("open-meteo-forecast", WEATHER_URL)])
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {WEATHER_URL: OPEN_METEO}))
+    assert out["state"] == "ready"
+    item = store.get_item(item_id)
+    assert nimod.awaits_yes(item) and item["last_checked"] is None
+    assert item_id not in [i["id"] for i in store.due_items()]  # the tick never picks it up
+    assert store.read_snapshot(item_id, "latest") is None  # no cadence run happened
+    store.record_validation(item_id, True)  # Keep
+    assert not nimod.awaits_yes(store.get_item(item_id))
+    assert item_id in [i["id"] for i in store.due_items()]
+
+
+# --- Keep: the existing YES on the held card ----------------------------------------------------
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
+    monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "ni.duckdb"))
+    from smartbrain_3000.main import create_app
+
+    with TestClient(create_app()) as test_client:
+        assert test_client.post("/api/account/setup", json={"passphrase": "correct-horse"}).status_code == 200
+        yield test_client
+
+
+def _auto_card(client, lib, monkeypatch) -> str:  # noqa: F811
+    wrap = _Wrap(lib, [_row("open-meteo-forecast", WEATHER_URL)])
+    item_id, out = _run(client.app.state.ni, wrap, monkeypatch, _fetcher([], {WEATHER_URL: OPEN_METEO}))
+    assert out["state"] == "ready"
+    return item_id
+
+
+def test_the_board_asks_keep_on_the_auto_built_card_with_its_preview(client, lib, monkeypatch) -> None:  # noqa: F811
+    item_id = _auto_card(client, lib, monkeypatch)
+    row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == item_id)
+    assert row["awaiting_yes"] == {"from": "library", "host": "api.open-meteo.com", "title": "open-meteo-forecast title"}
+    assert row["payload_slot"] == "preview" and row["payload"] is not None
+    assert row["actions"] == ["keep", "dismiss"]
+
+
+def test_keep_is_the_existing_yes_and_releases_the_card_to_cadence(client, lib, monkeypatch) -> None:  # noqa: F811
+    item_id = _auto_card(client, lib, monkeypatch)
+    calls: list[str] = []
+    monkeypatch.setattr(ni_routes, "_execute_manual_run", lambda r, s, item: calls.append(item["id"]) or {"status": "ok"})
+    r = client.post(f"/api/ni/items/{item_id}/validate", json={"ok": True})
+    assert r.status_code == 200 and calls == [item_id]
+    store = client.app.state.ni
+    item = store.get_item(item_id)
+    assert item["spec"].get("_c2_ok") is True and not nimod.awaits_yes(item)
+    assert item_id in [i["id"] for i in store.due_items()]
+
+
+def test_the_marker_is_closed_stripped_on_export_and_named_in_chat_status(lib, monkeypatch) -> None:  # noqa: F811
+    store = _store()
+    item_id, _out = _run(store, _Wrap(lib, [_row("open-meteo-forecast", WEATHER_URL)]), monkeypatch,
+                         _fetcher([], {WEATHER_URL: OPEN_METEO}))
+    spec = copy.deepcopy(store.get_item(item_id)["spec"])
+    nimod.validate_spec(spec)  # "auto" is a member of the closed set
+    spec["_built_from"]["path"] = "library"
+    with pytest.raises(ValueError, match="_built_from"):
+        nimod.validate_spec(spec)
+    assert "_built_from" in ni_routes._EXPORT_STRIP_KEYS  # a template can neither claim nor shed it
+    explanation, _next = tools._explain_state(store.get_item(item_id))
+    assert "WAITING FOR THE USER'S YES" in explanation and "SmartBrain Library source" in explanation
+
+
+def test_a_v1_declared_card_is_still_not_held(lib, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")
+    store = _store()
+    item_id = ni_flow.create_shell_item(store, _REQUEST)
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: lib)
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(_REQUEST, "source"))
+    ni_flow.seal_library_pick(store, item_id, WEATHER_URL,
+                              {"source_id": "open-meteo-forecast", "url": WEATHER_URL, "format": "json", "params": {}})
+    ni_flow._transition(store, item_id, "source", _auto_picked=True)  # even a stray marker cannot hold a v1 card
+    out = ni_flow._sample_and_map(store, item_id, _REQUEST, _INTENT, WEATHER_URL, _model,
+                                  lambda _u: copy.deepcopy(OPEN_METEO))
+    assert out["state"] == "ready"
+    item = store.get_item(item_id)
+    assert item["spec"]["_built_from"]["path"] == "declared" and not nimod.awaits_yes(item)

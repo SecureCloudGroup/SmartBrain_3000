@@ -179,7 +179,7 @@ def _board_row(store: ni.NIStore, item: dict, *,
         # model-mapped dataset shows its reading and where it came from, and waits for the
         # user's YES (POST /validate ok=true); NO (ok=false) re-lands the source pick without
         # that source. None for every other card.
-        "awaiting_yes": ({"from": "page" if built_from.get("path") == "page" else "dataset",
+        "awaiting_yes": ({"from": {"page": "page", "auto": "library"}.get(built_from.get("path"), "dataset"),
                           "host": str(built_from.get("host") or ""),
                           "title": str(built_from.get("title") or "")}
                          if ni.awaits_yes(item) else None),
