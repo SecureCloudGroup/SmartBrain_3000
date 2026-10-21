@@ -978,3 +978,16 @@ def test_improvements_ledger_api(client: TestClient) -> None:
     assert rows[0]["id"] == iid and rows[0]["status"] == "proposed"
     assert rows[0]["description"] == "likes brevity"
     assert "payload" not in rows[0] and "body" not in rows[0]  # ledger, not the raw lever
+
+
+def test_local_model_asks_only_for_known_slots(monkeypatch) -> None:
+    conn = _conn()
+    asked: list[str] = []
+    real = gateway.resolve_model
+    monkeypatch.setattr(gateway, "resolve_model", lambda cap, routes=None: (asked.append(cap), real(cap, routes))[1])
+    gateway.save_routes(conn, {"agent": "ollama/a", "chat": "ollama/c"})
+    monkeypatch.setattr(gateway, "local_available", lambda: True)
+    assert selfreview._local_model(conn) == "ollama/a"  # agent wins over chat
+    assert set(asked) <= gateway.KNOWN_CAPABILITIES  # never an unrouted slot name
+    gateway.save_routes(conn, {"chat": "ollama/c"})
+    assert selfreview._local_model(conn) == "ollama/c"  # falls back to chat

@@ -8,6 +8,7 @@ const FRIENDLY: Record<string, string> = {
   fetch_failed: "couldn't reach the source",
   image_type: "not a supported image",
   llm_requires_local: "needs a local model",
+  model_consent_required: "needs your OK to use a model off this computer; rebuild the card to choose",
   mcp_unavailable: "your MCP server didn't answer",
   secret_missing: "credential problem",
   secret_host_mismatch: "credential problem",

@@ -39,6 +39,34 @@ def test_record_response_handles_missing_usage(tmp_path) -> None:
     assert usage.summary(conn)[0]["prompt_tokens"] == 7
 
 
+def test_cache_tokens_count_toward_prompt_total(tmp_path) -> None:
+    conn = _conn(tmp_path)
+    native = {"input_tokens": 10, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 1000,
+              "completion_tokens": 5}
+    assert usage.cache_tokens(native) == (100, 1000)
+    assert usage.cache_tokens({"cache_read_input_tokens": True}) == (0, 0)  # bool is not a count
+    assert usage.prompt_total(native) == 1110  # input + both cache fields
+    assert usage.prompt_total({"prompt_tokens": 40, "cache_read_input_tokens": 30}) == 40  # already a total
+    usage.record_response(conn, "anthropic/claude-x", {"usage": native}, purpose="ni.fit")
+    row = usage.summary(conn)[0]
+    assert row["prompt_tokens"] == 1110 and row["completion_tokens"] == 5
+
+
+def test_chat_recorded_appears_in_summary(tmp_path) -> None:
+    import httpx
+
+    conn = _conn(tmp_path)
+    body = {"choices": [{"message": {"content": "x"}}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 4, "cache_read_input_tokens": 8}}
+    client = httpx.Client(base_url="http://bifrost:8080",
+                          transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
+    out = gateway.chat_recorded(conn, "ni.present", [{"role": "user", "content": "q"}], "openai/x", client=client)
+    assert out["choices"]
+    assert usage.summary(conn) == [{"model": "openai/x", "calls": 1, "prompt_tokens": 12,
+                                    "completion_tokens": 4, "recorded_cost": None}]
+    assert usage.cache_tokens(out["usage"]) == (0, 8)
+
+
 def test_summary_filters_by_time_window(tmp_path) -> None:
     import uuid
 

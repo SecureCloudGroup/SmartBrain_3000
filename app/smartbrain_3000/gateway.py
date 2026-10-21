@@ -488,6 +488,81 @@ def _chunk_delta(chunk: dict) -> tuple[str, list | None, str | None]:
     return text if isinstance(text, str) else "", tool_calls, finish
 
 
+# --- Optional prompt caching (anthropic/* routes only) ---------------------
+# Callers may pass message ``content`` as a list of blocks and mark a cache breakpoint on
+# a text block with ``"cache": True`` (our marker, never sent as-is). Render order is
+# tools -> system -> messages, so mark the LAST STATIC system block (and optionally the
+# last tool result). An ``anthropic/...`` model gets ``cache_control: ephemeral`` on the
+# marked block; every other route is flattened to today's plain-string content, so its
+# payload is byte-identical to a caller that never used blocks. Whether Bifrost forwards
+# cache_control is verified manually by tools/gateway-cache-check.py.
+_CACHE_MARK = "cache"
+_CACHE_CONTROL = {"type": "ephemeral"}
+_MAX_CACHE_BREAKPOINTS = 4  # Anthropic's per-request limit; surplus (earliest) marks are dropped
+
+
+def _is_anthropic(model: str) -> bool:
+    """True when ``model`` ('provider/id') routes to Anthropic's API (prompt-cache capable)."""
+    assert isinstance(model, str), "model must be a string"
+    return model.split("/", 1)[0] == "anthropic"
+
+
+def _flatten_blocks(blocks: list) -> object:
+    """Join all-text blocks into one string; return the list (marker stripped) if any block isn't text."""
+    assert isinstance(blocks, list), "blocks must be a list"
+    if all(isinstance(b, dict) and b.get("type", "text") == "text" and isinstance(b.get("text"), str)
+           for b in blocks):
+        return "".join(b["text"] for b in blocks)
+    return [{k: v for k, v in b.items() if k != _CACHE_MARK} if isinstance(b, dict) else b for b in blocks]
+
+
+def _cache_blocks(blocks: list, allowed: set[int]) -> list:
+    """Anthropic form of ``blocks``: marker -> cache_control, only for the ``allowed`` mark indexes."""
+    assert isinstance(blocks, list), "blocks must be a list"
+    out: list = []
+    for i, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            out.append(block)
+            continue
+        clean = {k: v for k, v in block.items() if k != _CACHE_MARK}
+        if block.get(_CACHE_MARK) and i in allowed:
+            clean["cache_control"] = dict(_CACHE_CONTROL)
+        out.append(clean)
+    return out
+
+
+def _wire_messages(messages: list[dict], model: str) -> list[dict]:
+    """Messages as sent to the gateway for ``model`` (see the prompt-caching note above).
+
+    Messages whose content is not a block list pass through untouched (same object), so a
+    string-only conversation is byte-identical on every route."""
+    assert isinstance(messages, list), "messages must be a list"
+    assert model, "model must be specified"
+    anthropic = _is_anthropic(model)
+    marks = [(mi, bi) for mi, m in enumerate(messages) if isinstance(m.get("content"), list)
+             for bi, b in enumerate(m["content"]) if isinstance(b, dict) and b.get(_CACHE_MARK)]
+    keep = set(marks[-_MAX_CACHE_BREAKPOINTS:]) if anthropic else set()
+    out: list[dict] = []
+    for mi, msg in enumerate(messages):
+        content = msg.get("content")
+        if not isinstance(content, list):
+            out.append(msg)
+        elif anthropic:
+            allowed = {bi for (m2, bi) in keep if m2 == mi}
+            out.append({**msg, "content": _cache_blocks(content, allowed)})
+        else:
+            out.append({**msg, "content": _flatten_blocks(content)})
+    return out
+
+
+def _wire_tools(tools_spec: list[dict] | None, model: str) -> list[dict] | None:
+    """Tool definitions for the wire. Anthropic routes get sorted keys at every level so the
+    cached prefix (tools render first) stays byte-stable; other routes get the spec unchanged."""
+    if not tools_spec or not _is_anthropic(model):
+        return tools_spec
+    return json.loads(json.dumps(tools_spec, sort_keys=True))
+
+
 def chat_stream(
     messages: list[dict],
     model: str,
@@ -513,14 +588,14 @@ def chat_stream(
     if claudecli.is_claudecode(model):  # served by the user's claude CLI, not Bifrost
         # Floor the timeout: callers size theirs for Bifrost HTTP hops (60s default),
         # but a CLI turn is a whole answer — 60s would kill healthy long replies.
-        yield from claudecli.chat_stream(messages, model,
+        yield from claudecli.chat_stream(_wire_messages(messages, model), model,
                                          timeout=max(timeout, claudecli.MIN_TIMEOUT),
                                          tools_spec=tools_spec)
         return
     client, owns_client = _resolve_client(client, timeout)
-    payload: dict = {"model": model, "messages": messages, "stream": True}
+    payload: dict = {"model": model, "messages": _wire_messages(messages, model), "stream": True}
     if tools_spec:
-        payload["tools"] = tools_spec
+        payload["tools"] = _wire_tools(tools_spec, model)
         payload["tool_choice"] = "auto"
     try:
         # Hold the local-model lock for the whole stream so a background embed / retry can't
@@ -559,6 +634,64 @@ def chat_stream(
             client.close()
 
 
+# --- Bounded retries --------------------------------------------------------
+# 429 / 5xx / connection-level failures are retried at most twice, honoring Retry-After.
+# Timeouts are NOT retried (a cold local model would triple the wait) and other 4xx never are.
+_MAX_RETRIES = 2
+_BACKOFF_BASE = 0.5       # seconds; doubles per attempt when no Retry-After is given
+_RETRY_AFTER_CAP = 30.0   # never sleep longer than this on a server's say-so
+
+
+def _sleep(seconds: float) -> None:
+    """Indirection over time.sleep so tests can run retries instantly."""
+    time.sleep(seconds)
+
+
+def _retry_delay(resp: httpx.Response | None, attempt: int) -> float:
+    """Seconds to wait before retry ``attempt`` (0-based): Retry-After (delta-seconds) else exponential."""
+    assert attempt >= 0, "attempt must be non-negative"
+    raw = resp.headers.get("retry-after") if resp is not None else None
+    try:
+        wait = float(raw) if raw is not None else _BACKOFF_BASE * (2 ** attempt)
+    except ValueError:
+        wait = _BACKOFF_BASE * (2 ** attempt)  # HTTP-date form: ignore, use backoff
+    return max(0.0, min(wait, _RETRY_AFTER_CAP))
+
+
+def _post_json(client: httpx.Client, path: str, payload: dict, timeout: float) -> httpx.Response:
+    """POST ``payload``; retry 429/5xx/connection errors (<= _MAX_RETRIES), return the final response.
+
+    After the retries are spent the last response is returned (callers turn it into a
+    GatewayError) or the last transport error is re-raised. Timeouts propagate immediately."""
+    assert path.startswith("/"), "path must be absolute"
+    assert isinstance(payload, dict), "payload must be a dict"
+    for attempt in range(_MAX_RETRIES + 1):  # fixed bound
+        last = attempt == _MAX_RETRIES
+        try:
+            resp = client.post(path, json=payload, timeout=timeout)
+        except httpx.TimeoutException:
+            raise
+        except httpx.TransportError:
+            if last:
+                raise
+            _sleep(_retry_delay(None, attempt))
+            continue
+        if last or not (resp.status_code == 429 or resp.status_code >= 500):
+            return resp
+        _sleep(_retry_delay(resp, attempt))
+    raise AssertionError("unreachable: final attempt returns or raises")
+
+
+def _set_max_tokens(payload: dict, max_tokens: int | None) -> None:
+    """Add a validated ``max_tokens`` to ``payload``; None leaves the payload untouched."""
+    assert isinstance(payload, dict), "payload must be a dict"
+    if max_tokens is None:
+        return
+    assert isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > 0, \
+        "max_tokens must be a positive int"
+    payload["max_tokens"] = max_tokens
+
+
 def chat(
     messages: list[dict],
     model: str,
@@ -566,8 +699,12 @@ def chat(
     client: httpx.Client | None = None,
     timeout: float = 60.0,
     temperature: float | None = None,
+    max_tokens: int | None = None,
 ) -> dict:
     """Send a chat completion through Bifrost; return the parsed JSON response.
+
+    ``max_tokens`` is opt-in like ``temperature``: when None the payload is unchanged
+    (the provider's own default applies).
 
     ``temperature`` is opt-in: when None (every existing caller), the payload stays
     byte-identical to before — user-facing chat keeps the model server's default.
@@ -582,15 +719,17 @@ def chat(
     assert model, "model must be specified"
     if claudecli.is_claudecode(model):  # served by the user's claude CLI, not Bifrost
         assert temperature is None, "claudecode does not honor temperature — refuse loudly"
-        return claudecli.chat(messages, model, timeout=max(timeout, claudecli.MIN_TIMEOUT))
-    payload: dict = {"model": model, "messages": messages}
+        assert max_tokens is None, "claudecode does not honor max_tokens — refuse loudly"
+        return claudecli.chat(_wire_messages(messages, model), model, timeout=max(timeout, claudecli.MIN_TIMEOUT))
+    payload: dict = {"model": model, "messages": _wire_messages(messages, model)}
     if temperature is not None:
         assert 0.0 <= temperature <= 2.0, "temperature out of range"
         payload["temperature"] = float(temperature)
+    _set_max_tokens(payload, max_tokens)
     client, owns_client = _resolve_client(client, timeout)
     try:
         with _serialized(model):  # serialize local-provider calls (no-op for cloud)
-            resp = client.post("/v1/chat/completions", json=payload, timeout=timeout)
+            resp = _post_json(client, "/v1/chat/completions", payload, timeout)
         try:
             data = resp.json()
         except ValueError:
@@ -605,6 +744,18 @@ def chat(
         if owns_client:
             client.close()
     assert isinstance(data, dict), "gateway response must be a JSON object"
+    return data
+
+
+def chat_recorded(conn, purpose: str, messages: list[dict], model: str, **kwargs) -> dict:
+    """``chat`` plus best-effort usage recording (cache tokens included) under a purpose label.
+
+    The hook for callers that want their calls to appear in /api/usage; ``kwargs`` go to ``chat``."""
+    from . import usage  # local import: keeps usage free of gateway at import time
+
+    assert purpose, "purpose label required"
+    data = chat(messages, model, **kwargs)
+    usage.record_response(conn, model, data, purpose=purpose)
     return data
 
 
@@ -637,8 +788,11 @@ def chat_with_tools(
     client: httpx.Client | None = None,
     timeout: float = 60.0,
     session: claudecli.TurnSession | None = None,
+    max_tokens: int | None = None,
 ) -> dict:
     """Chat completion with OpenAI tool-calling enabled; return parsed JSON.
+
+    ``max_tokens`` is opt-in (None leaves the payload unchanged).
 
     Additive sibling of ``chat`` (which never sends a tools field). On an
     upstream error, raises GatewayError with ``tools_unsupported`` set when the
@@ -653,19 +807,19 @@ def chat_with_tools(
     assert model, "model must be specified"
     assert tools_spec, "tools spec must be non-empty"
     if claudecli.is_claudecode(model):  # tool offers ride the text protocol (see claudecli)
-        return claudecli.chat(messages, model, timeout=max(timeout, claudecli.MIN_TIMEOUT),
+        assert max_tokens is None, "claudecode does not honor max_tokens — refuse loudly"
+        return claudecli.chat(_wire_messages(messages, model), model, timeout=max(timeout, claudecli.MIN_TIMEOUT),
                               tools_spec=tools_spec, session=session)
+    payload: dict = {"model": model, "messages": _wire_messages(messages, model),
+                     "tools": _wire_tools(tools_spec, model), "tool_choice": "auto"}
+    _set_max_tokens(payload, max_tokens)
     client, owns_client = _resolve_client(client, timeout)
     try:
         # Pass timeout per-request: the pooled client (always installed in prod) has a
         # fixed default, so only a per-call override lets the agent/scheduled path wait
         # out a cold local-model load. Serialize local-provider calls (no-op for cloud).
         with _serialized(model):
-            resp = client.post(
-                "/v1/chat/completions",
-                json={"model": model, "messages": messages, "tools": tools_spec, "tool_choice": "auto"},
-                timeout=timeout,
-            )
+            resp = _post_json(client, "/v1/chat/completions", payload, timeout)
         try:
             data = resp.json()
         except ValueError:
@@ -769,7 +923,7 @@ def embed(
         # far past a pooled/short client default — only the per-call value lets a backfill wait it
         # out. Serialize local-provider calls so a background embed can't overlap a foreground chat.
         with _serialized(model, acquire_timeout=acquire_timeout):
-            resp = client.post("/v1/embeddings", json={"model": model, "input": input_text}, timeout=timeout)
+            resp = _post_json(client, "/v1/embeddings", {"model": model, "input": input_text}, timeout)
         try:
             data = resp.json()
         except ValueError:

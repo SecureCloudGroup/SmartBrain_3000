@@ -1,0 +1,14 @@
+{
+ "ask_id": "CI4",
+ "fetches": [],
+ "meta": {
+  "built_by_hand_from": "fixtures/ni_flow/cases.json:xmas-countdown",
+  "model": "scripted"
+ },
+ "model": [
+  {
+   "reply": "{\"kind\": \"computed_only\", \"subject\": \"xmas-countdown\", \"cadence_minutes\": 1440, \"wants\": [\"days\"], \"threshold\": null, \"display_hint\": \"value\"}",
+   "sha": null
+  }
+ ]
+}

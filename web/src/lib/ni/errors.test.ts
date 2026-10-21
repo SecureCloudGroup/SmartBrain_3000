@@ -28,6 +28,12 @@ describe("friendlyErrorClass", () => {
     expect(new Set(Object.values(words)).size).toBe(7);
   });
 
+  it("explains a card that needs consent for a model off this computer", () => {
+    expect(friendlyErrorClass("model_consent_required")).toBe(
+      "needs your OK to use a model off this computer; rebuild the card to choose",
+    );
+  });
+
   it("echoes an unknown class verbatim (no invented story)", () => {
     expect(friendlyErrorClass("contract_violation")).toBe("contract_violation");
     expect(friendlyErrorClass("weird_new_thing")).toBe("weird_new_thing");

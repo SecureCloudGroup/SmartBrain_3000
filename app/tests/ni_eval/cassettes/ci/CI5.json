@@ -1,0 +1,14 @@
+{
+ "ask_id": "CI5",
+ "fetches": [],
+ "meta": {
+  "built_by_hand_from": "fixtures/ni_flow/cases.json:no-source-pause",
+  "model": "scripted"
+ },
+ "model": [
+  {
+   "reply": "{\"kind\": \"external_data\", \"subject\": \"no-source-pause\", \"cadence_minutes\": 15, \"wants\": [\"value\"], \"threshold\": null, \"display_hint\": \"value\"}",
+   "sha": null
+  }
+ ]
+}

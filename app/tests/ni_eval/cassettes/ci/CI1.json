@@ -1,0 +1,125 @@
+{
+ "ask_id": "CI1",
+ "fetches": [
+  {
+   "key": "safe_fetch_json https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d",
+   "ok": true,
+   "value": {
+    "chart": {
+     "error": null,
+     "result": [
+      {
+       "indicators": {
+        "adjclose": [
+         {
+          "adjclose": [
+           332.2699890136719
+          ]
+         }
+        ],
+        "quote": [
+         {
+          "close": [
+           332.2699890136719
+          ],
+          "high": [
+           336.2200012207031
+          ],
+          "low": [
+           326.29998779296875
+          ],
+          "open": [
+           327.45001220703125
+          ],
+          "volume": [
+           50659000
+          ]
+         }
+        ]
+       },
+       "meta": {
+        "chartPreviousClose": 326.57,
+        "currency": "USD",
+        "currentTradingPeriod": {
+         "post": {
+          "end": 1789171200,
+          "gmtoffset": -14400,
+          "start": 1789156800,
+          "timezone": "EDT"
+         },
+         "pre": {
+          "end": 1789133400,
+          "gmtoffset": -14400,
+          "start": 1789113600,
+          "timezone": "EDT"
+         },
+         "regular": {
+          "end": 1789156800,
+          "gmtoffset": -14400,
+          "start": 1789133400,
+          "timezone": "EDT"
+         }
+        },
+        "dataGranularity": "1d",
+        "exchangeName": "NMS",
+        "exchangeTimezoneName": "America/New_York",
+        "fiftyTwoWeekHigh": 344.57,
+        "fiftyTwoWeekLow": 235.03,
+        "firstTradeDate": 345479400,
+        "fullExchangeName": "NasdaqGS",
+        "fulldayChange": 5.7,
+        "fulldayChangePercent": 1.745,
+        "fulldayPrice": 331.3,
+        "gmtoffset": -14400,
+        "hasPrePostMarketData": true,
+        "instrumentType": "EQUITY",
+        "longName": "Apple Inc.",
+        "priceHint": 2,
+        "range": "1d",
+        "regularMarketChangePercent": 1.745,
+        "regularMarketDayHigh": 336.22,
+        "regularMarketDayLow": 326.3,
+        "regularMarketPrice": 332.27,
+        "regularMarketTime": 1789156801,
+        "regularMarketVolume": 50716865,
+        "shortName": "Apple Inc.",
+        "symbol": "AAPL",
+        "timezone": "EDT",
+        "validRanges": [
+         "1d",
+         "5d",
+         "1mo",
+         "3mo",
+         "6mo",
+         "1y",
+         "2y",
+         "5y",
+         "10y",
+         "ytd",
+         "max"
+        ]
+       },
+       "timestamp": [
+        1789133400
+       ]
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "meta": {
+  "built_by_hand_from": "fixtures/ni_flow/cases.json:aapl-5min",
+  "model": "scripted"
+ },
+ "model": [
+  {
+   "reply": "{\"kind\": \"external_data\", \"subject\": \"aapl-5min\", \"cadence_minutes\": 5, \"wants\": [\"price\", \"prev_close\"], \"threshold\": null, \"display_hint\": \"value\"}",
+   "sha": null
+  },
+  {
+   "reply": "{\"price\": \"chart.result[0].meta.fulldayPrice\", \"prev_close\": \"chart.result[0].meta.chartPreviousClose\"}",
+   "sha": null
+  }
+ ]
+}

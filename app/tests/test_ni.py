@@ -4109,7 +4109,7 @@ def test_L8_recovery_run_clears_alert_active_flag(
     )
     # Force parse of the model reply as JSON: fetch_model returns {"text": "..."}
     # so we need extract path 'text' → wait, that's not right. Use a fake fetch instead:
-    def fake_fetch_model(spec_arg, source, gateway_mod_arg, store_arg):
+    def fake_fetch_model(spec_arg, source, gateway_mod_arg, store_arg, item_id=""):
         return {"price": 5}
     monkeypatch.setattr(nimod, "_fetch_model", fake_fetch_model)
 
@@ -4925,3 +4925,111 @@ def test_quote_grounding_drops_invented_numbers() -> None:
     cleaned2, dropped2 = nimod.ground_llm_outputs(
         {"p": "pressure 1,004 mb"}, "Pressure 1004.", {"p"})
     assert dropped2 == []
+
+
+class _RoutedGateway:
+    """Route-table gateway fake: records the model each chat call used."""
+
+    class GatewayError(Exception):
+        status_code = 500
+
+    def __init__(self, routes: dict, local_models: tuple = ("ollama/small",)) -> None:
+        self.routes, self.local_models, self.used = routes, local_models, []
+
+    def load_routes(self, _conn) -> dict:
+        return dict(self.routes)
+
+    def resolve_model(self, capability: str, routes: dict) -> str | None:
+        return routes.get(capability)
+
+    def is_local(self, model: str) -> bool:
+        return model in self.local_models
+
+    def local_available(self) -> bool:
+        return True
+
+    def chat(self, _messages, model, **_kwargs) -> dict:
+        self.used.append(model)
+        return {"text": "ok"}
+
+    def completion_text(self, data: dict) -> str:
+        return data["text"]
+
+
+def _model_fetch(gw: _RoutedGateway, *, spec_extra: dict | None = None, use_local: bool = False) -> None:
+    store, _conn, _key = _store()
+    spec = {**_fetching_scene_spec(), **(spec_extra or {})}
+    iid = store.add_item(spec, _fetching_preview())
+    if use_local:
+        store.write_snapshot(iid, "flow", {"state": "live", "_use_local": True}, ok=True)
+    nimod._fetch_model(spec, spec["source"], gw, store, iid)
+
+
+def test_fetch_model_use_local_card_refreshes_on_local_model() -> None:
+    gw = _RoutedGateway({"ni": "openai/gpt", "chat": "ollama/small"})
+    _model_fetch(gw, use_local=True)
+    assert gw.used == ["ollama/small"]
+
+
+def test_fetch_model_cloud_chat_with_local_agent_refreshes_locally() -> None:
+    gw = _RoutedGateway({"chat": "openai/gpt", "agent": "ollama/small"})
+    _model_fetch(gw)
+    assert gw.used == ["ollama/small"]
+
+
+def test_fetch_model_consented_cloud_card_stays_on_cloud() -> None:
+    gw = _RoutedGateway({"ni": "openai/gpt", "agent": "ollama/small"})
+    _model_fetch(gw, spec_extra={"_model_consent": "openai/gpt"})
+    assert gw.used == ["openai/gpt"]
+
+
+def test_fetch_model_cloud_without_consent_or_local_raises() -> None:
+    gw = _RoutedGateway({"chat": "openai/gpt"})
+    with pytest.raises(nimod.NIError) as err:
+        _model_fetch(gw)
+    assert err.value.kind == "model_consent_required"
+    assert gw.used == []
+
+
+def test_tick_model_busy_leaves_the_card_due(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A busy local slot is not a check: ``tick`` must not stamp last_checked, so the card stays due."""
+    store, conn, key = _store()
+    busy_iid = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    bad_iid = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    store.set_state(busy_iid, "live")
+    store.set_state(bad_iid, "live")
+    conn.execute("UPDATE ni_items SET last_checked = NULL;")
+
+    def fake_run_item(_store, item_id, **_kwargs):
+        raise nimod.NIError("model_busy" if item_id == busy_iid else "fetch_failed")
+
+    monkeypatch.setattr(nimod, "run_item", fake_run_item)
+    nimod.tick(_fake_app(conn, key))
+    assert store.get_item(busy_iid)["last_checked"] is None
+    assert busy_iid in {item["id"] for item in store.due_items()}
+    assert store.get_item(bad_iid)["last_status"] == "fetch_failed"
+
+
+def test_tick_model_busy_cards_do_not_starve_a_plain_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Busy model cards stay unstamped and sort first; they must cost no quota, so a
+    plain card behind them still runs while the local slot is held."""
+    store, conn, key = _store()
+    busy = [store.add_item(_fetching_scene_spec(), _fetching_preview())
+            for _ in range(nimod._MAX_ITEMS_PER_PASS)]
+    plain = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    for iid in [*busy, plain]:
+        store.set_state(iid, "live")
+    conn.execute("UPDATE ni_items SET last_checked = NULL;")
+    conn.execute("UPDATE ni_items SET last_checked = TIMESTAMP '2000-01-01' WHERE id = ?;", [plain])
+    ran: list[str] = []
+
+    def fake_run_item(_store, item_id, **_kwargs):
+        if item_id in busy:
+            raise nimod.NIError("model_busy")
+        ran.append(item_id)
+
+    monkeypatch.setattr(nimod, "run_item", fake_run_item)
+    for _ in range(3):
+        nimod.tick(_fake_app(conn, key))
+    assert plain in ran
+    assert all(store.get_item(iid)["last_checked"] is None for iid in busy)

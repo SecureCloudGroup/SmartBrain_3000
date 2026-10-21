@@ -1,0 +1,28 @@
+{
+ "ask_id": "CI2",
+ "fetches": [
+  {
+   "key": "safe_fetch_json https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+   "ok": true,
+   "value": {
+    "bitcoin": {
+     "usd": 76828
+    }
+   }
+  }
+ ],
+ "meta": {
+  "built_by_hand_from": "fixtures/ni_flow/cases.json:btc-vague",
+  "model": "scripted"
+ },
+ "model": [
+  {
+   "reply": "{\"kind\": \"external_data\", \"subject\": \"btc-vague\", \"cadence_minutes\": 15, \"wants\": [\"price\"], \"threshold\": null, \"display_hint\": \"value\"}",
+   "sha": null
+  },
+  {
+   "reply": "{\"price\": \"bitcoin.usd\"}",
+   "sha": null
+  }
+ ]
+}
