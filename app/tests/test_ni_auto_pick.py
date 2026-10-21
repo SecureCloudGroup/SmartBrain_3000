@@ -265,7 +265,7 @@ def test_the_board_asks_keep_on_the_auto_built_card_with_its_preview(client, lib
     row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == item_id)
     assert row["awaiting_yes"] == {"from": "library", "host": "api.open-meteo.com", "title": "open-meteo-forecast title"}
     assert row["payload_slot"] == "preview" and row["payload"] is not None
-    assert row["actions"] == ["keep", "dismiss"]
+    assert row["actions"] == ["keep", "dismiss", "delete"]
 
 
 def test_keep_is_the_existing_yes_and_releases_the_card_to_cadence(client, lib, monkeypatch) -> None:  # noqa: F811
