@@ -3991,7 +3991,7 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
             _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark)
             return pause_for_access(store, item_id, url,
                                     [k for k, on in (("key", access["key"]), ("contact", access["contact"])) if on])
-        _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark,
+        _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark, _pick_url=url,
                     note=f"trying {mark['host']} ({mark['n']} of {mark['of']})")
         out = _sample_and_map(store, item_id, request, intent, url, call_model, do_fetch)
         if out.get("state") != "source":
@@ -7187,7 +7187,8 @@ def decline_reading(store: ni.NIStore, item_id: str) -> dict:
     url = str((item["spec"].get("source") or {}).get("url") or "")
     record = _flow_read(store, item_id) or {}
     v2 = _is_v2(store)
-    named = [url, str(record.get("_library_url") or "")] if v2 else [url]  # v2: the filled address the row carries
+    # v2: the filled address the row carries, and the row's own pre-lookup address (what the pick compares)
+    named = [url, str(record.get("_library_url") or ""), str(record.get("_pick_url") or "")] if v2 else [url]
     declined = [u for u in record.get("_declined") or [] if isinstance(u, str) and u not in named]
     declined = (declined + [u for u in named if u])[-_MAX_DECLINED:]
     _flow_write(store, item_id, {**record, "_declined": declined})

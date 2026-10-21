@@ -322,3 +322,17 @@ def test_awaiting_yes_names_a_key_or_email_the_preview_fetch_used() -> None:
     assert header["used_key"] is True
     emailed = ni_routes._awaiting_yes_of(_held({"url": "https://h/x", "contact_ua": True}))
     assert emailed["used_key"] is True
+
+
+def test_no_to_a_lookup_source_declines_the_row_address_not_only_the_resolved_one(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    row_url = "https://api.weather.example.gov/points/{{lat}},{{lon}}"  # a lookup row: the url before it is resolved
+    wrap = _Wrap(lib, [_row("open-meteo-forecast", WEATHER_URL)])
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {WEATHER_URL: OPEN_METEO}))
+    assert out["_pick_url"] == WEATHER_URL  # _auto_continue remembers the row it tried
+    ni_flow._flow_write(store, item_id, {**out, "_pick_url": row_url, "_library_url": "https://api.weather.example.gov/p/40,-74"})
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, i, **kw: True)
+    ni_flow.decline_reading(store, item_id)
+    declined = ni_flow._flow_read(store, item_id)["_declined"]
+    assert row_url in declined and "https://api.weather.example.gov/p/40,-74" in declined
+    assert ni_flow._without_declined(store, item_id, [_row("nws", row_url)]) == []  # not offered again
