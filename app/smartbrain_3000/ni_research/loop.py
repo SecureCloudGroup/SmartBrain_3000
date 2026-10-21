@@ -27,6 +27,7 @@ MAX_LINKS = 3
 MAX_REASONS = 5
 MAX_LOCAL_ROWS = 2
 MAX_LOCAL_FILLS = 3
+MAX_JSON_DEPTH = 64  # model JSON nested deeper is refused before decoding (a looping model can emit "[[[[...")
 _STRUCTURED = frozenset({"json", "csv", "feed", "xml"})
 
 
@@ -69,8 +70,11 @@ def _count(ctx: ResearchCtx, out: Outcome, response: object) -> None:
     out.usage["calls"] += 1
     if not isinstance(body, dict):
         return
-    created, read = usage.cache_tokens(body)
-    total, done = usage.prompt_total(body), int(body.get("completion_tokens") or 0)
+    try:
+        created, read = usage.cache_tokens(body)
+        total, done = int(usage.prompt_total(body)), int(body.get("completion_tokens") or 0)
+    except (TypeError, ValueError):  # a malformed usage block counts as a call with unknown tokens
+        return
     out.usage["prompt"] += total
     out.usage["completion"] += done
     out.usage["cache_read"] += read
@@ -98,6 +102,26 @@ def _message(response: object) -> dict:
     return msg if isinstance(msg, dict) else {}
 
 
+def _too_deep(text: str, cap: int = MAX_JSON_DEPTH) -> bool:
+    """True when ``text`` nests brackets deeper than ``cap`` outside strings (one linear pass): model JSON that
+    deep is refused before the decoder can recurse on it."""
+    assert isinstance(text, str), "text required"
+    assert cap > 0, "a positive cap"
+    depth, in_str, esc = 0, False, False
+    for ch in text:  # bounded by len(text)
+        if in_str:
+            esc, in_str = (False, in_str) if esc else (ch == "\\", ch != '"')
+        elif ch == '"':
+            in_str = True
+        elif ch in "[{":
+            depth += 1
+            if depth > cap:
+                return True
+        elif ch in "]}":
+            depth = max(depth - 1, 0)
+    return False
+
+
 def _calls(msg: dict) -> list[dict]:
     """The assistant's tool calls as ``{id, name, args}`` (``args`` None when the arguments are not a JSON object)."""
     assert isinstance(msg, dict), "a message"
@@ -107,8 +131,9 @@ def _calls(msg: dict) -> list[dict]:
         fn = tc.get("function") if isinstance(tc, dict) else None
         if not isinstance(fn, dict):
             continue
+        raw = fn.get("arguments") or "{}"
         try:
-            args = json.loads(fn.get("arguments") or "{}")
+            args = None if not isinstance(raw, str) or _too_deep(raw) else json.loads(raw)
         except (ValueError, TypeError):
             args = None
         out.append({"id": str(tc.get("id") or f"call_{i}")[:64], "name": str(fn.get("name") or ""),
@@ -146,12 +171,30 @@ def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None) ->
     return {**error("verify_failed", why), "reasons": [one_line(why, 200)]}
 
 
+def _bounded(run, ctx: ResearchCtx, out: Outcome) -> Outcome:
+    """The one boundary around a research run: whatever a model reply or a tool does, the run ends in an honest
+    decline (with the usage counted so far), never a crash that seals the card failed."""
+    assert callable(run), "a run"
+    assert isinstance(out, Outcome), "an outcome"
+    try:
+        return run(out)
+    except Exception as exc:  # the boundary: any failure is a decline
+        log.warning("ni_research: run stopped: %s", type(exc).__name__)
+        return _decline(ctx, out, [f"the model reply could not be handled ({type(exc).__name__})"])
+
+
 def run_research(ctx: ResearchCtx, chat: ChatFn, *, place: str = "", accept: AcceptFn | None = None) -> Outcome:
     """The cloud loop: ask the model for tool calls, run each in code, end at ``propose_card``, budget or two failed
     proposals. ``chat(messages, tools)`` is the only model seam (the gateway's tool path, or a cassette)."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
     assert callable(chat), "a chat seam"
-    out, base, turns = Outcome("declined", "cloud"), prompt.initial_messages(ctx, place), []
+    return _bounded(lambda out: _research_turns(ctx, chat, out, place, accept), ctx, Outcome("declined", "cloud"))
+
+
+def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, accept: AcceptFn | None) -> Outcome:
+    assert isinstance(out, Outcome), "an outcome"
+    assert callable(chat), "a chat seam"
+    base, turns = prompt.initial_messages(ctx, place), []
     fails, nudges, why = 0, 0, []
     for _ in range(ctx.max_turns + MAX_NUDGES + MAX_VERIFY_FAILS + 1):  # bounded: tool calls + nudges + retries
         stop = _budget_stop(ctx)
@@ -198,7 +241,10 @@ def _json_object(text: str) -> dict | None:
     assert text is not None, "text required"
     assert isinstance(text, str), "text required"
     dec = json.JSONDecoder()
-    for i, ch in enumerate(text[:20000]):  # bounded
+    text = text[:20000]
+    if _too_deep(text):
+        return None
+    for i, ch in enumerate(text):  # bounded
         if ch != "{":
             continue
         try:
@@ -290,7 +336,13 @@ def run_closed_world(ctx: ResearchCtx, chat: ChatFn, *, accept: AcceptFn | None 
     """Local mode: code ranks the Library rows; the model picks one and fills the recipe from its sample. No loop, no web."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
     assert callable(chat), "a chat seam"
-    out, reasons, fills = Outcome("declined", "local"), [], 0
+    return _bounded(lambda out: _closed_world(ctx, chat, out, accept), ctx, Outcome("declined", "local"))
+
+
+def _closed_world(ctx: ResearchCtx, chat: ChatFn, out: Outcome, accept: AcceptFn | None) -> Outcome:
+    assert isinstance(out, Outcome), "an outcome"
+    assert callable(chat), "a chat seam"
+    reasons, fills = [], 0
     rows, why = _ranked(ctx)
     if not rows:
         return _decline(ctx, out, [why or "the Library has no source for this ask"])

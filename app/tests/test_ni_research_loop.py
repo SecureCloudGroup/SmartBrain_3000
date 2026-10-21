@@ -389,6 +389,37 @@ def test_local_mode_declines_when_the_model_cannot_pass_the_checks(monkeypatch) 
     assert none.status == "declined" and "no listed Library source" in none.reasons[0]
 
 
+def test_an_unhandleable_model_reply_ends_in_a_decline_never_a_crash(monkeypatch) -> None:
+    deep = '{"pipeline": ' + "[" * 1500
+    ctx, _ = listed(monkeypatch)
+    out = loop.run_closed_world(ctx, Script(text_reply('{"pick": 1}'), *[text_reply(deep)] * 4))
+    assert out.status == "declined" and out.mode == "local", "a looping local model's '[[[[' is no pipeline"
+    nested = {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "c0", "type": "function", "function": {"name": "library_search", "arguments": "[" * 50000}}]}}]}
+    ctx2, _ = listed(monkeypatch)
+    out2 = loop.run_research(ctx2, Script(nested, nested, nested, nested))
+    assert out2.status == "declined"
+    odd = reply(call("library_search", query="q"), used={"prompt_tokens": "lots", "completion_tokens": {}})
+    ctx3, _ = listed(monkeypatch)
+    out3 = loop.run_research(ctx3, Script(odd, *good_run()[1:]))
+    assert out3.status == "proposed", "a malformed usage block is not fatal"
+
+    def boom(*a, **k):
+        raise RecursionError("anything a reply or a tool can raise")
+
+    monkeypatch.setattr(loop.schemas, "run_tool", boom)
+    ctx4, _ = listed(monkeypatch)
+    out4 = loop.run_research(ctx4, Script(*good_run()))
+    assert out4.status == "declined" and "could not be handled (RecursionError)" in out4.reasons[0]
+    assert out4.usage["calls"] == 1, "the usage counted before the failure is kept"
+
+
+def test_model_json_depth_is_checked_outside_strings() -> None:
+    assert loop._too_deep("[" * 65) and not loop._too_deep("[" * 64)
+    assert not loop._too_deep('{"a": "' + "[" * 500 + '"}'), "brackets inside a string do not nest"
+    assert not loop._too_deep('{"a": "\\"' + "}" + "[" * 3)
+
+
 def test_a_decline_stops_honestly_with_the_reasons_and_builds_nothing(lib, monkeypatch) -> None:  # noqa: F811
     store, item_id, out, _ = _flow(monkeypatch, _wrap(lib), seam=Script(reply(call("library_search", query="q"))),
                                    cloud="anthropic/x", consented=True)
