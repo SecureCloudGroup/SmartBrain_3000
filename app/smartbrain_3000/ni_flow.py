@@ -3993,6 +3993,7 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
                                     [k for k, on in (("key", access["key"]), ("contact", access["contact"])) if on])
         _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark, _pick_url=url,
                     note=f"trying {mark['host']} ({mark['n']} of {mark['of']})")
+        _audit_auto_pick(item_id, mark["host"], mark)  # the Library fetch the user did not tap for
         out = _sample_and_map(store, item_id, request, intent, url, call_model, do_fetch)
         if out.get("state") != "source":
             return out
@@ -4015,6 +4016,33 @@ def set_secrets_provider(provider: Callable[[], object] | None) -> None:
     global _SECRETS_PROVIDER
     assert provider is None or callable(provider), "provider must be callable"
     _SECRETS_PROVIDER = provider
+
+
+_AUDIT_PROVIDER: Callable[[], object] | None = None
+
+
+def set_audit_sink(provider: Callable[[], object] | None) -> None:
+    """Install the app's audit-log accessor (app startup; tests). The flow worker has no request, so
+    the auto-pick fetch reaches the audit log only through this one provider."""
+    global _AUDIT_PROVIDER
+    assert provider is None or callable(provider), "provider must be callable"
+    _AUDIT_PROVIDER = provider
+
+
+def _audit_auto_pick(item_id: str, host: str, mark: dict) -> bool:
+    """Record one v2 auto-picked Library fetch (``ni_auto_pick``, with the host). Best effort: a locked or
+    unwired log never stops the build. True when a row was written."""
+    assert item_id and isinstance(mark, dict), "item id + mark required"
+    try:
+        log_ = _AUDIT_PROVIDER() if _AUDIT_PROVIDER is not None else None
+        if log_ is None:
+            return False
+        log_.append("assistant", "ni_auto_pick", "reviewed", "auto", True,
+                    args_summary=json.dumps({"item_id": item_id, "host": host[:120], "try": mark.get("n")}))
+        return True
+    except Exception as exc:  # the audit row is a record, never a gate
+        log.warning("ni_flow: auto-pick audit failed: %s", type(exc).__name__)
+        return False
 
 
 def _resolve_secrets_store() -> object | None:

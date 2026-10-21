@@ -9,6 +9,7 @@ secret is read) and goes last; and nothing recurs on cadence until Keep.
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import Iterator
 
 import duckdb
@@ -365,3 +366,35 @@ def test_a_flag_flip_mid_build_still_holds_the_auto_card(lib, monkeypatch) -> No
     item = store.get_item(item_id)
     assert out["state"] == "ready" and item["spec"]["_built_from"]["path"] == "auto"
     assert nimod.awaits_yes(item)  # held for Keep: it does not run on cadence
+
+
+# --- audit ----------------------------------------------------------------------------------------
+
+class _AuditSpy:
+    def __init__(self) -> None:
+        self.rows: list[tuple] = []
+
+    def append(self, *a, **k) -> str:
+        self.rows.append((a, k))
+        return "id"
+
+
+def test_each_auto_picked_fetch_is_audited_with_its_host(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched, spy = _store(), [], _AuditSpy()
+    ni_flow.set_audit_sink(lambda: spy)
+    try:
+        wrap = _Wrap(lib, [_row("usgs-quakes", _QUAKE_URL), _row("open-meteo-forecast", WEATHER_URL)])
+        _run(store, wrap, monkeypatch, _fetcher(fetched, {_QUAKE_URL: {"x": 1}, WEATHER_URL: OPEN_METEO}))
+    finally:
+        ni_flow.set_audit_sink(None)
+    assert len(fetched) == 2 and [r[0][1] for r in spy.rows] == ["ni_auto_pick"] * 2
+    assert [json.loads(r[1]["args_summary"])["host"] for r in spy.rows] == ["earthquake.usgs.gov", "api.open-meteo.com"]
+
+
+def test_keep_on_an_auto_card_is_audited(client, lib, monkeypatch) -> None:  # noqa: F811
+    item_id = _auto_card(client, lib, monkeypatch)
+    before = {r["tool"] for r in client.app.state.audit.list(500)}
+    assert "ni_auto_pick" in before and "ni_keep" not in before  # the worker's fetch reached the real log
+    assert client.post(f"/api/ni/items/{item_id}/validate", json={"ok": True}).status_code == 200
+    kept = [r for r in client.app.state.audit.list(500) if r["tool"] == "ni_keep"]
+    assert len(kept) == 1 and "api.open-meteo.com" in kept[0]["args_summary"]

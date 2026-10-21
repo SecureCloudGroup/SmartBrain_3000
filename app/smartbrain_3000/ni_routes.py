@@ -522,6 +522,10 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
                                 presentation_id=body.presentation_id if body.ok else None)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    if body.ok and held and (before["spec"].get("_built_from") or {}).get("path") == "auto":
+        request.app.state.audit.append(  # Keep: the user accepts SmartBrain's own pick; recurring begins
+            "user", "ni_keep", "reviewed", "executed", True,
+            args_summary=tools.summarize({"item_id": item_id, "host": (before["spec"].get("_built_from") or {}).get("host")}))
     if not body.ok and held:
         # NO to a web page / dataset reading: back to the source pick without that source —
         # never a dead end (the declined address is never offered on this card again)
