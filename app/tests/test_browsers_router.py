@@ -33,6 +33,13 @@ POLICY = {"mode": "own"}
 IDENTITY = {"mode": "honest"}
 
 
+@pytest.fixture(autouse=True)
+def _no_robots_fetch(monkeypatch):
+    """S5a: a render checks robots.txt through netguard; these tests have no network, so they allow it."""
+    from smartbrain_3000 import ni_polite
+    monkeypatch.setattr(ni_polite.SHARED, "robots_ok", lambda url: True)
+
+
 @pytest.fixture()
 def rig(tmp_path, monkeypatch):
     hb.install_fake(monkeypatch, tmp_path)

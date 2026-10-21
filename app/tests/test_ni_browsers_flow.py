@@ -37,6 +37,13 @@ ELIGIBLE = {"eligible": True, "engine": "obscura", "version": "0.2.4", "reason":
 
 
 @pytest.fixture(autouse=True)
+def _no_robots_fetch(monkeypatch):
+    """S5a: a render checks robots.txt through netguard; these tests have no network, so they allow it."""
+    from smartbrain_3000 import ni_polite
+    monkeypatch.setattr(ni_polite.SHARED, "robots_ok", lambda url: True)
+
+
+@pytest.fixture(autouse=True)
 def _local_build_model(monkeypatch):
     from smartbrain_3000 import gateway as _gateway
     monkeypatch.setattr(_gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})

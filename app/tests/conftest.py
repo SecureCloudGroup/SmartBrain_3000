@@ -76,3 +76,14 @@ def _no_leaked_library_embedder():
     yield
     library_embed.set_provider(None)
     library_embed.forget()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_politeness():
+    """S5a: the per-host budgets, pauses and caches are process-wide; every test starts clean."""
+    from smartbrain_3000 import ni_polite
+    ni_polite.SHARED.reset()
+    ni_polite.set_dedupe(False)
+    yield
+    ni_polite.SHARED.reset()
+    ni_polite.set_dedupe(False)

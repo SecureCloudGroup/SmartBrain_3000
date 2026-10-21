@@ -22,6 +22,18 @@ to know when a release changes behavior.
   and only after you type the key. If no Library source answers, the card lists the
   Library's links and nothing else is fetched. Turn it on with `SMARTBRAIN_NI_FLOW=v2`.
 
+### Changed
+
+- **Neural Interface cards are politer to the sites they read.** Cards
+  that read the same address now share one request, and a site that is asked too often is rested: the
+  card stays due and tries again shortly, and it is never marked as failed. When a site
+  says "slow down" (HTTP 429 or 503), SmartBrain waits as long as it asks, up to an hour.
+  Cards that read someone else's site refresh at most every 15 minutes, even if they were
+  set to refresh faster; cards on your own network are not limited. Page readers now
+  follow a site's robots.txt, and a site that asks automated readers to stay out is not
+  read. Cards read only ports 80 and 443, unless a Library source or the
+  address you kept names its own port; cards on your own network may use any port.
+
 ### Fixed
 
 - **A data source that answers with a web page now says so.** When a site serves a
@@ -31,9 +43,6 @@ to know when a release changes behavior.
 - **In the new flow, Delete is always offered**, including while a card builds or waits
   for Keep. A card that stopped on the links list no longer shows a Cancel button or a
   progress bar.
-
-### Fixed
-
 - **An approved action interrupted by a restart no longer parks its turn for good.**
   The approval row is marked as running before the action starts; if the app stopped
   before the result was recorded, that row counted as still running forever, so the

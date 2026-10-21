@@ -42,6 +42,7 @@ from . import db, ni, ni_master, ni_query, page_verify, pagegraph
 from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
+from . import ni_fetch as _ni_fetch
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import resolve_lookup
@@ -3659,12 +3660,14 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         keyed path would silently fall through to the plain fetch.
         """
         assert isinstance(url, str) and url, "url required"
-        current_access = (_flow_read(store, item_id) or {}).get("_access")
+        live = _flow_read(store, item_id) or {}
+        port = _declared_port(live, url)  # S5a: a Library row's declared port; politeness engages in ni_fetch
+        current_access = live.get("_access")
         if isinstance(current_access, dict) and current_access.get("url") == url:
-            return _fetch_with_access(url, sealed_fmt or "json", current_access, item_id)
+            return _fetch_with_access(url, sealed_fmt or "json", current_access, item_id, port)
         if sealed_fmt and sealed_fmt in ni._HTTP_JSON_FORMATS and sealed_fmt != "json":
-            return _fetch_textual_sample(url, sealed_fmt)
-        sample, fmt = _sniffed_fetch_with_format(url)
+            return _ni_fetch.fetch_parsed(url, sealed_fmt, port=port)
+        sample, fmt = _sniffed_fetch_with_format(url, port=port)
         _seal_sniffed_format(store, item_id, fmt)
         if fmt != "json" and fmt in ni._HTTP_JSON_FORMATS:
             sealed_fmt = fmt  # a later fetch in this pass parses the sealed way, no second sniff
@@ -4065,12 +4068,23 @@ def _resolve_secrets_store() -> object | None:
 # path fetches JSON first (the vast majority of NI sources) and, on
 # ``FetchError.kind == "not_json"``, sniffs the served content-type + first
 # bytes to pick the right textual parser. Both helpers reuse the SAME
-# netguard machinery (``safe_fetch_json`` / ``safe_fetch_text``) that the
-# engine's ``_fetch_http_json`` does — one code path, one set of caps.
-_SNIFF_HEAD_BYTES = 4096
+# netguard machinery, now in ni_fetch (P33): one code path, one set of caps.
 
 
-def _fetch_with_access(url: str, fmt: str, access: dict, item_id: str) -> object:
+def _declared_port(record: dict, url: str) -> int | None:
+    """The one non-80/443 port a picked Library row declared (its sealed address), when ``url`` is
+    on that same host; None otherwise, so a pasted address on an odd port is refused (S5a)."""
+    assert isinstance(record, dict) and isinstance(url, str), "record + url required"
+    lib = urlparse(str(record.get("_library_url") or ""))
+    try:
+        port = lib.port
+        same = bool(lib.hostname) and lib.hostname == urlparse(url).hostname
+    except ValueError:
+        return None
+    return port if same and port not in (None, 80, 443) else None
+
+
+def _fetch_with_access(url: str, fmt: str, access: dict, item_id: str, port: int | None = None) -> object:
     """The first sample of a picked source that needs the user's key or contact email: the
     same request the engine will send (``ni.http_request_parts``), redirects refused."""
     secrets_store = _resolve_secrets_store()
@@ -4078,57 +4092,17 @@ def _fetch_with_access(url: str, fmt: str, access: dict, item_id: str) -> object
         raise ni.NIError("secret_missing", "the key store is locked")
     source = {"type": "http_json", "url": url, **_access_source(access, item_id)}
     full_url, headers = ni.http_request_parts(source, item_id, secrets_store)
-    if fmt == "json":
-        return _netguard_mod.safe_fetch_json(full_url, headers=headers or None, allow_redirects=False)
-    got = _netguard_mod.safe_fetch_text(full_url, fmt, headers=headers or None, allow_redirects=False)
-    return _textual_parse(str(got.get("text") or ""), fmt)
+    return _ni_fetch.fetch_parsed(full_url, fmt, headers=headers or None, allow_redirects=False, port=port)
 
 
-def _fetch_textual_sample(url: str, fmt: str) -> object:
-    """Sampling fetch for a Library-picked textual format → walker-shaped dict."""
-    assert isinstance(url, str) and url, "url required"
-    assert fmt in ni._HTTP_JSON_FORMATS and fmt != "json", "fmt must be a textual format"
-    got = _netguard_mod.safe_fetch_text(url, fmt)
-    text = got.get("text") if isinstance(got, dict) else ""
-    if not isinstance(text, str):
-        raise _netguard_mod.FetchError(f"no text body for {fmt}",
-                                        kind=_netguard_mod.format_error_kind(fmt))
-    return _textual_parse(text, fmt)
+# the shared fetch-and-parse path (``ni_fetch``, P33); these names stay for the flow's callers and tests
+_sniffed_fetch_with_format = _ni_fetch.sniff_fetch
+_textual_parse = _ni_fetch.parse_textual
 
 
 def _sniffed_fetch(url: str) -> object:
-    """Paste-URL fetch: try JSON first; on a shape refusal, sniff + parse.
-
-    Historical / catalog / recipe URLs are almost all JSON APIs — the JSON
-    path stays the default so nothing about existing behaviour changes. A
-    ``FetchError(kind="not_json")`` is the honest "the URL is alive, but the
-    body isn't JSON" signal; we then read the head bytes to sniff feed / xml /
-    csv and re-parse. Every other FetchError (SSRF refusal, timeout, upstream
-    4xx) rides straight through — those are not "wrong format", they are the
-    fetch failing outright.
-    """
-    return _sniffed_fetch_with_format(url)[0]
-
-
-def _sniffed_fetch_with_format(url: str) -> tuple[object, str]:
-    """``_sniffed_fetch`` plus the format the body really was (``json`` | ``csv`` | ``feed`` | ``xml`` |
-    ``text``), so the flow can seal it on the record and the engine refreshes a pasted CSV or feed the
-    way sampling parsed it. Phase 0 (2026-10-05): before this the sealed spec of a pasted non-JSON link
-    carried no ``source.format`` and its first refresh failed as not-JSON (only a Library row's tap
-    stamped ``_format``)."""
-    assert isinstance(url, str) and url, "url required"
-    try:
-        return _netguard_mod.safe_fetch_json(url), "json"
-    except _netguard_mod.FetchError as exc:
-        if getattr(exc, "kind", None) != "not_json":
-            raise
-        page = exc  # the URL is alive but isn't JSON: a data file, or an ordinary web page
-    try:
-        return _sniffed_textual(url)
-    except _netguard_mod.FetchError:
-        # an ordinary web page (field 2026-09-28: HTML sniffed as XML failed to parse and never
-        # reached the page reader) — the not_json refusal routes the flow to the page door
-        raise page from None
+    """Paste-URL fetch (JSON first, then sniff); the parsed value only."""
+    return _ni_fetch.sniff_fetch(url)[0]
 
 
 def _seal_sniffed_format(store: ni.NIStore, item_id: str, fmt: str) -> None:
@@ -4143,59 +4117,10 @@ def _seal_sniffed_format(store: ni.NIStore, item_id: str, fmt: str) -> None:
         _flow_write(store, item_id, {**record, "_format": fmt})
 
 
-def _sniffed_textual(url: str) -> tuple[object, str]:
-    """Fetch as text and parse by what it really is, returning ``(parsed, format)``; HTML is refused (the
-    page door reads pages)."""
-    from . import formats as _formats
-    got = _netguard_mod.safe_fetch_text(url, "text")
-    text = got.get("text") if isinstance(got, dict) else ""
-    if not isinstance(text, str):
-        raise _netguard_mod.FetchError("no text body", kind="not_json") from None
-    ct = str(got.get("content_type") or "")
-    head = text[:_SNIFF_HEAD_BYTES].lstrip().lower()
-    if "html" in ct.lower() or head.startswith(("<!doctype html", "<html")):
-        raise _netguard_mod.FetchError("an HTML page", kind="not_text")
-    sniffed = _formats.sniff_format(ct, text[:_SNIFF_HEAD_BYTES])
-    if sniffed == "json":
-        # A body that sniffs back as JSON while the guard refused it is a
-        # server that lied about its content-type but really did serve JSON.
-        # Re-parse in-process — the netguard fetch has already run, so this
-        # only decodes bytes we already hold.
-        try:
-            return json.loads(text), "json"
-        except ValueError as exc:
-            raise _netguard_mod.FetchError(f"upstream JSON reparse failed: {exc}",
-                                            kind="not_json") from None
-    return _textual_parse(text, sniffed), sniffed
-
-
 def _is_web_page(exc: BaseException) -> bool:
     """True when a fetch failure says the response was an HTML page (set by the guard's header refusal
     or by a textual parser that saw a web page body), whichever format the source was sealed as."""
     return str(getattr(exc, "content_type", "") or "") in ("text/html", "application/xhtml+xml")
-
-
-def _textual_parse(text: str, fmt: str) -> object:
-    """Parse ``text`` per ``fmt``; a parse failure surfaces as FetchError kind=not_<fmt>."""
-    from . import formats as _formats
-    assert isinstance(text, str) and isinstance(fmt, str), "args required"
-    assert fmt in ni._HTTP_JSON_FORMATS and fmt != "json", "fmt must be a textual format"
-    try:
-        if fmt == "csv":
-            return _formats.parse_csv(text)
-        if fmt == "feed":
-            return _formats.parse_feed(text)
-        if fmt == "xml":
-            return _formats.parse_xml(text)
-        return _formats.parse_text(text)
-    except _formats.HtmlBody:
-        raise _netguard_mod.FetchError(
-            f"{fmt} source returned a web page, not its data",
-            kind=_netguard_mod.format_error_kind(fmt), content_type="text/html") from None
-    except _formats.FormatError as exc:
-        raise _netguard_mod.FetchError(
-            f"parse failed for {fmt}: {exc}",
-            kind=_netguard_mod.format_error_kind(fmt)) from None
 
 
 # S2 (round 9/10): the search-provider seam, mirroring the secrets provider.
@@ -5813,6 +5738,9 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
         pick_fmt = str(live.get("_format") or "").strip().lower()
         if pick_fmt and pick_fmt in ni._HTTP_JSON_FORMATS and pick_fmt != "json":
             source["format"] = pick_fmt
+        port = _declared_port(live, str(source.get("url") or url))
+        if port is not None:
+            source["port"] = port  # S5a: the Library row's own port; any other is refused at fetch
     spec = build_final_spec(request, intent, source, intent["cadence_minutes"],
                             built["pipeline"], built["scene"])
     # §34 / §11: a form over a numeric measure tracks it, so the stat's sparkline accrues

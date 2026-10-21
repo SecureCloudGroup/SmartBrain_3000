@@ -40,7 +40,7 @@ import unicodedata
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-from . import jailrun, netguard
+from . import jailrun, netguard, ni_polite
 from .jail_extract import DATA_ID_RE, MAX_DATA_PATH, PAGE_EXTRA_MARK
 
 _FETCH_DEADLINE_S = 15.0
@@ -72,7 +72,8 @@ def fetch_page_graph(url: str, *, fetcher=None) -> dict:
     """
     assert isinstance(url, str) and url, "url required"
     do_fetch = fetcher if fetcher is not None else netguard.safe_fetch_page
-    got = do_fetch(url, deadline_seconds=_FETCH_DEADLINE_S)
+    with ni_polite.engaged():  # S5a: budget, pause, robots.txt and ports for a page read
+        got = do_fetch(url, deadline_seconds=_FETCH_DEADLINE_S)
     body = got.get("content") if isinstance(got, dict) else None
     if not isinstance(body, (bytes, bytearray)):
         raise netguard.FetchError("no bytes in page response")
