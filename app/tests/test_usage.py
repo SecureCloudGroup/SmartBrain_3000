@@ -52,6 +52,32 @@ def test_cache_tokens_count_toward_prompt_total(tmp_path) -> None:
     assert row["prompt_tokens"] == 1110 and row["completion_tokens"] == 5
 
 
+def test_cache_tokens_read_from_bifrost_prompt_tokens_details(tmp_path) -> None:
+    # Shape Bifrost v1.6.4 returns from /v1/chat/completions for an anthropic/* cache hit:
+    # no top-level cache keys; prompt_tokens already includes the cached tokens.
+    hit = {"prompt_tokens": 20718, "completion_tokens": 284, "total_tokens": 21002,
+           "prompt_tokens_details": {"cached_read_tokens": 20700, "cached_tokens": 20700,
+                                     "cache_write_tokens": 0}}
+    write = {"prompt_tokens": 20718, "completion_tokens": 303,
+             "prompt_tokens_details": {"cached_write_tokens": 20700, "cache_write_tokens": 20700,
+                                       "cached_tokens": 0,
+                                       "cached_write_token_details": {"cached_write_tokens_5m": 20700,
+                                                                      "cached_write_tokens_1h": 0}}}
+    assert usage.cache_tokens(hit) == (0, 20700)
+    assert usage.cache_tokens(write) == (20700, 0)
+    # OpenAI-spec mirrors alone still count (cached_tokens = reads, cache_write_tokens = writes).
+    assert usage.cache_tokens({"prompt_tokens_details": {"cached_tokens": 7, "cache_write_tokens": 3}}) == (3, 7)
+    assert usage.cache_tokens({"prompt_tokens_details": {"cached_tokens": True}}) == (0, 0)
+    assert usage.cache_tokens({"prompt_tokens_details": None}) == (0, 0)
+    # Top-level Anthropic keys win over details when both are present.
+    both = {"cache_read_input_tokens": 5, "prompt_tokens_details": {"cached_read_tokens": 9}}
+    assert usage.cache_tokens(both) == (0, 5)
+    assert usage.prompt_total(hit) == 20718  # never double-counts the cached tokens
+    conn = _conn(tmp_path)
+    usage.record_response(conn, "anthropic/claude-x", {"usage": hit})
+    assert usage.summary(conn)[0]["prompt_tokens"] == 20718
+
+
 def test_chat_recorded_appears_in_summary(tmp_path) -> None:
     import httpx
 
