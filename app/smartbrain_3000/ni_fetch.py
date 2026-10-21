@@ -3,8 +3,10 @@
 The flow's sampling fetch (``ni_flow``) and the tick's ``ni.run_item`` fetch both go through here, so a
 source is fetched, size-capped, content-type checked and parsed one way. Every request goes through
 ``netguard`` (SSRF pin, redirect re-validation, byte cap) and every request passes ``_get``, the single
-chokepoint: ``before_request`` is where a per-host rate limiter hooks in (one place, covers JSON, textual
-and sniffed fetches alike).
+chokepoint. ``_get`` is also where S5a's politeness is engaged (``ni_polite.engaged``: per-host budget,
+Retry-After pause, fetch dedupe, port policy, installed on the thread so netguard's guarded request applies
+it to every hop), once for JSON, textual and sniffed fetches alike. ``before_request`` stays as a plain
+URL-only seam for a caller that needs to veto a request.
 
 This module imports neither ``ni`` nor ``ni_flow``; callers translate ``FetchError`` to their own error type.
 """
@@ -13,7 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from . import formats, netguard
+from . import formats, netguard, ni_polite
 
 TEXTUAL_FORMATS = frozenset({"csv", "feed", "xml", "text"})
 SNIFF_HEAD_BYTES = 4096
@@ -26,15 +28,17 @@ class ParseError(netguard.FetchError):
     """The body arrived but is not the sealed format (``kind`` = ``not_<fmt>``)."""
 
 
-def _get(url: str, fmt: str, headers: dict | None, allow_redirects: bool) -> dict:
-    """The only place this module touches the network. ``fmt`` ``json`` returns the parsed JSON itself."""
+def _get(url: str, fmt: str, headers: dict | None, allow_redirects: bool, port: int | None = None) -> dict:
+    """The only place this module touches the network, politeness-engaged here and nowhere else (``port``
+    is the one extra port a Library row declared). ``fmt`` ``json`` returns the parsed JSON itself."""
     assert isinstance(url, str) and url, "url required"
     assert fmt == "json" or fmt in TEXTUAL_FORMATS or fmt == "text", "a known format"
     if before_request is not None:
         before_request(url)
-    if fmt == "json":
-        return netguard.safe_fetch_json(url, headers=headers, allow_redirects=allow_redirects)
-    return netguard.safe_fetch_text(url, fmt, headers=headers, allow_redirects=allow_redirects)
+    with ni_polite.engaged(port=port):
+        if fmt == "json":
+            return netguard.safe_fetch_json(url, headers=headers, allow_redirects=allow_redirects)
+        return netguard.safe_fetch_text(url, fmt, headers=headers, allow_redirects=allow_redirects)
 
 
 def parse_textual(text: str, fmt: str) -> object:
@@ -57,7 +61,7 @@ def parse_textual(text: str, fmt: str) -> object:
 
 
 def fetch_parsed(url: str, fmt: str = "json", *, headers: dict | None = None,
-                 allow_redirects: bool = True) -> object:
+                 allow_redirects: bool = True, port: int | None = None) -> object:
     """Fetch ``url`` as sealed format ``fmt`` and return the parsed value.
 
     ``headers`` is the access the caller resolved (keys never reach this module unresolved); callers refuse
@@ -65,7 +69,7 @@ def fetch_parsed(url: str, fmt: str = "json", *, headers: dict | None = None,
     """
     assert isinstance(url, str) and url, "url required"
     assert fmt == "json" or fmt in TEXTUAL_FORMATS, "fmt must be json or a textual format"
-    got = _get(url, fmt, headers or None, allow_redirects)
+    got = _get(url, fmt, headers or None, allow_redirects, port)
     if fmt == "json":
         return got
     text = got.get("text") if isinstance(got, dict) else ""
@@ -74,29 +78,29 @@ def fetch_parsed(url: str, fmt: str = "json", *, headers: dict | None = None,
     return parse_textual(text, fmt)
 
 
-def sniff_fetch(url: str, *, allow_redirects: bool = True) -> tuple[object, str]:
+def sniff_fetch(url: str, *, allow_redirects: bool = True, port: int | None = None) -> tuple[object, str]:
     """Paste-URL fetch: try JSON first; on a ``not_json`` refusal sniff the body and parse, returning
     ``(parsed, format)``. Every other FetchError rides through; an HTML page re-raises the JSON refusal so
     the flow routes it to the page door."""
     assert allow_redirects in (True, False), "a redirect flag"
     assert isinstance(url, str) and url, "url required"
     try:
-        return _get(url, "json", None, allow_redirects), "json"
+        return _get(url, "json", None, allow_redirects, port), "json"
     except netguard.FetchError as exc:
         if getattr(exc, "kind", None) != "not_json":
             raise
         page = exc  # alive but not JSON: a data file, or an ordinary web page
     try:
-        return _sniffed_textual(url, allow_redirects)
+        return _sniffed_textual(url, allow_redirects, port)
     except netguard.FetchError:
         raise page from None
 
 
-def _sniffed_textual(url: str, allow_redirects: bool = True) -> tuple[object, str]:
+def _sniffed_textual(url: str, allow_redirects: bool = True, port: int | None = None) -> tuple[object, str]:
     """Fetch as text and parse by what it really is; HTML is refused (the page door reads pages)."""
     assert url.startswith(("http://", "https://")), "an http(s) url"
     assert isinstance(allow_redirects, bool), "a redirect flag"
-    got = _get(url, "text", None, allow_redirects)
+    got = _get(url, "text", None, allow_redirects, port)
     text = got.get("text") if isinstance(got, dict) else ""
     if not isinstance(text, str):
         raise netguard.FetchError("no text body", kind="not_json") from None

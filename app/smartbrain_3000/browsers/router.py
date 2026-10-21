@@ -35,7 +35,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from .. import __version__, jailrun, netguard, pagegraph
+from .. import __version__, jailrun, netguard, ni_polite, pagegraph
 from . import install, runner
 from . import manifest as mf
 
@@ -54,7 +54,7 @@ _JS_NOTICE_RE = re.compile(rb"(?:enable|turn on|requires?|disabled|not available
                            rb"|javascript[^<]{0,80}?(?:enable|turn on|required|disabled|not available)",
                            re.IGNORECASE)
 _monotonic = time.monotonic           # module attribute so a test can open/close the breaker
-_static_fetch = netguard.safe_fetch_page  # the page door's guarded fetch (tests: a local server)
+_static_fetch = ni_polite.polite(netguard.safe_fetch_page)  # S5a budget + robots; the page door's guarded fetch (tests: a local server)
 
 
 @dataclass(frozen=True)
@@ -339,6 +339,11 @@ def _render_tier(url: str, engine: str, site_policy: dict, identity: dict, timez
         return _render_refusal(engine, "tier_disabled", "tier_disabled", signals)
     if not BREAKER.allow(engine):
         return _render_refusal(engine, "engine_unhealthy", "breaker_open", signals)
+    try:  # S5a: a render is a page read: the host's budget / pause and robots.txt apply
+        ni_polite.admit_page(url)
+    except netguard.FetchError as exc:
+        busy = exc.kind == "host_busy"
+        return _render_refusal(engine, "busy" if busy else "refused", "host_busy" if busy else "robots", signals)
     extra = {"want_assets": True} if want_assets else {}
     got = runner.render(url, engine=engine, site_policy=site_policy, identity=identity,
                         timezone=timezone, **extra)
@@ -351,7 +356,7 @@ def _render_tier(url: str, engine: str, site_policy: dict, identity: dict, timez
 
 
 def _render_refusal(engine: str, status: str, reason: str, signals: tuple[str, ...]) -> BrowseResult:
-    assert status in ("tier_disabled", "engine_unhealthy"), "router refusals are closed"
+    assert status in ("tier_disabled", "engine_unhealthy", "busy", "refused"), "router refusals are closed"
     assert reason, "reason required"
     return BrowseResult(ok=False, tier=engine, status=status, reason=reason, signals=signals,
                         html=None, graph=None, final_url=None, engine=engine, version="",

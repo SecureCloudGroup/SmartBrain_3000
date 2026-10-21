@@ -43,6 +43,7 @@ from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
 from . import ni_fetch as _ni_fetch
+from . import ni_polite as _ni_polite
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import resolve_lookup
@@ -3660,12 +3661,14 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         keyed path would silently fall through to the plain fetch.
         """
         assert isinstance(url, str) and url, "url required"
-        current_access = (_flow_read(store, item_id) or {}).get("_access")
+        live = _flow_read(store, item_id) or {}
+        port = _declared_port(live, url)  # S5a: a Library row's declared port; politeness engages in ni_fetch
+        current_access = live.get("_access")
         if isinstance(current_access, dict) and current_access.get("url") == url:
-            return _fetch_with_access(url, sealed_fmt or "json", current_access, item_id)
+            return _fetch_with_access(url, sealed_fmt or "json", current_access, item_id, port)
         if sealed_fmt and sealed_fmt in ni._HTTP_JSON_FORMATS and sealed_fmt != "json":
-            return _ni_fetch.fetch_parsed(url, sealed_fmt)
-        sample, fmt = _sniffed_fetch_with_format(url)
+            return _ni_fetch.fetch_parsed(url, sealed_fmt, port=port)
+        sample, fmt = _sniffed_fetch_with_format(url, port=port)
         _seal_sniffed_format(store, item_id, fmt)
         if fmt != "json" and fmt in ni._HTTP_JSON_FORMATS:
             sealed_fmt = fmt  # a later fetch in this pass parses the sealed way, no second sniff
@@ -4069,7 +4072,20 @@ def _resolve_secrets_store() -> object | None:
 # netguard machinery, now in ni_fetch (P33): one code path, one set of caps.
 
 
-def _fetch_with_access(url: str, fmt: str, access: dict, item_id: str) -> object:
+def _declared_port(record: dict, url: str) -> int | None:
+    """The one non-80/443 port a picked Library row declared (its sealed address), when ``url`` is
+    on that same host; None otherwise, so a pasted address on an odd port is refused (S5a)."""
+    assert isinstance(record, dict) and isinstance(url, str), "record + url required"
+    lib = urlparse(str(record.get("_library_url") or ""))
+    try:
+        port = lib.port
+        same = bool(lib.hostname) and lib.hostname == urlparse(url).hostname
+    except ValueError:
+        return None
+    return port if same and port not in (None, 80, 443) else None
+
+
+def _fetch_with_access(url: str, fmt: str, access: dict, item_id: str, port: int | None = None) -> object:
     """The first sample of a picked source that needs the user's key or contact email: the
     same request the engine will send (``ni.http_request_parts``), redirects refused."""
     secrets_store = _resolve_secrets_store()
@@ -4077,7 +4093,7 @@ def _fetch_with_access(url: str, fmt: str, access: dict, item_id: str) -> object
         raise ni.NIError("secret_missing", "the key store is locked")
     source = {"type": "http_json", "url": url, **_access_source(access, item_id)}
     full_url, headers = ni.http_request_parts(source, item_id, secrets_store)
-    return _ni_fetch.fetch_parsed(full_url, fmt, headers=headers or None, allow_redirects=False)
+    return _ni_fetch.fetch_parsed(full_url, fmt, headers=headers or None, allow_redirects=False, port=port)
 
 
 # the shared fetch-and-parse path (``ni_fetch``, P33); these names stay for the flow's callers and tests
@@ -5723,6 +5739,9 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
         pick_fmt = str(live.get("_format") or "").strip().lower()
         if pick_fmt and pick_fmt in ni._HTTP_JSON_FORMATS and pick_fmt != "json":
             source["format"] = pick_fmt
+        port = _declared_port(live, str(source.get("url") or url))
+        if port is not None:
+            source["port"] = port  # S5a: the Library row's own port; any other is refused at fetch
     spec = build_final_spec(request, intent, source, intent["cadence_minutes"],
                             built["pipeline"], built["scene"])
     # §34 / §11: a form over a numeric measure tracks it, so the stat's sparkline accrues

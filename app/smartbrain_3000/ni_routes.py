@@ -861,7 +861,7 @@ def _execute_manual_run(request: Request, store: ni.NIStore, item: dict) -> dict
                              secrets_store=secrets, schedules_store=schedules,
                              kb=getattr(state, "kb", None))
     except ni.NIError as exc:
-        if exc.kind == "render_busy":  # B3a: capacity, never a failure — the card stays as it was
+        if exc.kind in ("render_busy", "host_busy"):  # B3a/S5a: capacity, never a failure — the card stays as it was
             return {"status": "busy", "kind": exc.kind, "code": exc.kind,
                     "duration_ms": int((time.monotonic() - started) * 1000)}
         store.mark_checked(item_id, exc.kind[:200])

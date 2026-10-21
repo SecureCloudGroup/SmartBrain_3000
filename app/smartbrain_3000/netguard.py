@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import threading
 import time
 from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 
@@ -240,7 +241,8 @@ class FetchError(Exception):
     """
 
     def __init__(self, message: str, *, status: int | None = None,
-                 kind: str | None = None, content_type: str = "") -> None:
+                 kind: str | None = None, content_type: str = "",
+                 retry_after: str | None = None) -> None:
         assert message, "message required"
         assert status is None or (100 <= status <= 599), "status must be an HTTP code"
         super().__init__(message)
@@ -256,6 +258,9 @@ class FetchError(Exception):
         # the refusing response's media type (lowercase, no parameters), "" when
         # unknown — lets a caller tell an API's JSON refusal from a page's
         self.content_type = content_type[:_MAX_MEDIA]
+        # the upstream's raw ``Retry-After`` value (seconds or an HTTP date), None when absent;
+        # the politeness layer parses it, this class only carries it
+        self.retry_after = retry_after[:64] if isinstance(retry_after, str) and retry_after else None
 
 
 def _unwrap(addr: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
@@ -378,11 +383,49 @@ def _send_pinned(client: httpx.Client, url: str, host: str, ip: str,
     return client.send(request, stream=True)
 
 
+# S5a politeness hook. ``ni_polite`` installs an object here (per thread) around the NI fetch
+# paths; every other caller of this module sees ``None`` and behaves exactly as before. The object
+# decides (a) whether a request may go out now / reuse a recent response (``call``), (b) which
+# ports are allowed (``port_ok``) and (c) whether robots.txt lets a page be read (``robots_ok``).
+_POLITE = threading.local()
+
+
+def active_politeness() -> object | None:
+    """The politeness object installed on this thread, or None."""
+    return getattr(_POLITE, "obj", None)
+
+
+def set_politeness(obj: object | None) -> object | None:
+    """Install ``obj`` (or None) on this thread; return the previous one so a caller restores it."""
+    previous = getattr(_POLITE, "obj", None)
+    _POLITE.obj = obj
+    return previous
+
+
 def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                  deadline_seconds: float | None = None, accept_zip_magic: bool = False,
                  method: str = "GET", content: bytes | None = None,
                  extra_headers: dict | None = None,
                  allow_redirects: bool = True) -> dict:
+    """The guarded request, through the thread's politeness object when one is installed."""
+    polite = active_politeness()
+
+    def go() -> dict:
+        return _guarded_get_once(url, allowed_ct, max_bytes, deadline_seconds, accept_zip_magic,
+                                 method, content, extra_headers, allow_redirects)
+
+    if polite is None:
+        return go()
+    # an Accept header alone is not a credential: only other headers (keys, contact) bar response reuse
+    custom = any(str(k).lower() != "accept" for k in (extra_headers or {}))
+    return polite.call(url, method, custom, (allowed_ct, max_bytes), go)  # type: ignore[attr-defined]
+
+
+def _guarded_get_once(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
+                      deadline_seconds: float | None = None, accept_zip_magic: bool = False,
+                      method: str = "GET", content: bytes | None = None,
+                      extra_headers: dict | None = None,
+                      allow_redirects: bool = True) -> dict:
     """Shared SSRF-guarded request; return {final_url, status, content_type, content (bytes)}.
 
     All the defenses (scheme/userinfo/IP allowlist, per-request IP pin with no
@@ -410,6 +453,9 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                 parsed.port  # noqa: B018 - urlparse validates the port lazily, on ACCESS: a malformed one
             except ValueError:  # (":abc", ":99999") must be a refusal like any other, not a 500
                 raise FetchError("invalid port in URL") from None
+            polite = active_politeness()
+            if polite is not None and not polite.port_ok(parsed.port):  # type: ignore[attr-defined]
+                raise FetchError("port not allowed", kind="port_refused")
             ip = _validated_ip(host)  # re-validated on every hop
             # httpx.Response (from send(stream=True)) is NOT a context manager — close
             # it explicitly in finally, or the body/connection leaks (and `with` raises).
@@ -445,7 +491,8 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                     raise FetchError(f"upstream returned HTTP {response.status_code}",
                                      status=response.status_code,
                                      kind="challenge" if _is_challenge(response) else None,
-                                     content_type=_media_type(response))
+                                     content_type=_media_type(response),
+                                     retry_after=response.headers.get("retry-after"))
                 if _challenge_header(response):  # a 2xx bot check (AWS WAF answers 202)
                     raise FetchError("upstream answered with a bot challenge", kind="challenge")
                 ctype = response.headers.get("content-type", "")
@@ -569,6 +616,9 @@ def safe_fetch_page(url: str, headers: dict | None = None,
     ``allow_redirects=False`` is threaded through when the NI caller attaches any
     header (mirrors ``safe_fetch_json`` credential-exfiltration guard).
     """
+    polite = active_politeness()
+    if polite is not None and not polite.robots_ok(url):  # type: ignore[attr-defined]
+        raise FetchError("robots.txt asks automated readers to stay out", kind="robots")
     got = _guarded_get(
         url, ("text/html", "application/xhtml+xml", "text/"),
         _MAX_BYTES, extra_headers=headers, allow_redirects=allow_redirects,

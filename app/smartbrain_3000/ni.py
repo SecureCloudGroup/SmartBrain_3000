@@ -147,7 +147,7 @@ _SOURCE_TYPES: frozenset[str] = frozenset(
 # ``smartbrain_3000.formats`` turns into the walker-shaped dict the pipeline
 # grammar already consumes. Refused when absent from a candidate spec.
 _HTTP_JSON_FORMATS: frozenset[str] = frozenset({"json", "csv", "feed", "xml", "text"})
-_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format", "secret_query", "contact_ua"})
+_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format", "secret_query", "contact_ua", "port"})
 # The user's own key as a query parameter (most free-key APIs: ``?api_key=``): resolved
 # host-bound at fetch time exactly like a ``$secret`` header, never stored in the URL.
 _SECRET_QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\-]{1,40}\Z")
@@ -224,7 +224,9 @@ MAX_FEED_CANDIDATES = 5
 _RENDER_INTERVAL_FLOOR = 15  # minutes: about two renders a minute serve ~30 cards
 # A capacity status is never a failure: no run row, no latest / last_failure write, no
 # streak, no L1 hook (busy: the item stays due; unavailable: marked, no streak).
-CAPACITY_KINDS: frozenset[str] = frozenset({"render_busy", "render_unavailable", "model_busy"})
+# ``host_busy`` (S5a): the card's host is over its request budget or paused by a 429 / 503; the card
+# stays due and the tick asks again, it is never a failure.
+CAPACITY_KINDS: frozenset[str] = frozenset({"render_busy", "render_unavailable", "model_busy", "host_busy"})
 # Render outcomes that ARE failures (the runner's statuses, renamed host-free).
 _RENDER_FAILURES: dict[str, str] = {
     "refused": "render_refused", "timeout": "render_timeout", "blocked": "render_blocked",
@@ -1131,6 +1133,9 @@ def _validate_http_json_source(s: dict) -> None:
                 raise ValueError(f"spec.source.secret_query.{name}.$secret must start with 'ni:'")
     if s.get("contact_ua") is not None and not isinstance(s.get("contact_ua"), bool):
         raise ValueError("spec.source.contact_ua must be true or false")
+    port = s.get("port")  # S5a: the one non-80/443 port a Library row declared (default: refused)
+    if port is not None and (not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536):
+        raise ValueError("spec.source.port must be a TCP port number")
 
 
 def _validate_http_page_source(s: dict) -> None:
@@ -4659,6 +4664,7 @@ class NIStore:
         floor = _LLM_INTERVAL_FLOOR if _spec_has_llm_stage(spec) else _INTERVAL_FLOOR
         if spec_renders(spec):  # B3a: a page-browser card has its own floor (max with the LLM's)
             floor = max(floor, _RENDER_INTERVAL_FLOOR)
+        floor = max(floor, _polite_floor(spec))  # S5a: third-party hosts get the 15 minute floor
         if not isinstance(raw, int) or isinstance(raw, bool):
             return max(floor, 60)
         return max(floor, int(raw))
@@ -5490,6 +5496,13 @@ def _to_utc(value) -> datetime:
     return datetime.fromisoformat(str(value)).replace(tzinfo=UTC)
 
 
+def _polite_floor(spec: object) -> int:
+    """S5a cadence floor (minutes) for ``spec``'s host: 15 for a third party, 0 for an own host."""
+    from . import ni_polite  # lazy: keep the fetch layer off ni's import graph edges
+
+    return ni_polite.cadence_floor_minutes(spec)
+
+
 def effective_interval_minutes(base: int, failures: int) -> int:
     """Effective cadence (§6): base until failures>=3, then doubles per extra failure, cap 24h."""
     assert isinstance(base, int) and base >= _INTERVAL_FLOOR, "base >= floor"
@@ -5504,7 +5517,9 @@ def _is_due(item: dict, now: datetime) -> bool:
     """True when the effective-interval has elapsed since ``last_checked`` (or NULL)."""
     assert isinstance(now, datetime) and now.tzinfo is not None, "now must be UTC-aware"
     last = item.get("last_checked")
-    interval = effective_interval_minutes(item["interval_minutes"], item["consecutive_failures"])
+    # S5a: a card stored below its host's floor is clamped HERE, at run time (its row is not rewritten)
+    base = max(item["interval_minutes"], _polite_floor(item.get("spec")))
+    interval = effective_interval_minutes(base, item["consecutive_failures"])
     if last is None:
         return True
     elapsed = (now - _to_utc(last)).total_seconds()
@@ -5598,6 +5613,8 @@ def tick(app, pass_budget_seconds: float = 20.0,
     kb = getattr(app.state, "kb", None)
     handed_off = False  # B3a: at most one rendered card goes to the render worker per pass
     _TICK_THREAD.active = True
+    from . import ni_polite  # lazy: keep the fetch layer off ni's import graph edges
+    ni_polite.set_dedupe(True)  # S5a: cards on one URL share one response inside the window
     try:
         store = NIStore(cursor, key)
         secrets_store = SecretStore(cursor, key)
@@ -5658,8 +5675,8 @@ def tick(app, pass_budget_seconds: float = 20.0,
                     fired.extend(result.get("alerts") or [])
                     repaired.extend(result.get("repaired") or [])
             except NIError as exc:
-                if exc.kind == "model_busy":
-                    # A busy local slot is no attempt: the card stays due (no stamp) and costs
+                if exc.kind in ("model_busy", "host_busy"):
+                    # A busy local slot (or a host over its request budget, S5a) is no attempt: the card stays due (no stamp) and costs
                     # no quota (L3), else unstamped busy cards sort first and starve the rest.
                     continue
                 store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
@@ -5671,6 +5688,7 @@ def tick(app, pass_budget_seconds: float = 20.0,
             checked += 1
     finally:
         _TICK_THREAD.active = False
+        ni_polite.set_dedupe(False)
         try:
             cursor.close()
         except Exception:
@@ -5828,7 +5846,7 @@ def _render_run(store: NIStore, item: dict, gateway_mod, secrets_store, schedule
     except NIError as exc:
         if exc.kind == "render_unavailable":
             store.mark_checked(item["id"], "render_unavailable")
-        elif exc.kind not in ("render_busy", "model_busy"):
+        elif exc.kind not in ("render_busy", "model_busy", "host_busy"):
             store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
         return {}
     return result if isinstance(result, dict) else {}
@@ -7896,6 +7914,18 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
     raise NIError("source_bad_type", str(stype))
 
 
+def _fetch_error(exc: Exception) -> NIError:
+    """A guarded fetch's refusal as the engine's error: a host over budget or paused is the
+    ``host_busy`` capacity status (S5a); everything else a ``fetch_failed`` with a host-free detail."""
+    assert isinstance(exc, Exception), "an exception"
+    kind = getattr(exc, "kind", None)
+    if kind == "host_busy":
+        return NIError("host_busy", "paused")
+    if kind in ("robots", "port_refused"):
+        return NIError("fetch_failed", "robots_disallowed" if kind == "robots" else "port_refused")
+    return NIError("fetch_failed", exc.__class__.__name__)
+
+
 def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
     """Guarded fetch for the §3 http_json source; parses by ``source.format``.
 
@@ -7915,15 +7945,17 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
     # E: refuse any redirect hop while a header or a key rides the request
     has_headers = bool(resolved_headers) or bool(source.get("secret_query"))
     fmt = source.get("format") or "json"
+    port = source.get("port")  # S5a: the one non-80/443 port a Library row declared (default: refused)
     if fmt == "json":
         try:
             return ni_fetch.fetch_parsed(
                 url, "json", headers=resolved_headers or None,
                 allow_redirects=not has_headers,  # E: refuse hop when carrying any header
+                port=port,
             )
         except netguard.FetchError as exc:
-            raise NIError("fetch_failed", exc.__class__.__name__) from None
-    return _fetch_http_textual(url, fmt, resolved_headers, has_headers)
+            raise _fetch_error(exc) from None
+    return _fetch_http_textual(url, fmt, resolved_headers, has_headers, port)
 
 
 def http_request_parts(source: dict, item_id: str, secrets_store) -> tuple[str, dict[str, str]]:
@@ -7979,7 +8011,7 @@ def set_contact_email(secrets_store, email: str) -> str:
 
 
 def _fetch_http_textual(url: str, fmt: str, resolved_headers: dict[str, str],
-                        has_headers: bool) -> dict:
+                        has_headers: bool, port: int | None = None) -> dict:
     """Non-JSON textual formats through the shared ``ni_fetch`` path → walker-shaped dict.
 
     Same redirect discipline (headers ⇒ no redirects, mirroring the JSON path). A parse failure
@@ -7992,15 +8024,24 @@ def _fetch_http_textual(url: str, fmt: str, resolved_headers: dict[str, str],
     assert isinstance(fmt, str) and fmt != "json", "fmt must be a non-json textual format"
     try:
         return ni_fetch.fetch_parsed(url, fmt, headers=resolved_headers or None,
-                                     allow_redirects=not has_headers)
+                                     allow_redirects=not has_headers, port=port)
     except ni_fetch.ParseError as exc:
         raise NIError("fetch_failed", exc.kind) from None
     except ni_fetch.netguard.FetchError as exc:
-        raise NIError("fetch_failed", exc.__class__.__name__) from None
+        raise _fetch_error(exc) from None
 
 
 def _fetch_http_page(source: dict, item_id: str, secrets_store, *,
                      full: bool = False) -> dict:
+    """S5a: ``_fetch_http_page_polite`` inside the shared politeness (budget, robots.txt, ports)."""
+    from . import ni_polite  # lazy: keep the fetch layer off ni's import graph edges
+
+    with ni_polite.engaged():
+        return _fetch_http_page_polite(source, item_id, secrets_store, full=full)
+
+
+def _fetch_http_page_polite(source: dict, item_id: str, secrets_store, *,
+                            full: bool = False) -> dict:
     """§15 http_page: netguard-guarded HTML fetch + §16 subprocess-jailed extraction.
 
     Inherits the http_json credential-exfiltration guard verbatim: when ANY header
@@ -8039,7 +8080,7 @@ def _fetch_http_page(source: dict, item_id: str, secrets_store, *,
             deadline_seconds=_PAGE_FETCH_DEADLINE_S,
         )
     except netguard.FetchError as exc:
-        raise NIError("fetch_failed", exc.__class__.__name__) from None
+        raise _fetch_error(exc) from None
     body = got.get("content") if isinstance(got, dict) else None
     if not isinstance(body, (bytes, bytearray)):
         raise NIError("fetch_failed", "no bytes")
@@ -8131,8 +8172,16 @@ def _write_render_notes(store: NIStore, item_id: str, got: object) -> None:
         log.warning("ni render notes skipped: item=%s", item_id)
 
 
-def _fetch_http_image(source: dict, item_id: str,
-                       secrets_store) -> tuple[dict, dict]:
+def _fetch_http_image(source: dict, item_id: str, secrets_store) -> tuple[dict, dict]:
+    """S5a: ``_fetch_http_image_polite`` inside the shared politeness (budget, pause, ports)."""
+    from . import ni_polite  # lazy: keep the fetch layer off ni's import graph edges
+
+    with ni_polite.engaged():
+        return _fetch_http_image_polite(source, item_id, secrets_store)
+
+
+def _fetch_http_image_polite(source: dict, item_id: str,
+                             secrets_store) -> tuple[dict, dict]:
     """§24 http_image: netguard-guarded raster fetch + magic-byte sniff allowlist.
 
     Inherits the http_json credential-exfiltration guard verbatim: when ANY header
@@ -8172,7 +8221,7 @@ def _fetch_http_image(source: dict, item_id: str,
             deadline_seconds=_IMAGE_FETCH_DEADLINE_S,
         )
     except netguard.FetchError as exc:
-        raise NIError("fetch_failed", exc.__class__.__name__) from None
+        raise _fetch_error(exc) from None
     body = got.get("content") if isinstance(got, dict) else None
     if not isinstance(body, (bytes, bytearray)):
         raise NIError("fetch_failed", "no bytes")
