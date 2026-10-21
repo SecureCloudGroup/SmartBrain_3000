@@ -1062,16 +1062,7 @@ def retry_flow(request: Request, item_id: str) -> dict:
     # Claims audit 2026-09-21: clear-then-spawn CRASHED the worker ("no flow
     # record") — Retry never worked; the mocked route test was the mask.
     # RE-SEED the record with the sealed request instead of clearing it.
-    fresh = ni_flow._make_record(
-        request_text, "intent",
-        source_url=source_url if keep_url else None,
-        notes=["retrying the build with the same request"])
-    for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
-        if record.get(key) is not None:
-            fresh[key] = record[key]
-    ni_flow._flow_write(store, item_id, fresh)
-    started = ni_flow.start_flow_worker(
-        store, item_id, source_url=source_url if keep_url else None)
+    started = ni_flow.reseed_for_retry(store, item_id, record, request_text, keep_url)
     request.app.state.audit.append(
         "user", "ni_intake_retry", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),
@@ -1117,39 +1108,23 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
         ni._validate_http_json_url_shape(url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"url: {exc}") from None
-    if ni_flow.link_row_for(record, url) is not None:
-        if not body.pasted:
-            raise HTTPException(
-                status_code=409,
-                detail="that page is offered as a link — SmartBrain can't keep a live card from it "
-                       "yet; open it, or paste a link to the data")
-        ni_flow.mark_pasted(store, item_id, url)
-    # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
-    # named a non-JSON format) seals ``_format`` on the flow record so sampling +
-    # every subsequent refresh parse the fetched body the same way — CSV / RSS /
-    # XML / text, not just JSON — plus the Library source it came from (its declared
-    # answers build the card). Both writes happen BEFORE the worker starts so
-    # the sampling fetcher sees the sealed format on first read.
-    lib_row = next((r for r in ni_flow._buildable(record.get("_ranked_library"))
-                    if r.get("url") == url), None)
-    if lib_row:
-        ni_flow.seal_library_pick(store, item_id, url, lib_row)
+    if ni_flow.link_row_for(record, url) is not None and not body.pasted:
+        raise HTTPException(
+            status_code=409,
+            detail="that page is offered as a link — SmartBrain can't keep a live card from it "
+                   "yet; open it, or paste a link to the data")
+
+    def _vote(lib_row: dict) -> None:
         try:
             source_id = str(lib_row.get("source_id") or "")
             library_index.LocalSources(store).record_yes(source_id)
             library_client.queue_vote(store, source_id)  # sent by the tick (R6: a Yes is a vote)
         except Exception as exc:  # the vote must never break the pick
             log.warning("ni: recording a Library yes failed: %s", type(exc).__name__)
-    # a source that takes the user's own key or contact email asks for it on the card
-    # BEFORE the first fetch; a same-host key the user already gave is reused
-    missing: list[str] = []
-    if lib_row and ni_flow.seal_access(store, item_id, url, lib_row) is not None:
-        missing = ni_flow.missing_access(store, item_id, getattr(request.app.state, "secret_store", None))
-    if missing:
-        ni_flow.pause_for_access(store, item_id, url, missing)
-        started = False
-    else:
-        started = ni_flow.start_flow_worker(store, item_id, source_url=url)
+
+    _lib_row, missing, started = ni_flow.apply_pick(
+        store, item_id, url, record, pasted=body.pasted,
+        secrets=getattr(request.app.state, "secret_store", None), on_library_row=_vote)
     request.app.state.audit.append(
         "user", "ni_flow_pick_source", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "url": url}),
@@ -1285,10 +1260,7 @@ def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         raise HTTPException(status_code=400,
                             detail="date must be written as YYYY-MM-DD")
-    ni_flow._transition(store, item_id, "intent",
-                         note=f"user supplied the date {value}",
-                         _supplied={"date": value}, _question=None)
-    started = ni_flow.start_flow_worker(store, item_id)
+    started = ni_flow.supply_date(store, item_id, value)
     request.app.state.audit.append(
         "user", "ni_flow_answer", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "kind": body.kind}),
@@ -1304,16 +1276,9 @@ def _answer_model_consent(request: Request, store, item_id: str, stamped: dict,
     local model the question offered."""
     model = str(stamped.get("model") or "")
     local = str(stamped.get("local") or "")
-    if value == "allow" and model:
-        fields: dict = {"_model_consent": model}
-    elif value == "local" and local:
-        fields = {"_use_local": True}
-    else:
+    started = ni_flow.answer_model_consent(store, item_id, stamped, value)
+    if started is None:
         raise HTTPException(status_code=400, detail="answer 'allow' or 'local'")
-    ni_flow._transition(store, item_id, "intent", _question=None, error=None,
-                         note=("user allowed " + model) if value == "allow"
-                         else "user chose the local model", **fields)
-    started = ni_flow.start_flow_worker(store, item_id)
     request.app.state.audit.append(
         "user", "ni_flow_answer", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "kind": "model_consent",

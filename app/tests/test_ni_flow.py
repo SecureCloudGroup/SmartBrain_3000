@@ -3089,3 +3089,20 @@ def test_board_keeps_terminal_slot_that_carries_a_question() -> None:
     field = ni_flow.board_flow_field(store, item_id)
     assert field is not None and field["question"]["kind"] == "model_consent"
     assert ni_flow._flow_read(store, item_id) is not None, "slot must survive the read"
+
+
+def test_routes_never_write_flow_state():
+    """P34: flow-slot writes live in ni_flow only (routes, chat tools and MCP call its public
+    functions). ``clear_flow_slot`` is the allowed public helper."""
+    import ast
+
+    banned = {"_flow_write", "_make_record", "_transition"}
+    root = Path(ni_flow.__file__).parent
+    for name in ("ni_routes.py", "tools.py", "ni_mcp.py"):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        hits = sorted({n.attr if isinstance(n, ast.Attribute) else n.id
+                       for n in ast.walk(tree)
+                       if (isinstance(n, ast.Attribute) and n.attr in banned)
+                       or (isinstance(n, ast.Name) and n.id in banned)})
+        assert hits == [], f"{name} writes flow state directly via {hits}"
+    assert callable(ni_flow.clear_flow_slot), "the allowed helper stays public"

@@ -6820,11 +6820,100 @@ def begin_remap(store: ni.NIStore, item: dict) -> bool:
         raise ValueError(
             "this card is busy building — wait for it to settle, then fix")
     request = str(item["spec"].get("goal") or item["spec"].get("title") or "remap")
+    return start_remap(store, item["id"], request, url)
+
+
+def start_remap(store: ni.NIStore, item_id: str, request: str, url: str) -> bool:
+    """Seed the ``_remap`` flow record at sampling and spawn the worker (no guards:
+    callers check the source). The one writer behind the Fix button and the chat tool."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(request, str) and isinstance(url, str), "request + url"
     record = _make_record(request, "sampling", source_url=url,
                            notes=["remap re-entering flow at sampling"])
     record["_remap"] = True
-    _flow_write(store, item["id"], record)
-    return start_flow_worker(store, item["id"], source_url=url)
+    _flow_write(store, item_id, record)
+    return start_flow_worker(store, item_id, source_url=url)
+
+
+def reseed_for_retry(store: ni.NIStore, item_id: str, record: dict,
+                     request_text: str, keep_url: bool) -> bool:
+    """Retry: RE-SEED the flow slot with the sealed request (clear-then-spawn crashed
+    the worker), carry the card's own answers, and spawn the worker. Returns started."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(record, dict) and request_text, "record + request required"
+    source_url = record.get("source_url")
+    fresh = _make_record(
+        request_text, "intent",
+        source_url=source_url if keep_url else None,
+        notes=["retrying the build with the same request"])
+    for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
+        if record.get(key) is not None:
+            fresh[key] = record[key]
+    _flow_write(store, item_id, fresh)
+    return start_flow_worker(
+        store, item_id, source_url=source_url if keep_url else None)
+
+
+def supply_date(store: ni.NIStore, item_id: str, value: str) -> bool:
+    """The user's typed date is the truth: stamp ``_supplied`` and re-run the sealed request."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(value, str) and value, "date required"
+    _transition(store, item_id, "intent",
+                note=f"user supplied the date {value}",
+                _supplied={"date": value}, _question=None)
+    return start_flow_worker(store, item_id)
+
+
+def answer_model_consent(store: ni.NIStore, item_id: str, stamped: dict,
+                         value: str) -> bool | None:
+    """Ruling 2: "allow" seals consent for the named non-local model on this card; "local"
+    uses the local model the question offered. None when the answer does not fit the
+    question (nothing written); else whether the worker started."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(stamped, dict), "stamped question required"
+    model = str(stamped.get("model") or "")
+    local = str(stamped.get("local") or "")
+    if value == "allow" and model:
+        fields: dict = {"_model_consent": model}
+    elif value == "local" and local:
+        fields = {"_use_local": True}
+    else:
+        return None
+    _transition(store, item_id, "intent", _question=None, error=None,
+                note=("user allowed " + model) if value == "allow"
+                else "user chose the local model", **fields)
+    return start_flow_worker(store, item_id)
+
+
+def apply_pick(store: ni.NIStore, item_id: str, url: str, record: dict, *,
+               pasted: bool, secrets, on_library_row: Callable[[dict], None] | None = None
+               ) -> tuple[dict | None, list[str], bool]:
+    """Resume a source-pick pause with ``url``: mark a pasted link, seal a tapped Library
+    row (``on_library_row`` runs right after, for the vote), ask for missing access, or
+    start the worker. Returns ``(library_row, missing, started)``."""
+    assert store is not None and item_id and url, "store + id + url required"
+    assert isinstance(record, dict), "record required"
+    if pasted and link_row_for(record, url) is not None:
+        mark_pasted(store, item_id, url)
+    # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
+    # named a non-JSON format) seals ``_format`` on the flow record so sampling +
+    # every subsequent refresh parse the fetched body the same way. Both writes happen
+    # BEFORE the worker starts so the sampling fetcher sees the sealed format on first read.
+    lib_row = next((r for r in _buildable(record.get("_ranked_library"))
+                    if r.get("url") == url), None)
+    if lib_row:
+        seal_library_pick(store, item_id, url, lib_row)
+        if on_library_row is not None:
+            on_library_row(lib_row)
+    # a source that takes the user's own key or contact email asks for it on the card
+    # BEFORE the first fetch; a same-host key the user already gave is reused
+    missing: list[str] = []
+    if lib_row and seal_access(store, item_id, url, lib_row) is not None:
+        missing = missing_access(store, item_id, secrets)
+    if missing:
+        pause_for_access(store, item_id, url, missing)
+        return lib_row, missing, False
+    return lib_row, missing, start_flow_worker(store, item_id, source_url=url)
 
 
 def _repick_without(store: ni.NIStore, item_id: str, url: str,

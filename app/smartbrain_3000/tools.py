@@ -2300,11 +2300,7 @@ def _remap_ni_item(ctx: ToolContext, args: dict) -> dict:
             "fills it on the card first"
         )
     request = str(item["spec"].get("goal") or item["spec"].get("title") or "remap")
-    record = ni_flow._make_record(request, "sampling", source_url=url,
-                                    notes=["remap re-entering flow at sampling"])
-    record["_remap"] = True
-    ni_flow._flow_write(ctx.ni, item_id, record)
-    started = ni_flow.start_flow_worker(ctx.ni, item_id, source_url=url)
+    started = ni_flow.start_remap(ctx.ni, item_id, request, url)
     return _flow_tool_result(ctx.ni, item_id, started=bool(started),
                               fallback_url=url)
 
