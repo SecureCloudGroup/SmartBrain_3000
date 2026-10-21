@@ -6807,6 +6807,45 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     if _is_v2(store):  # v1 output stays byte-identical
         out["actions"] = ni_master.actions_for(
             state, record, shell=shell, awaiting_yes=False, item_state="", has_payload=False)
+        progress = build_progress(record)
+        if progress is not None:
+            out["progress"] = progress
+    return out
+
+
+# v2 build progress: four steps, from the flow state alone (a pure read; the board never writes it)
+PROGRESS_OF = 4
+_PROGRESS_STAGES: dict[str, tuple[int, str]] = {
+    "intent": (1, "Understanding your ask"),
+    "source": (2, "Finding a source"),
+    "awaiting_access": (2, "Waiting for your key or email"),
+    "sampling": (3, "Reading a sample"),
+    "mapping": (4, "Checking it answers your ask"),
+    "assembling": (4, "Building the card"),
+    "awaiting_credential": (4, "Waiting for your key"),
+    "awaiting_params": (4, "Waiting for a value"),
+}
+
+
+def build_progress(record: dict) -> dict | None:
+    """``{step, of, label}`` for a non-terminal flow record (+ ``gate`` when it waits on the user, + ``try``
+    ``{n, of, host}`` while the v2 auto-pick works through Library sources); None for ready / terminal.
+    Monotone in the state order, so a progress bar never moves back."""
+    assert isinstance(record, dict), "record required"
+    state = str(record.get("state") or "")
+    stage = _PROGRESS_STAGES.get(state)
+    if stage is None:
+        return None
+    out: dict = {"step": stage[0], "of": PROGRESS_OF, "label": stage[1]}
+    if state.startswith("awaiting_"):
+        out["gate"] = state.removeprefix("awaiting_")
+    elif state == "source" and record.get("error") == AWAITING_SOURCE_PICK:
+        out.update(label="Stopped: no source to build from", gate="links")
+    tried = record.get("_try")
+    if isinstance(tried, dict) and isinstance(tried.get("n"), int) and isinstance(tried.get("of"), int) \
+            and 2 <= stage[0] <= 4 and out.get("gate") != "links":
+        out["try"] = {"n": tried["n"], "of": tried["of"], "host": str(tried.get("host") or "")[:120]}
+    assert 1 <= out["step"] <= PROGRESS_OF, "a step on the bar"
     return out
 
 
