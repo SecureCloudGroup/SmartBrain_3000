@@ -88,6 +88,21 @@ ask scores `error`. `pytest tests/test_ni_eval_replay.py` runs the committed `ci
 built by hand from `fixtures/ni_flow`, no model) through the real `run_flow` in seconds.
 Library-mode cassettes also need `--pack-dir` at replay (the pack is not recorded).
 
+### Researcher (S4c)
+
+`--research cloud|local|off` (record and replay, v2 only) sets the researcher tier for the run through
+`SMARTBRAIN_NI_RESEARCH` and puts its model turns in the cassette (`research`: the raw responses with usage).
+`cloud` uses `--research-model` (default `anthropic/claude-sonnet-5-5`) with the operator's consent, the
+flow itself staying on `--model`; `local` is the closed-world mode on `--model`; `off` is no researcher. A
+gold entry with `harness: {"mode": "research", "library_rows": [...]}` drives `run_flow` over a fixed Library
+(`CI6` is one, built by hand: four scripted tool turns). The summary line prints median seconds, model calls,
+tokens, cache reads and cost per ask. Measure S4c on the gold with, for example:
+
+```
+python3 tools/ni-eval.py record --flow v2 --research cloud --research-model anthropic/claude-sonnet-5-5 \
+  --model mlx/Qwen3.5-9B-MLX-4bit --pack-dir <dir holding library/> --cassette-dir <dir> --out <file.json>
+```
+
 ## Gating a phase
 
 A phase PR attaches the replay table next to the committed baseline for the same gold subset.

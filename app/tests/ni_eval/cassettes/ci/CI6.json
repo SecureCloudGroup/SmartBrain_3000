@@ -1,0 +1,169 @@
+{
+ "ask_id": "CI6",
+ "fetches": [
+  {
+   "key": "safe_fetch_json https://data.example.org/quakes.json",
+   "ok": true,
+   "value": {
+    "features": [
+     {
+      "properties": {
+       "mag": 4.6,
+       "place": "10 km S of Hualien, Taiwan"
+      }
+     },
+     {
+      "properties": {
+       "mag": 2.1,
+       "place": "5 km NW of Ridgecrest, CA"
+      }
+     }
+    ],
+    "metadata": {
+     "title": "Earthquakes, past day"
+    }
+   }
+  }
+ ],
+ "meta": {
+  "built_by_hand": "research ask: Library row declares no answers; four scripted tool turns",
+  "model": "scripted",
+  "research": "cloud"
+ },
+ "model": [
+  {
+   "reply": "{\"kind\": \"external_data\", \"subject\": \"earthquakes\", \"cadence_minutes\": 60, \"wants\": [\"magnitude\", \"place\"], \"threshold\": null, \"display_hint\": \"value\"}",
+   "sha": null
+  }
+ ],
+ "research": [
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"query\": \"earthquakes\"}",
+          "name": "library_search"
+         },
+         "id": "c0",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 4200,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 0,
+      "cached_write_tokens": 3900
+     }
+    }
+   },
+   "sha": null
+  },
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"url\": \"https://data.example.org/quakes.json\"}",
+          "name": "fetch_sample"
+         },
+         "id": "c1",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 8100,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 3900,
+      "cached_write_tokens": 200
+     }
+    }
+   },
+   "sha": null
+  },
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"draft_spec\": {\"version\": 1, \"title\": \"Latest earthquakes\", \"goal\": \"latest earthquakes\", \"params\": {}, \"source\": {\"type\": \"http_json\", \"url\": \"https://data.example.org/quakes.json\"}, \"pipeline\": [{\"op\": \"extract\", \"paths\": {\"headline\": \"metadata.title\", \"newest\": \"features[0].properties.place\", \"size\": \"features[0].properties.mag\"}}], \"scene\": {\"type\": \"stack\", \"dir\": \"v\", \"gap\": \"sm\", \"children\": [{\"type\": \"text\", \"value\": \"{{headline}}\", \"role\": \"title\", \"tone\": \"default\", \"size\": \"md\"}, {\"type\": \"text\", \"value\": \"{{newest}}\", \"role\": \"value\", \"tone\": \"default\", \"size\": \"md\"}, {\"type\": \"number\", \"value\": {\"$bind\": \"size\"}, \"format\": \"plain\", \"unit\": \"magnitude\", \"tone\": \"default\", \"size\": \"lg\"}]}, \"display\": {\"size\": \"small\"}, \"model\": null}}",
+          "name": "try_recipe"
+         },
+         "id": "c2",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 8300,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 4100,
+      "cached_write_tokens": 600
+     }
+    }
+   },
+   "sha": null
+  },
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"draft_spec\": {\"version\": 1, \"title\": \"Latest earthquakes\", \"goal\": \"latest earthquakes\", \"params\": {}, \"source\": {\"type\": \"http_json\", \"url\": \"https://data.example.org/quakes.json\"}, \"pipeline\": [{\"op\": \"extract\", \"paths\": {\"headline\": \"metadata.title\", \"newest\": \"features[0].properties.place\", \"size\": \"features[0].properties.mag\"}}], \"scene\": {\"type\": \"stack\", \"dir\": \"v\", \"gap\": \"sm\", \"children\": [{\"type\": \"text\", \"value\": \"{{headline}}\", \"role\": \"title\", \"tone\": \"default\", \"size\": \"md\"}, {\"type\": \"text\", \"value\": \"{{newest}}\", \"role\": \"value\", \"tone\": \"default\", \"size\": \"md\"}, {\"type\": \"number\", \"value\": {\"$bind\": \"size\"}, \"format\": \"plain\", \"unit\": \"magnitude\", \"tone\": \"default\", \"size\": \"lg\"}]}, \"display\": {\"size\": \"small\"}, \"model\": null}}",
+          "name": "propose_card"
+         },
+         "id": "c3",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 8900,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 4700,
+      "cached_write_tokens": 300
+     }
+    }
+   },
+   "sha": null
+  }
+ ]
+}

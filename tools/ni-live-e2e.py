@@ -199,7 +199,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
             found = store.read_snapshot(item_id, "preview")
             origin = built["spec"].get("_built_from") or {}
             out["reading"] = _texts(found["payload"] if found else None)
-            out["from"] = {"kind": {"page": "web page", "auto": "library"}.get(origin.get("path"), "dataset"),
+            out["from"] = {"kind": {"page": "web page", "auto": "library", "research": "library"}.get(origin.get("path"), "dataset"),
                            "host": origin.get("host") or "", "title": origin.get("title") or ""}
         run = _eval._engine_first_run(store, conn, item_id, llm, model, ni, key)
         out["outcome"] = "awaiting-yes" if out.get("from") else "live" if run == "ok" else "built-no-run"

@@ -14,6 +14,11 @@ safe_fetch / safe_fetch_feed / safe_post_json``, patched for the span of one ask
 are never recorded and secret-looking query parameters are redacted from the cassette key.
 Classes per ask: right / partial / wrong / links / declined / waiting / error (see ``score_ask``).
 ``--flow v1|v2`` on record and replay sets the ``ni_flow`` flag (env ``SMARTBRAIN_NI_FLOW``) for the run.
+``--research cloud|local|off`` (S4c, v2 only) sets the researcher tier for the run (env ``SMARTBRAIN_NI_RESEARCH``)
+and routes its model turns through the cassette like every other model reply: ``cloud`` uses ``--research-model``
+(default anthropic/claude-sonnet-5-5) with the eval operator's consent, ``local`` the closed-world mode on
+``--model``, ``off`` no researcher. Each ask's cassette gains a ``research`` list (the raw model responses, usage
+included) and the run a ``research`` block (calls, tokens, cache reads, cost) the summary prints.
 """
 from __future__ import annotations
 
@@ -261,8 +266,10 @@ class Session:
         assert ask_id, "ask id required"
         self.ask_id, self.recording = ask_id, recording
         self.data = data or {"ask_id": ask_id, "meta": {}, "fetches": [], "model": []}
+        self.data.setdefault("research", [])
         self._fetch_seen: dict[str, int] = {}
         self._model_i = 0
+        self._research_i = 0
         self.drift = 0
         self.unrecorded = 0
 
@@ -281,6 +288,42 @@ class Session:
         if rec.get("sha") and rec["sha"] != _sha(prompt):
             self.drift += 1  # the prompt changed since recording: served anyway, reported
         return str(rec["reply"])
+
+    def research_turn(self, model: str, messages: list, tools: list | None, real: Callable | None = None) -> dict:
+        """One researcher model turn: record the live response (usage included) or serve the next recorded one.
+        A changed prompt (the hash of the messages) is counted as drift and served anyway, like ``model_call``."""
+        assert isinstance(messages, list) and model, "messages + model required"
+        sha = _sha(json.dumps(messages, sort_keys=True, default=str))
+        if self.recording:
+            assert real is not None, "recording needs the real model"
+            reply = real(model, messages, tools)
+            self.data["research"].append({"sha": sha, "model": model, "reply": reply})
+            return reply
+        if self._research_i >= len(self.data["research"]):
+            raise CassetteMiss(f"{self.ask_id}: research turn #{self._research_i + 1} not in the cassette")
+        rec = self.data["research"][self._research_i]
+        self._research_i += 1
+        if rec.get("sha") and rec["sha"] != sha:
+            self.drift += 1
+        return json.loads(json.dumps(rec["reply"]))
+
+    def research_stats(self) -> dict:
+        """Calls and tokens the researcher used on this ask, from the recorded responses' ``usage`` blocks."""
+        from smartbrain_3000 import usage
+        stats = {"calls": 0, "prompt": 0, "completion": 0, "cache_read": 0, "cache_write": 0, "cost_usd": 0.0}
+        turns = self.data.get("research") or []
+        for turn in turns if self.recording else turns[: self._research_i]:  # replay counts what was served
+            body = (turn.get("reply") or {}).get("usage")
+            stats["calls"] += 1
+            if not isinstance(body, dict):
+                continue
+            created, read = usage.cache_tokens(body)
+            stats["prompt"] += usage.prompt_total(body)
+            stats["completion"] += int(body.get("completion_tokens") or 0)
+            stats["cache_read"] += read
+            stats["cache_write"] += created
+            stats["cost_usd"] += float(body.get("cost_usd") or 0.0)
+        return stats
 
     def fetch(self, fn: str, url: str, real: Callable | None, payload: object = None, **kw) -> object:
         """Record the live response (or failure), or replay it by key; repeats get the last one."""
@@ -422,8 +465,109 @@ def drive_url(ask: str, source_url: str | None, call: Callable[[str, str], str])
     return out
 
 
+RESEARCH_MODES = ("cloud", "local", "off")
+DEFAULT_CLOUD_MODEL = "anthropic/claude-sonnet-5-5"
+LOCAL_STAND_IN = "mlx/eval-local"
+
+
+class StaticLibrary:
+    """A Library of fixed candidate rows (the CI research ask): no declared answers, so every row is a link row
+    the auto-pick cannot build and the researcher is the only way to a card."""
+
+    def __init__(self, rows: list[dict]) -> None:
+        assert isinstance(rows, list), "rows required"
+        self.rows = rows
+
+    def candidates(self, ask: str, limit: int = 3, hint: dict | None = None):
+        assert isinstance(ask, str), "ask required"
+        return [dict(r) for r in self.rows[:limit]], []
+
+    def answers(self, source_id: str) -> list:
+        assert isinstance(source_id, str), "id required"
+        return []
+
+    def get(self, source_id: str) -> dict | None:
+        assert isinstance(source_id, str), "id required"
+        return None
+
+
+@contextlib.contextmanager
+def _env(values: dict[str, str]) -> Iterator[None]:
+    """Set environment variables for one ask, then restore them exactly."""
+    assert isinstance(values, dict), "values required"
+    saved = {k: os.environ.get(k) for k in values}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for key, old in saved.items():
+            if old is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old
+
+
+@contextlib.contextmanager
+def research_seam(session: Session, mode: str, *, local_model: str, cloud_model: str,
+                  real_chat: Callable | None = None) -> Iterator[None]:
+    """Route the researcher's model turns through ``session`` for one ask. ``cloud`` stands for the operator's
+    consent (the eval runs no UI to tap it); ``local`` offers no cloud route at all."""
+    from smartbrain_3000 import ni_research_flow
+    assert mode in RESEARCH_MODES, "a known research mode"
+    if mode == "off":
+        yield
+        return
+    ni_research_flow.set_research_chat(
+        lambda model, messages, tools: session.research_turn(model, messages, tools, real_chat),
+        cloud=cloud_model if mode == "cloud" else None, local=local_model, consented=mode == "cloud")
+    try:
+        yield
+    finally:
+        ni_research_flow.set_research_chat(None)
+
+
+def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) -> dict:
+    """The v2 flow on a fresh in-memory store with a fixed Library: what a research ask does end to end."""
+    import duckdb
+
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import ni, ni_flow
+    from smartbrain_3000.secrets import gen_master_key
+    assert ask and rows, "ask + library rows required"
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    store = ni.NIStore(conn, gen_master_key())
+    out: dict = {"ask": ask, "outcome": "", "source": "", "detail": "", "preview": None, "tapped": [],
+                 "links": [], "notes": [], "scene_text": []}
+    ni_flow.set_library_provider(lambda: StaticLibrary(rows))
+    try:
+        with _env({"SMARTBRAIN_NI_FLOW": "v2"}):
+            item_id = ni_flow.create_shell_item(store, ask)
+            rec = ni_flow.run_flow(store, item_id, gateway_call=call, ni_route_model=LOCAL_STAND_IN)
+        state = str(rec.get("state") or "")
+        out["notes"] = [str(n) for n in rec.get("notes") or []]
+        out["detail"] = str(rec.get("error") or "")[:160]
+        out["outcome"] = {"ready": "live"}.get(state, state)
+        item = store.get_item(item_id)
+        if state == "ready":
+            snap = store.read_snapshot(item_id, "preview_data")
+            out["preview"] = snap["payload"] if snap else None
+            built = item["spec"].get("_built_from") or {}
+            out["source"] = item["spec"]["source"].get("url", "")
+            out["tapped"] = [{"title": built.get("title") or "", "url": out["source"], "label": "", "params": {}}]
+            if ni.awaits_yes(item):
+                out["outcome"] = "awaiting-yes"
+                out["from"] = {"kind": "library", "host": built.get("host") or "", "title": built.get("title") or ""}
+    except Exception as exc:
+        out["outcome"], out["detail"] = "crash", f"{type(exc).__name__}: {str(exc)[:160]}"
+    finally:
+        ni_flow.set_library_provider(None)
+    return out
+
+
 def run_entry(entry: dict, session: Session, *, llm: Callable[[str], str] | None = None,
-              model: str = "", pack_dir: pathlib.Path | None = None) -> dict:
+              model: str = "", pack_dir: pathlib.Path | None = None, research: str | None = None,
+              research_model: str = DEFAULT_CLOUD_MODEL, real_chat: Callable | None = None) -> dict:
     """Run one gold entry under ``session`` (record if ``llm`` is the live model, else replay).
 
     ``harness.mode == "url"`` drives ``run_flow`` with a given source (no Library); anything else
@@ -436,14 +580,24 @@ def run_entry(entry: dict, session: Session, *, llm: Callable[[str], str] | None
     def call(_model: str, prompt: str) -> str:
         return session.model_call(prompt, llm)
 
-    with patched_netguard(session):
+    mode = research or harness.get("research")
+    assert mode in (None, *RESEARCH_MODES), "research is cloud, local or off"
+    env = {"SMARTBRAIN_NI_RESEARCH": mode} if mode else {}
+    local_model = model if model and "/" in model else LOCAL_STAND_IN
+    with patched_netguard(session), _env(env), research_seam(session, mode or "off", local_model=local_model,
+                                                             cloud_model=research_model, real_chat=real_chat):
         if harness.get("mode") == "url":
             run = drive_url(entry["ask"], harness.get("source_url"), call)
+        elif harness.get("mode") == "research":
+            run = drive_research(entry["ask"], harness["library_rows"], call)
         else:
             assert pack_dir is not None, "library-mode asks need --pack-dir"
             e2e = _load_tool("ni_live_e2e", "ni-live-e2e.py")
             run = e2e.run_one(entry["ask"], e2e._pack(pack_dir), lambda p, _n: call(model, p), model)
     run.update({"id": entry["id"], "cassette_drift": session.drift, "secs": round(time.time() - started, 1)})
+    stats = session.research_stats()
+    if stats["calls"]:
+        run["research"] = stats
     return run
 
 
@@ -454,14 +608,16 @@ def load_gold(path: pathlib.Path = GOLD_PATH) -> list[dict]:
     return data
 
 
-def replay_all(gold: list[dict], cassette_dir: pathlib.Path, pack_dir: pathlib.Path | None = None) -> list[dict]:
+def replay_all(gold: list[dict], cassette_dir: pathlib.Path, pack_dir: pathlib.Path | None = None,
+               research: str | None = None, research_model: str = DEFAULT_CLOUD_MODEL, model: str = "") -> list[dict]:
     """Replay every gold entry that has a cassette; others are skipped (not errors)."""
     assert isinstance(gold, list), "gold list required"
     runs = []
     for entry in gold:
         if not (pathlib.Path(cassette_dir) / f"{entry['id']}.json").is_file():
             continue
-        runs.append(run_entry(entry, load_session(cassette_dir, entry["id"]), pack_dir=pack_dir))
+        runs.append(run_entry(entry, load_session(cassette_dir, entry["id"]), pack_dir=pack_dir, research=research,
+                              research_model=research_model, model=model))
     return runs
 
 
@@ -615,17 +771,45 @@ def _set_flow(args: argparse.Namespace) -> None:
         os.environ["SMARTBRAIN_NI_FLOW"] = flow
 
 
+def bifrost_chat(bifrost: str, timeout: float = 300.0) -> Callable[[str, list, list | None], dict]:
+    """The real researcher transport: the gateway's own wire form (cache markers on anthropic routes, sorted
+    tool keys) posted to bifrost's /v1/chat/completions; returns the parsed response with its usage block."""
+    import urllib.request
+
+    from smartbrain_3000 import gateway
+    assert bifrost and isinstance(bifrost, str), "bifrost URL required"
+    endpoint = bifrost.rstrip("/") + "/v1/chat/completions"
+
+    def _call(model: str, messages: list, tools: list | None) -> dict:
+        assert model and messages, "model + messages required"
+        payload: dict = {"model": model, "messages": gateway._wire_messages(messages, model)}
+        if tools:
+            payload.update(tools=gateway._wire_tools(tools, model), tool_choice="auto", max_tokens=4096)
+        else:
+            payload.update(temperature=0, max_tokens=2048)
+        req = urllib.request.Request(endpoint, data=json.dumps(payload).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.load(resp)
+
+    return _call
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     """LIVE: real model through the bifrost gateway, real network. Saves cassette + results."""
     _set_flow(args)
     ev = _load_tool("ni_flow_eval", "ni-flow-eval.py")
     llm = ev._bifrost_llm(args.bifrost, args.model)
+    chat = bifrost_chat(args.bifrost) if getattr(args, "research", None) in ("cloud", "local") else None
     gold, runs = load_gold(args.gold), []
     for entry in _select(gold, args):
         sess = Session(entry["id"], recording=True)
-        sess.data["meta"] = {"model": args.model, "ask": entry["ask"],
+        sess.data["meta"] = {"model": args.model, "ask": entry["ask"], "research": getattr(args, "research", None),
+                             "research_model": getattr(args, "research_model", None),
                              "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-        run = run_entry(entry, sess, llm=lambda p: llm(p, 600), model=args.model, pack_dir=args.pack_dir)
+        run = run_entry(entry, sess, llm=lambda p: llm(p, 600), model=args.model, pack_dir=args.pack_dir,
+                        research=getattr(args, "research", None), real_chat=chat,
+                        research_model=getattr(args, "research_model", None) or DEFAULT_CLOUD_MODEL)
         save_session(args.cassette_dir, sess)
         runs.append(run)
         print(f"[{run['outcome']:>12}] {entry['id']:<5} {entry['ask'][:50]}", flush=True)
@@ -635,16 +819,37 @@ def cmd_record(args: argparse.Namespace) -> int:
 def cmd_replay(args: argparse.Namespace) -> int:
     _set_flow(args)
     gold = _select(load_gold(args.gold), args)
-    return _finish(args, gold, replay_all(gold, args.cassette_dir, args.pack_dir))
+    runs = replay_all(gold, args.cassette_dir, args.pack_dir, research=getattr(args, "research", None),
+                      research_model=getattr(args, "research_model", None) or DEFAULT_CLOUD_MODEL)
+    return _finish(args, gold, runs)
 
 
 def _finish(args: argparse.Namespace, gold: list[dict], runs: list[dict]) -> int:
     assert isinstance(runs, list), "runs required"
     scored, table = score_all(gold, runs)
     print(format_table(table))
+    summary = research_summary(runs)
+    if summary:
+        print(summary)
     if args.out:
         args.out.write_text(json.dumps({"runs": runs, "scored": scored, "table": table}, indent=1, default=str))
     return 0
+
+
+def research_summary(runs: list[dict]) -> str:
+    """One line on what the researcher cost: asks that used it, median seconds per ask, tokens and cache reads,
+    cost when the responses carried one. "" when no run used the researcher."""
+    assert isinstance(runs, list), "runs required"
+    used = [r for r in runs if r.get("research")]
+    if not used:
+        return ""
+    secs = sorted(float(r.get("secs") or 0.0) for r in used)
+    total = {k: sum(r["research"][k] for r in used) for k in ("calls", "prompt", "completion", "cache_read", "cache_write", "cost_usd")}
+    n = len(used)
+    reads = total["cache_read"] / total["prompt"] if total["prompt"] else 0.0
+    return (f"research: {n} asks, median {secs[n // 2]:.1f}s, {total['calls'] / n:.1f} model calls/ask, "
+            f"prompt {total['prompt'] / n:.0f} (cache read {reads:.0%}, write {total['cache_write'] / n:.0f}) "
+            f"+ completion {total['completion'] / n:.0f} tokens/ask, cost ${total['cost_usd'] / n:.4f}/ask")
 
 
 def cmd_score(args: argparse.Namespace) -> int:
@@ -682,6 +887,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--set", default="", help="comma list of set letters, e.g. A,B")
             p.add_argument("--only", default="")
             p.add_argument("--flow", choices=("v1", "v2"), help="set the ni_flow flag for this run")
+            p.add_argument("--research", choices=RESEARCH_MODES,
+                           help="v2 researcher tier: cloud (consented), local (closed-world) or off")
+            p.add_argument("--research-model", default=None, help=f"cloud route (default {DEFAULT_CLOUD_MODEL})")
         if name == "record":
             p.add_argument("--model", default="mlx/Qwen3.5-9B-MLX-4bit")
             p.add_argument("--bifrost", default="http://127.0.0.1:38080")
