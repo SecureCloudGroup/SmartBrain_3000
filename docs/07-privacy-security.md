@@ -117,7 +117,12 @@ not. Being precise about the line matters more than claiming everything:
   card watching a page fetches that page; a card watching an image fetches that
   image; cards built on your schedules, your knowledge, or other cards fetch nothing
   at all. A card with a credential sends it only to the host it was entered for,
-  only over HTTPS, and never follows a redirect while carrying it.
+  only over HTTPS, and never follows a redirect while carrying it. Cards read only
+  ports 80 and 443. While a card is being built, the only other port it may use is one
+  the SmartBrain Library lists for that source. Once you keep a card, the port in the
+  address you kept is part of it. Hosts on your own network may use any port. A card
+  rests a site that is asked too often, waits as long as a site asks with "slow down",
+  and page readers follow the site's robots.txt.
 - **The page browser (only for a page you pasted, and only when it needs one).** Some pages
   show their data only after their scripts run. For a page you pasted, or a page card you press
   Fix on, SmartBrain may open it once in its own local, locked-down page browser (Obscura,
