@@ -32,15 +32,29 @@ def record(conn, model: str, prompt_tokens: int, completion_tokens: int,
     )
 
 
+def _count(val: object) -> int:
+    """A positive int token count, else 0 (bools and other types are not counts)."""
+    return val if isinstance(val, int) and not isinstance(val, bool) and val > 0 else 0
+
+
 def cache_tokens(usage: object) -> tuple[int, int]:
-    """(cache_creation_input_tokens, cache_read_input_tokens) from a usage block; 0 when absent/invalid."""
+    """(cache write, cache read) token counts from a usage block; 0 when absent/invalid.
+
+    Two shapes reach us. Anthropic-native usage (claude CLI) has top-level
+    ``cache_creation_input_tokens`` / ``cache_read_input_tokens``. Bifrost's OpenAI-compatible
+    /v1/chat/completions moves Anthropic's cache counts into ``prompt_tokens_details``:
+    reads as ``cached_read_tokens`` (mirrored to OpenAI's ``cached_tokens``) and writes as
+    ``cached_write_tokens`` (mirrored to ``cache_write_tokens``), with the top-level keys absent.
+    Top-level keys win when present; otherwise the details block is read."""
     if not isinstance(usage, dict):
         return 0, 0
-    out = []
-    for key in ("cache_creation_input_tokens", "cache_read_input_tokens"):
-        val = usage.get(key)
-        out.append(val if isinstance(val, int) and not isinstance(val, bool) and val > 0 else 0)
-    return out[0], out[1]
+    created = _count(usage.get("cache_creation_input_tokens"))
+    read = _count(usage.get("cache_read_input_tokens"))
+    details = usage.get("prompt_tokens_details")
+    if isinstance(details, dict):
+        created = created or _count(details.get("cached_write_tokens")) or _count(details.get("cache_write_tokens"))
+        read = read or _count(details.get("cached_read_tokens")) or _count(details.get("cached_tokens"))
+    return created, read
 
 
 def prompt_total(usage: dict) -> int:
@@ -62,8 +76,8 @@ def record_response(conn, model: str, response: object, purpose: str | None = No
 
     A response without a ``usage`` block is ignored; any failure is swallowed
     (logged at debug) so usage logging can never fail a turn. Prompt-cache tokens
-    (``cache_creation_input_tokens`` / ``cache_read_input_tokens``) count toward the
-    prompt total. ``purpose`` is a caller label (e.g. "ni.fit") kept in the debug log:
+    (either usage shape, see ``cache_tokens``) count toward the prompt total.
+    ``purpose`` is a caller label (e.g. "ni.fit") kept in the debug log:
     usage_log has no purpose column, so rows aggregate by model in /api/usage.
     """
     if conn is None or not model or not isinstance(response, dict):

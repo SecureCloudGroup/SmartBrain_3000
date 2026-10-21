@@ -494,8 +494,11 @@ def _chunk_delta(chunk: dict) -> tuple[str, list | None, str | None]:
 # tools -> system -> messages, so mark the LAST STATIC system block (and optionally the
 # last tool result). An ``anthropic/...`` model gets ``cache_control: ephemeral`` on the
 # marked block; every other route is flattened to today's plain-string content, so its
-# payload is byte-identical to a caller that never used blocks. Whether Bifrost forwards
-# cache_control is verified manually by tools/gateway-cache-check.py.
+# payload is byte-identical to a caller that never used blocks. Bifrost (v1.6.4) forwards
+# block-level cache_control to Anthropic from /v1/chat/completions with no config flag, and
+# reports the cache counts in ``usage.prompt_tokens_details`` (cached_read_tokens /
+# cached_write_tokens), not Anthropic's top-level keys; ``usage.cache_tokens`` reads both.
+# Verified live by tools/gateway-cache-check.py.
 _CACHE_MARK = "cache"
 _CACHE_CONTROL = {"type": "ephemeral"}
 _MAX_CACHE_BREAKPOINTS = 4  # Anthropic's per-request limit; surplus (earliest) marks are dropped
