@@ -3,6 +3,8 @@ import {
   AWAITING_SOURCE_PICK,
   awaitingYesSource,
   flowStageLabel,
+  hasAction,
+  rowActions,
   isFlowActive,
   linkWhat,
   pickRows,
@@ -145,5 +147,46 @@ describe("pickRows (ruling 2026-10-05: Library cards; web as links)", () => {
     expect(linkWhat(dataset)).toBe("data.ny.gov · dataset");
     expect(linkWhat(page)).toBe("rivers.example.org · web page");
     expect(linkWhat({ ...page, host: " " })).toBe("web page");
+  });
+});
+
+describe("rowActions / hasAction", () => {
+  it("is null for a v1 row (no actions key) and hasAction is false", () => {
+    expect(rowActions({})).toBeNull();
+    expect(rowActions(null)).toBeNull();
+    expect(hasAction({ flow: { state: "failed" } as never }, "retry")).toBe(false);
+  });
+
+  it("reads the row's actions and ignores unknown kinds", () => {
+    const row = { actions: ["run", "from_the_future", "delete"] };
+    expect(rowActions(row)).toEqual(["run", "delete"]);
+    expect(hasAction(row, "run")).toBe(true);
+    expect(hasAction(row, "from_the_future")).toBe(false);
+  });
+
+  it("prefers the flow's own actions while a flow is present", () => {
+    const row = { actions: ["run"], flow: { actions: ["cancel"] } };
+    expect(rowActions(row)).toEqual(["cancel"]);
+    expect(hasAction(row, "cancel")).toBe(true);
+    expect(hasAction(row, "run")).toBe(false);
+  });
+
+  it("an empty list is a v2 row with no buttons, not a v1 row", () => {
+    expect(rowActions({ actions: [] })).toEqual([]);
+    expect(hasAction({ actions: [] }, "keep")).toBe(false);
+  });
+});
+
+describe("flowStageLabel with progress", () => {
+  it("uses the backend progress label when present", () => {
+    const progress = { step: 2, of: 4, label: "Finding a source" };
+    expect(flowStageLabel({ state: "source", progress })).toBe("Finding a source");
+    expect(flowStageLabel({ state: "sampling", progress: { ...progress, step: 3, label: "Reading a sample" } }))
+      .toBe("Reading a sample");
+  });
+
+  it("keeps the v1 labels without progress and never labels a terminal flow", () => {
+    expect(flowStageLabel({ state: "source" })).toBe("Finding the source…");
+    expect(flowStageLabel({ state: "failed", progress: { step: 1, of: 4, label: "x" } })).toBe("");
   });
 });
