@@ -9,6 +9,7 @@
   import { onDestroy, onMount, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import CardShell from "$lib/components/CardShell.svelte";
+  import BuildProgress from "$lib/components/BuildProgress.svelte";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import { cardText, withoutCardText, type CardText } from "$lib/ni/cardText";
@@ -66,6 +67,7 @@
   // Board items + load/poll machinery live in the store (lib/ni/board.svelte.ts).
   const board = createBoard({
     fetchBoard: () => api.niBoard(),
+    fetchFlow: (id) => api.niFlowGet(id),
     isUnlocked: () => !!account.status?.unlocked,
     onLoad: (err) => {
       if (err === null) { error = ""; return; }
@@ -1332,6 +1334,17 @@
                    line replaces the payload/first-run copy so the card tells one
                    truth at a time. failed/unsupported render the honest error via
                    friendlyErrorClass; every other state has a calm stage label. -->
+              {#if item.flow.progress && item.flow.state !== "failed" && item.flow.state !== "unsupported"}
+                <!-- v2: the backend's build progress (step bar, "Trying source n of m"), with Cancel
+                     when the row declares it. Its busy/error state lives in the component. -->
+                <BuildProgress
+                  itemId={item.id}
+                  progress={item.flow.progress}
+                  canCancel={hasAction(item, "cancel")}
+                  cancel={(id) => api.niFlowCancel(id)}
+                  onCancelled={() => void load()}
+                />
+              {/if}
               {#if item.flow.state === "failed" || item.flow.state === "unsupported"}
                 <!-- G1 single-writer law: the card renders the MASTER's reason
                      sentence, question, and reopen affordances verbatim — a
@@ -1565,7 +1578,7 @@
                     <p class="error ni-note">{flowActionError[item.id]}</p>
                   {/if}
                 </form>
-              {:else}
+              {:else if !item.flow.progress}
                 <p class="muted ni-note">{flowStageLabel(item.flow)}</p>
               {/if}
             {:else if item.payload}

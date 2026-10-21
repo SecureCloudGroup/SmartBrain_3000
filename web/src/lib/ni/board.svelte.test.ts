@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushSync, untrack } from "svelte";
-import type { NiBoardItem } from "$lib/api";
+import type { NiBoardItem, NiFlowPoll } from "$lib/api";
 import { createBoard } from "./board.svelte";
 import { runEffect } from "./effectRoot.svelte";
 
@@ -180,5 +180,111 @@ describe("board store", () => {
     api.respond(0, [item("a", 1)]);
     await settle();
     expect(api.fetchBoard).toHaveBeenCalledTimes(1);
+  });
+});
+
+// v2: the per-item 3 s poll. Rows with `actions` are v2; a poll reads one item, not the board.
+describe("board store, per-item poll (v2)", () => {
+  let cleanups: Array<() => void> = [];
+  beforeEach(() => { vi.useFakeTimers(); setVisibility("visible"); });
+  afterEach(() => { cleanups.forEach((c) => c()); cleanups = []; vi.useRealTimers(); });
+
+  const v2 = (id: string, position: number, flowState?: string) =>
+    ({ ...item(id, position, flowState), actions: ["cancel"] }) as NiBoardItem;
+  const poll = (id: string, flowState: string | null): NiFlowPoll =>
+    ({ id, state: "draft", flow: flowState ? { state: flowState } : null, awaiting_yes: null, actions: ["cancel"] }) as unknown as NiFlowPoll;
+
+  function setup(initial: NiBoardItem[]) {
+    const api = fakeApi();
+    const calls: string[] = [];
+    const waiting: Array<{ id: string; resolve: (v: NiFlowPoll) => void; reject: (e: unknown) => void }> = [];
+    const fetchFlow = vi.fn((id: string) => new Promise<NiFlowPoll>((resolve, reject) => {
+      calls.push(id);
+      waiting.push({ id, resolve, reject });
+    }));
+    const board = createBoard({ fetchBoard: api.fetchBoard, fetchFlow, isUnlocked: () => true });
+    cleanups.push(() => board.stop());
+    board.start();
+    void board.load();
+    api.respond(0, initial);
+    return { api, board, fetchFlow, waiting, calls };
+  }
+
+  it("polls only the active v2 item every 3 s, never the whole board", async () => {
+    const { api, board, fetchFlow, calls } = setup([v2("a", 1, "sampling"), v2("b", 2)]);
+    await settle();
+    expect(board.anyActive).toBe(true);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(calls).toEqual(["a"]);
+    expect(fetchFlow).toHaveBeenCalledTimes(1);
+    expect(api.fetchBoard).toHaveBeenCalledTimes(1); // only the initial load
+  });
+
+  it("merges the answer into the row without touching the others", async () => {
+    const { board, waiting } = setup([v2("a", 1, "sampling"), v2("b", 2)]);
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    waiting[0].resolve(poll("a", "mapping"));
+    await settle();
+    expect(board.items[0].flow?.state).toBe("mapping");
+    expect(board.items[1].flow).toBeNull();
+    expect(board.items.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+
+  it("stops polling once the flow is terminal and reloads the board once", async () => {
+    const { api, board, fetchFlow, waiting } = setup([v2("a", 1, "sampling")]);
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    waiting[0].resolve(poll("a", "failed"));
+    await settle();
+    expect(board.anyActive).toBe(false);
+    expect(api.fetchBoard).toHaveBeenCalledTimes(2); // initial + the one reload
+    api.respond(1, [v2("a", 1, "failed")]);
+    await settle();
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(fetchFlow).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a poll answer that lands after a newer board load", async () => {
+    const { api, board, waiting } = setup([v2("a", 1, "sampling")]);
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    void board.load(); // a newer load starts while the poll is in flight
+    waiting[0].resolve(poll("a", "mapping"));
+    await settle();
+    expect(board.items[0].flow?.state).toBe("sampling");
+    api.respond(1, [v2("a", 1, "assembling")]);
+    await settle();
+    expect(board.items[0].flow?.state).toBe("assembling");
+  });
+
+  it("does not start a second request for an item whose poll is still in flight", async () => {
+    const { fetchFlow, waiting } = setup([v2("a", 1, "sampling")]);
+    await settle();
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(fetchFlow).toHaveBeenCalledTimes(1);
+    waiting[0].resolve(poll("a", "sampling"));
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(fetchFlow).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the board-wide fast poll when any active row is v1", async () => {
+    const { api, fetchFlow } = setup([v2("a", 1, "sampling"), item("old", 2, "mapping")]);
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(fetchFlow).not.toHaveBeenCalled();
+    expect(api.fetchBoard).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failed poll is ignored and retried on the next tick", async () => {
+    const { board, fetchFlow, waiting } = setup([v2("a", 1, "sampling")]);
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    waiting[0].reject(new Error("offline"));
+    await settle();
+    expect(board.lastError).toBeNull();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(fetchFlow).toHaveBeenCalledTimes(2);
   });
 });
