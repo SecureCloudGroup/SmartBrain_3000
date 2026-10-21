@@ -24,6 +24,16 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **A data source that answers with a web page now says so.** When a site serves a
+  maintenance or login page in place of its CSV, feed, XML or JSON data, the card reports
+  "returned a web page, not its data", not "has nothing for this right now", and the
+  refresh counts as a failed fetch.
+- **In the new flow, Delete is always offered**, including while a card builds or waits
+  for Keep. A card that stopped on the links list no longer shows a Cancel button or a
+  progress bar.
+
+### Fixed
+
 - **An approved action interrupted by a restart no longer parks its turn for good.**
   The approval row is marked as running before the action starts; if the app stopped
   before the result was recorded, that row counted as still running forever, so the
