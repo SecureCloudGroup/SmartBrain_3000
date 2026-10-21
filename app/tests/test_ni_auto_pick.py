@@ -336,3 +336,18 @@ def test_no_to_a_lookup_source_declines_the_row_address_not_only_the_resolved_on
     declined = ni_flow._flow_read(store, item_id)["_declined"]
     assert row_url in declined and "https://api.weather.example.gov/p/40,-74" in declined
     assert ni_flow._without_declined(store, item_id, [_row("nws", row_url)]) == []  # not offered again
+
+
+# --- a held card is not run until Keep ----------------------------------------------------------
+
+def test_a_held_card_refuses_the_chat_tool_run_and_the_manual_run_route(client, lib, monkeypatch) -> None:  # noqa: F811
+    item_id = _auto_card(client, lib, monkeypatch)
+    store = client.app.state.ni
+    assert nimod.awaits_yes(store.get_item(item_id))
+    with pytest.raises(ValueError, match="Keep"):
+        tools._run_ni_item_now(tools.ToolContext(ni=store), {"item_id": item_id})  # chat tool; MCP has no NI tools
+    r = client.post(f"/api/ni/items/{item_id}/run")
+    assert r.status_code == 409 and "Keep" in r.json()["detail"]
+    assert store.get_item(item_id)["last_checked"] is None and store.read_snapshot(item_id, "latest") is None
+    store.record_validation(item_id, True)  # Keep
+    assert tools._run_ni_item_now(tools.ToolContext(ni=store), {"item_id": item_id})["ok"] is True

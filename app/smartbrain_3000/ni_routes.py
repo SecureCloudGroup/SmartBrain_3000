@@ -808,6 +808,8 @@ def run_item(request: Request, item_id: str) -> dict:
                             detail=f"run refused: state={item['state']!r}")
     if not item["enabled"]:
         raise HTTPException(status_code=409, detail="run refused: item paused")
+    if ni.awaits_yes(item):
+        raise HTTPException(status_code=409, detail="run refused: this card is waiting for you — tap Keep first")
     if ni.spec_renders(item["spec"]) and browser_runner.slot_busy():
         return _render_busy_conflict()
     result = _execute_manual_run(request, store, item)

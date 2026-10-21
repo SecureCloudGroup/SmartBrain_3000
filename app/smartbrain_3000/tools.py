@@ -2009,6 +2009,8 @@ def _run_ni_item_now(ctx: ToolContext, args: dict) -> dict:
         raise ValueError("cannot run a broken item — edit + re-commission first")
     if not item["enabled"]:
         raise ValueError("cannot run a paused item — resume it first (set_ni_item_enabled)")
+    if ni.awaits_yes(item):
+        raise ValueError("cannot run a card that is waiting for the user's Keep — the user taps Keep on the card first")
     ctx.ni.clear_last_checked(args["item_id"])
     return {"ok": True, "id": args["item_id"]}
 
