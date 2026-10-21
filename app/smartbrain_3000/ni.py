@@ -7909,7 +7909,7 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
     are attached we keep the default redirect following (parity with the
     feed/vault fetchers).
     """
-    from . import netguard  # lazy: keep netguard off ni's import graph edges
+    from . import netguard, ni_fetch  # lazy: keep both off ni's import graph edges
 
     url, resolved_headers = http_request_parts(source, item_id, secrets_store)
     # E: refuse any redirect hop while a header or a key rides the request
@@ -7917,8 +7917,8 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
     fmt = source.get("format") or "json"
     if fmt == "json":
         try:
-            return netguard.safe_fetch_json(
-                url, headers=resolved_headers or None,
+            return ni_fetch.fetch_parsed(
+                url, "json", headers=resolved_headers or None,
                 allow_redirects=not has_headers,  # E: refuse hop when carrying any header
             )
         except netguard.FetchError as exc:
@@ -7980,38 +7980,23 @@ def set_contact_email(secrets_store, email: str) -> str:
 
 def _fetch_http_textual(url: str, fmt: str, resolved_headers: dict[str, str],
                         has_headers: bool) -> dict:
-    """Non-JSON textual formats: guarded fetch → stdlib parser → walker-shaped dict.
+    """Non-JSON textual formats through the shared ``ni_fetch`` path → walker-shaped dict.
 
-    Split out of ``_fetch_http_json`` to keep either branch under the per-function
-    line cap. Same redirect discipline (headers ⇒ no redirects, mirroring the
-    JSON path). A parse failure surfaces as ``NIError('fetch_failed',
-    'not_<fmt>')`` — the ``not_<fmt>`` token comes from ``netguard.format_error_kind``
-    so the flow's page-door / retry routing can key on it without matching text.
+    Same redirect discipline (headers ⇒ no redirects, mirroring the JSON path). A parse failure
+    surfaces as ``NIError('fetch_failed', 'not_<fmt>')`` — the ``not_<fmt>`` token comes from
+    ``netguard.format_error_kind`` so the flow's page-door / retry routing can key on it.
     """
-    from . import formats, netguard  # lazy: keep both off ni's import graph edges
+    from . import ni_fetch  # lazy: keep it off ni's import graph edges
 
     assert isinstance(url, str) and url, "url required"
     assert isinstance(fmt, str) and fmt != "json", "fmt must be a non-json textual format"
     try:
-        got = netguard.safe_fetch_text(
-            url, fmt, headers=resolved_headers or None,
-            allow_redirects=not has_headers,
-        )
-    except netguard.FetchError as exc:
+        return ni_fetch.fetch_parsed(url, fmt, headers=resolved_headers or None,
+                                     allow_redirects=not has_headers)
+    except ni_fetch.ParseError as exc:
+        raise NIError("fetch_failed", exc.kind) from None
+    except ni_fetch.netguard.FetchError as exc:
         raise NIError("fetch_failed", exc.__class__.__name__) from None
-    text = got.get("text") if isinstance(got, dict) else ""
-    if not isinstance(text, str):
-        raise NIError("fetch_failed", "no text")
-    try:
-        if fmt == "csv":
-            return formats.parse_csv(text)
-        if fmt == "feed":
-            return formats.parse_feed(text)
-        if fmt == "xml":
-            return formats.parse_xml(text)
-        return formats.parse_text(text)
-    except formats.FormatError:
-        raise NIError("fetch_failed", netguard.format_error_kind(fmt)) from None
 
 
 def _fetch_http_page(source: dict, item_id: str, secrets_store, *,
