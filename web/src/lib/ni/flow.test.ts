@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AWAITING_SOURCE_PICK,
+  allows,
+  pauseKind,
   awaitingYesButtons,
   awaitingYesSource,
   flowStageLabel,
@@ -211,5 +213,39 @@ describe("awaiting-yes wording for from: library", () => {
       .toEqual({ yes: "Keep", yesBusy: "Keeping…", no: "Try another source" });
     expect(awaitingYesButtons({ from: "page", host: "h", title: "t" }).yes).toBe("Yes, that’s it");
     expect(awaitingYesButtons({ from: "dataset", host: "h", title: "t" }).no).toBe("No, try another source");
+  });
+});
+
+describe("allows / pauseKind: rows to button sets", () => {
+  const BUTTONS = ["keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "edit", "delete", "activate"];
+  const shown = (row: Parameters<typeof allows>[0]) => BUTTONS.filter((k) => allows(row, k, false));
+
+  it("v2 rows show exactly the declared buttons, unknown kinds ignored", () => {
+    expect(shown({ actions: ["keep", "dismiss"] })).toEqual(["keep", "dismiss"]);
+    expect(shown({ flow: { actions: ["cancel"] }, actions: ["cancel"] })).toEqual(["cancel"]);
+    expect(shown({ actions: ["retry", "delete", "teleport"] })).toEqual(["retry", "delete"]);
+    expect(shown({ actions: ["run", "pause", "edit", "refine", "delete"] }))
+      .toEqual(["refine", "run", "edit", "delete"]);
+    expect(shown({ actions: ["activate", "edit", "refine", "delete"] }))
+      .toEqual(["refine", "edit", "delete", "activate"]);
+  });
+
+  it("a v1 row (no actions) keeps the page's own condition, true or false", () => {
+    expect(allows({ flow: null }, "retry", true)).toBe(true);
+    expect(allows({ flow: null }, "retry", false)).toBe(false);
+    expect(allows({}, "fix", true)).toBe(true);
+  });
+
+  it("v2 ignores the legacy condition", () => {
+    expect(allows({ actions: [] }, "delete", true)).toBe(false);
+    expect(allows({ actions: ["delete"] }, "delete", false)).toBe(true);
+  });
+
+  it("pauseKind follows enabled on v1 and the declared list on v2", () => {
+    expect(pauseKind({ enabled: true })).toBe("pause");
+    expect(pauseKind({ enabled: false })).toBe("resume");
+    expect(pauseKind({ enabled: true, actions: ["pause"] })).toBe("pause");
+    expect(pauseKind({ enabled: false, actions: ["resume", "edit"] })).toBe("resume");
+    expect(pauseKind({ enabled: true, actions: ["cancel"] })).toBe("");
   });
 });

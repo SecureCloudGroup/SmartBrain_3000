@@ -84,6 +84,32 @@ export function hasAction(
   return rowActions(row)?.includes(kind) ?? false;
 }
 
+/** Whether a button shows. On a v2 row (backend `actions` present) the declared list decides and
+ *  `legacy` is ignored; on a v1 row (no `actions`) `legacy` is the page's own client-side
+ *  condition, unchanged. */
+export function allows(
+  row: { actions?: string[]; flow?: { actions?: string[] } | null } | null | undefined,
+  kind: string,
+  legacy: boolean,
+): boolean {
+  console.assert(typeof kind === "string" && kind !== "", "allows: kind required");
+  console.assert(typeof legacy === "boolean", "allows: legacy is boolean");
+  const list = rowActions(row);
+  return list === null ? legacy : list.includes(kind);
+}
+
+/** The card menu's pause/resume button: "pause" or "resume", or "" when the row offers neither
+ *  (v2 only). A v1 row keeps the toggle that follows `enabled`. */
+export function pauseKind(
+  row: { enabled?: boolean; actions?: string[]; flow?: { actions?: string[] } | null },
+): "pause" | "resume" | "" {
+  console.assert(typeof row === "object" && row !== null, "pauseKind: row is object");
+  const list = rowActions(row);
+  console.assert(list === null || Array.isArray(list), "pauseKind: list is array or null");
+  if (list === null) return row.enabled ? "pause" : "resume";
+  return list.includes("pause") ? "pause" : list.includes("resume") ? "resume" : "";
+}
+
 /** A flow is "in progress" (fast-poll worthy) when it's non-null and NOT in a
  *  terminal error state. awaiting_credential is user-gated but still counts —
  *  a 3s poll is cheap and picks up the transition the moment the key lands. */

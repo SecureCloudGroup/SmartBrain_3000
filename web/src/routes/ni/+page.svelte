@@ -43,7 +43,7 @@
   } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { fitText } from "$lib/ni/fit";
-  import { awaitingYesButtons, awaitingYesSource, flowStageLabel, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
+  import { allows, awaitingYesButtons, awaitingYesSource, flowStageLabel, hasAction, pauseKind, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -1354,12 +1354,14 @@
                     <p class="muted ni-note-sp">{consent.prompt}</p>
                   {/if}
                   <div class="ni-actions ni-actions-sp">
-                    <button
-                      class="secondary"
-                      disabled={busyId === item.id}
-                      onclick={() => answerConsent(item, "allow")}
-                    >Build with {consent.model}</button>
-                    {#if consent.local}
+                    {#if allows(item, "allow_model", true)}
+                      <button
+                        class="secondary"
+                        disabled={busyId === item.id}
+                        onclick={() => answerConsent(item, "allow")}
+                      >Build with {consent.model}</button>
+                    {/if}
+                    {#if consent.local && allows(item, "use_local", true)}
                       <button
                         class="ghost"
                         disabled={busyId === item.id}
@@ -1368,7 +1370,7 @@
                     {/if}
                   </div>
                 {/if}
-                {#if item.flow.question?.kind === "supply_date"}
+                {#if item.flow.question?.kind === "supply_date" && allows(item, "answer_date", true)}
                   {#if item.flow.question.prompt}
                     <p class="muted ni-note-sp">{item.flow.question.prompt}</p>
                   {/if}
@@ -1389,19 +1391,21 @@
                 {/if}
                 {#if !consent}
                 <div class="ni-actions ni-actions-sp">
-                  {#if !item.shell}
+                  {#if allows(item, "fix", !item.shell)}
                     <button
                       class="secondary"
                       disabled={busyId === item.id}
                       onclick={() => fixItem(item)}
                     >Fix</button>
+                  {/if}
+                  {#if allows(item, "refine", !item.shell)}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
                       onclick={() => openRefine(item)}
                     >Refine…</button>
                   {/if}
-                  {#if item.shell && item.flow.reopen?.includes("retry")}
+                  {#if allows(item, "retry", item.shell === true && !!item.flow.reopen?.includes("retry"))}
                     <button
                       class="secondary"
                       disabled={busyId === item.id}
@@ -1507,7 +1511,7 @@
                     <p class="error ni-note-sp">{flowActionError[item.id]}</p>
                   {/if}
                 </div>
-              {:else if item.flow.state === "awaiting_access" && item.flow.access}
+              {:else if item.flow.state === "awaiting_access" && item.flow.access && allows(item, "give_access", true)}
                 {@const access = item.flow.access}
                 <!-- The picked source needs the user's own free key and/or a contact email
                      (SEC, BLS). Nothing is fetched until this is sent; each value goes only to
@@ -1592,7 +1596,7 @@
             {/if}
 
           {#snippet below()}
-          {#if !item.shell && !item.flow && (item.state === "failing" || item.state === "broken" || item.state === "degraded" || (item.state === "commissioning" && item.consecutive_failures > 0))}
+          {#if !item.flow && allows(item, "fix", !item.shell && (item.state === "failing" || item.state === "broken" || item.state === "degraded" || (item.state === "commissioning" && item.consecutive_failures > 0)))}
             <!-- P3: the card's Fix — re-derives against the card's OWN frozen
                  source (never a new host). Generic across every http card.
                  2026-09-23: also on a COMMISSIONING card whose run failed — a
@@ -1654,7 +1658,7 @@
             <p class="muted ni-note">
               Creation didn’t finish. Delete this card, or start again above.
             </p>
-          {:else if preview && !item.shell && !item.flow && draftSites}
+          {:else if preview && !item.shell && !item.flow && draftSites && (allows(item, "activate_sites", true) || hasAction(item, "activate"))}
             <!-- Round 20 (B3a, R6): this page also loads other sites — the panel lists them and
                  its Activate (POST /activate) is the consent; /commission refuses such a draft. -->
             <RenderSitesPanel
@@ -1663,7 +1667,7 @@
               error={flowActionError[item.id] ?? ""}
               onActivate={() => activateSites(item)}
             />
-          {:else if preview && !item.shell && !item.flow}
+          {:else if preview && !item.shell && !item.flow && allows(item, "activate", true)}
             <div class="ni-actions">
               <button
                 disabled={busyId === item.id}
@@ -1684,16 +1688,20 @@
               <p class="ni-note-head">Is this what you asked for?</p>
               <p class="muted ni-yes-from">{awaitingYesSource(item.awaiting_yes)}</p>
               <div class="ni-actions">
-                <button
-                  class="secondary"
-                  disabled={busyId === item.id}
-                  onclick={() => validateLooksRight(item)}
-                >{busyId === item.id ? yesWords.yesBusy : yesWords.yes}</button>
-                <button
-                  class="ghost"
-                  disabled={busyId === item.id}
-                  onclick={() => declineReading(item)}
-                >{yesWords.no}</button>
+                {#if allows(item, "keep", true)}
+                  <button
+                    class="secondary"
+                    disabled={busyId === item.id}
+                    onclick={() => validateLooksRight(item)}
+                  >{busyId === item.id ? yesWords.yesBusy : yesWords.yes}</button>
+                {/if}
+                {#if allows(item, "dismiss", true)}
+                  <button
+                    class="ghost"
+                    disabled={busyId === item.id}
+                    onclick={() => declineReading(item)}
+                  >{yesWords.no}</button>
+                {/if}
               </div>
               {#if feeds.length > 0}
                 <!-- Round 20 (B3a, R12): the page's own data feed, by its exact address. -->
@@ -1754,12 +1762,14 @@
                   onclick={() => openHistory(item)}
                   title="Show recent runs"
                 >History</button>
-                <button
-                  class="ghost"
-                  disabled={busyId === item.id}
-                  onclick={() => runNow(item)}
-                  title="Run now"
-                >{busyId === item.id ? "Running…" : "Run now"}</button>
+                {#if allows(item, "run", true)}
+                  <button
+                    class="ghost"
+                    disabled={busyId === item.id}
+                    onclick={() => runNow(item)}
+                    title="Run now"
+                  >{busyId === item.id ? "Running…" : "Run now"}</button>
+                {/if}
               {/if}
               <details class="ni-more">
                 <summary title="More actions" aria-label="More actions">⋯</summary>
@@ -1773,23 +1783,29 @@
                       disabled={busyId === item.id || historyFor !== null}
                       onclick={() => openHistory(item)}
                     >History</button>
+                    {#if allows(item, "run", true)}
+                      <button
+                        class="ghost"
+                        disabled={busyId === item.id}
+                        onclick={() => runNow(item)}
+                      >{busyId === item.id ? "Running…" : "Run now"}</button>
+                    {/if}
+                  {/if}
+                  {#if pauseKind(item)}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
-                      onclick={() => runNow(item)}
-                    >{busyId === item.id ? "Running…" : "Run now"}</button>
+                      onclick={() => togglePause(item)}
+                    >{pauseKind(item) === "pause" ? "Pause" : "Resume"}</button>
                   {/if}
-                  <button
-                    class="ghost"
-                    disabled={busyId === item.id}
-                    onclick={() => togglePause(item)}
-                  >{item.enabled ? "Pause" : "Resume"}</button>
-                  <button
-                    class="ghost"
-                    disabled={busyId === item.id}
-                    onclick={() => openEdit(item)}
-                  >Edit…</button>
-                  {#if !item.shell}
+                  {#if allows(item, "edit", true)}
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id}
+                      onclick={() => openEdit(item)}
+                    >Edit…</button>
+                  {/if}
+                  {#if allows(item, "refine", !item.shell)}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
@@ -1801,11 +1817,13 @@
                     disabled={busyId === item.id}
                     onclick={() => openRepair(item)}
                   >Repair settings</button>
-                  <button
-                    class="ghost ni-danger"
-                    disabled={busyId === item.id}
-                    onclick={() => remove(item)}
-                  >Delete</button>
+                  {#if allows(item, "delete", true)}
+                    <button
+                      class="ghost ni-danger"
+                      disabled={busyId === item.id}
+                      onclick={() => remove(item)}
+                    >Delete</button>
+                  {/if}
                 </div>
               </details>
             </span>
