@@ -147,7 +147,9 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         out["detail"] = str(rec.get("error") or "")[:160]
         out["notes"] = [str(n) for n in rec.get("notes") or []]  # the flow's own account: frame, verify
         if state != "ready":
-            out["outcome"] = "failed" if state in ("failed", "unsupported") else state
+            parked = state == "source" and rec.get("error") == ni_flow.AWAITING_SOURCE_PICK
+            out["outcome"] = ("failed" if state in ("failed", "unsupported")
+                              else "waiting-pick" if parked else state)
             return out
         out["answers"] = next((str(n) for n in reversed(rec.get("notes") or [])
                                if "declared answers" in str(n)), "")

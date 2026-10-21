@@ -12,7 +12,8 @@ Seams (nothing in app/smartbrain_3000 is edited): model replies are recorded at 
 the flow already accepts; fetch responses at ``netguard.safe_fetch_json / safe_fetch_text /
 safe_fetch / safe_fetch_feed / safe_post_json``, patched for the span of one ask. Headers (keys)
 are never recorded and secret-looking query parameters are redacted from the cassette key.
-Classes per ask: right / partial / wrong / links / declined / error (see ``score_ask``).
+Classes per ask: right / partial / wrong / links / declined / waiting / error (see ``score_ask``).
+``--flow v1|v2`` on record and replay sets the ``ni_flow`` flag (env ``SMARTBRAIN_NI_FLOW``) for the run.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import contextlib
 import hashlib
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import sys
@@ -33,12 +35,13 @@ sys.path.insert(0, str(REPO / "app"))
 FIXTURES = REPO / "app" / "tests" / "fixtures"
 EVAL_DIR = REPO / "app" / "tests" / "ni_eval"
 GOLD_PATH = EVAL_DIR / "gold" / "gold.json"
-CLASSES = ("right", "partial", "wrong", "links", "declined", "error")
+CLASSES = ("right", "partial", "wrong", "links", "declined", "waiting", "error")
 _RANK = {"right": 0, "partial": 1, "wrong": 2}
 _OUTCOME = {
     "live": "card", "ready": "card", "awaiting-yes": "card",
     "links": "links", "source": "links", "needs-key": "links", "needs-email": "links",
     "no-source": "links", "unsupported": "declined", "declined": "declined",
+    "waiting-pick": "waiting",  # a run parked at the source pick (state source + awaiting_pick)
 }
 _SECRET_Q = re.compile(r"(?i)(key|token|secret|auth|sig|appid|password)")
 
@@ -48,7 +51,7 @@ _SECRET_Q = re.compile(r"(?i)(key|token|secret|auth|sig|appid|password)")
 # ---------------------------------------------------------------------------------------------
 
 def outcome_class(run: dict) -> str:
-    """card | links | declined | error for one run result (anything unknown is an error)."""
+    """card | links | declined | waiting | error for one run result (anything unknown is an error)."""
     assert isinstance(run, dict), "run result required"
     out = str(run.get("outcome") or "")
     assert isinstance(out, str), "outcome is text"
@@ -145,7 +148,7 @@ def _verdict_from_checks(checks: dict) -> tuple[str, str]:
 def score_ask(run: dict, gold: dict) -> dict:
     """Class of one run: {id, kind, cls, reason, checks, needs_review}. Pure.
 
-    Not a card: links (links, source pick, needs key), declined, or error. A card is wrong if the
+    Not a card: links (links, needs key), declined, waiting (parked at the source pick), or error. A card is wrong if the
     gold forbids a card or a checkable constraint fails; partial if only some asked places show;
     right if checks ran and passed. With nothing checkable it is "partial / unchecked" (needs a
     human). The same card a human already judged (same source, same text) takes that verdict.
@@ -154,7 +157,7 @@ def score_ask(run: dict, gold: dict) -> dict:
     res = {"id": gold.get("id"), "kind": gold.get("kind"), "checks": {}, "needs_review": False}
     oc = outcome_class(run)
     if oc != "card":
-        cls = {"links": "links", "declined": "declined"}.get(oc, "error")
+        cls = {"links": "links", "declined": "declined", "waiting": "waiting"}.get(oc, "error")
         return {**res, "cls": cls, "reason": str(run.get("outcome") or "")}
     if gold.get("expected_outcome") == "decline" or "card" in (gold.get("forbidden_outcomes") or []):
         return {**res, "cls": "wrong", "reason": "forbidden outcome: card"}
@@ -185,11 +188,11 @@ def aggregate(scored: list[dict]) -> dict:
 
 def format_table(table: dict) -> str:
     assert isinstance(table, dict), "table required"
-    lines = [f"{'kind':<14}{'n':>4}{'right':>7}{'part':>6}{'wrong':>7}{'links':>7}{'decl':>6}{'err':>5}"]
+    lines = [f"{'kind':<14}{'n':>4}{'right':>7}{'part':>6}{'wrong':>7}{'links':>7}{'decl':>6}{'wait':>6}{'err':>5}"]
     for key in sorted(table, key=lambda k: (k == "ALL", k)):
         r = table[key]
         lines.append(f"{key:<14}{r['n']:>4}{r['right']:>7}{r['partial']:>6}{r['wrong']:>7}"
-                     f"{r['links']:>7}{r['declined']:>6}{r['error']:>5}")
+                     f"{r['links']:>7}{r['declined']:>6}{r['waiting']:>6}{r['error']:>5}")
     assert lines, "header at least"
     return "\n".join(lines)
 
@@ -579,8 +582,17 @@ def _select(gold: list[dict], args: argparse.Namespace) -> list[dict]:
     return rows
 
 
+def _set_flow(args: argparse.Namespace) -> None:
+    """``--flow v1|v2``: set the ni_flow flag for this run through its env var (no-op when absent)."""
+    flow = getattr(args, "flow", None)
+    assert flow in (None, "v1", "v2"), "flow is v1 or v2"
+    if flow:
+        os.environ["SMARTBRAIN_NI_FLOW"] = flow
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     """LIVE: real model through the bifrost gateway, real network. Saves cassette + results."""
+    _set_flow(args)
     ev = _load_tool("ni_flow_eval", "ni-flow-eval.py")
     llm = ev._bifrost_llm(args.bifrost, args.model)
     gold, runs = load_gold(args.gold), []
@@ -596,6 +608,7 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
+    _set_flow(args)
     gold = _select(load_gold(args.gold), args)
     return _finish(args, gold, replay_all(gold, args.cassette_dir, args.pack_dir))
 
@@ -643,6 +656,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--pack-dir", type=pathlib.Path)
             p.add_argument("--set", default="", help="comma list of set letters, e.g. A,B")
             p.add_argument("--only", default="")
+            p.add_argument("--flow", choices=("v1", "v2"), help="set the ni_flow flag for this run")
         if name == "record":
             p.add_argument("--model", default="mlx/Qwen3.5-9B-MLX-4bit")
             p.add_argument("--bifrost", default="http://127.0.0.1:38080")

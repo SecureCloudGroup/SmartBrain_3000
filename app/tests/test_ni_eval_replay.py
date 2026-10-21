@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 
@@ -60,11 +61,12 @@ def _card(text: list[str], url: str = "https://a.example/x?min=4.0", **extra) ->
 
 @pytest.mark.parametrize("outcome,cls", [("links", "links"), ("source", "links"), ("needs-key", "links"),
                                          ("unsupported", "declined"), ("crash", "error"),
-                                         ("failed", "error"), ("built-no-run", "error")])
+                                         ("failed", "error"), ("built-no-run", "error"),
+                                         ("waiting-pick", "waiting")])
 def test_non_card_outcomes_map_to_their_class(outcome: str, cls: str) -> None:
     res = ne.score_ask({"outcome": outcome}, _gold())
     assert res["cls"] == cls, res
-    assert res["cls"] in ne.CLASSES, "class is one of the six"
+    assert res["cls"] in ne.CLASSES, "class is one of the known classes"
 
 
 def test_forbidden_or_declined_expectation_makes_a_card_wrong() -> None:
@@ -119,6 +121,29 @@ def test_aggregate_counts_per_kind_and_overall() -> None:
     assert table["a"]["R"] == 0.5 and table["a"]["W"] == 0.5, table["a"]
     assert table["b"]["L"] == 1.0 and table["ALL"]["n"] == 4, table
     assert "ALL" in ne.format_table(table)
+
+
+def test_waiting_is_its_own_column_not_links() -> None:
+    scored = [{"kind": "a", "cls": "waiting"}, {"kind": "a", "cls": "links"}, {"kind": "a", "cls": "right"}]
+    table = ne.aggregate(scored)
+    assert table["ALL"]["waiting"] == 1 and table["ALL"]["links"] == 1, table["ALL"]
+    assert table["ALL"]["L"] == 1 / 3, "waiting does not count toward links"
+    header = ne.format_table(table).splitlines()[0]
+    assert "wait" in header and header.index("decl") < header.index("wait") < header.index("err")
+    assert ne.score_ask({"outcome": "source"}, _gold())["cls"] == "links", "old source stays links"
+
+
+def test_flow_flag_sets_the_env_for_the_run(monkeypatch) -> None:
+    import argparse
+
+    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "x")  # records the original so teardown restores it
+    monkeypatch.delenv("SMARTBRAIN_NI_FLOW")
+    ne._set_flow(argparse.Namespace(flow=None))
+    assert "SMARTBRAIN_NI_FLOW" not in os.environ
+    ne._set_flow(argparse.Namespace(flow="v2"))
+    assert os.environ["SMARTBRAIN_NI_FLOW"] == "v2"
+    with pytest.raises(SystemExit):  # argparse rejects anything but v1 / v2
+        ne.main(["replay", "--cassette-dir", str(_EVAL), "--flow", "v3"])
 
 
 # --- cassette mechanics ---------------------------------------------------------------------------

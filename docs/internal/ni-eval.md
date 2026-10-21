@@ -26,15 +26,21 @@ wrong / null), `defect_class`, `baseline`, `harness`. Constraints are parsed fro
 
 ## Scoring
 
-`score_ask(run, gold)` is pure. Classes: right / partial / wrong / links (links, source pick, needs a
-key) / declined / error. A card is wrong when the gold forbids a card or a checkable constraint fails
+`score_ask(run, gold)` is pure. Classes: right / partial / wrong / links (links, needs a
+key) / declined / waiting (parked at the source pick) / error. A card is wrong when the gold forbids a card or a checkable constraint fails
 (threshold not in the request, compare entities missing, units, source not acceptable); partial when
 only some asked places show; right when checks ran and passed. With nothing checkable it is
 `partial` with `needs_review`. The same card a human already judged (same source and card text) takes
 the human verdict, so replaying the 2026-10-05 results reproduces 13 / 6 / 4 / 27. `aggregate` gives
-counts and R, P, W, L rates per kind and overall (L = links + declined).
+counts and R, P, W, L rates per kind and overall (L = links + declined). The table has a `waiting`
+column: runs parked at the source pick (outcome `waiting-pick` = state `source` with the
+`awaiting_pick` marker). They are not links; older results with outcome `source` still score as links.
 
 ## Record a live baseline (T's machine, real model)
+
+On macOS use the app's bundled Python for `record`: the system `python3` can lack `cryptography`.
+It is at `~/Library/Application Support/SmartBrain/native/versions/<ver>/python/bin/python3`
+(substitute it for `python3` below).
 
 ```
 cd SmartBrain_3000
@@ -44,12 +50,15 @@ PYTHONPATH=app python3 tools/ni-eval.py record \
   --out /tmp/baseline-v0.26.0.json
 ```
 
-Add `--set A,B` or `--only "<text or id>"` to narrow. For a cloud model pass its id as `--model`
+Add `--set A,B` or `--only "<text or id>"` to narrow, and `--flow v1|v2` to run under that `ni_flow`
+flag (it sets `SMARTBRAIN_NI_FLOW` for the run; replay takes it too, default is the stored flag, v1). For a cloud model pass its id as `--model`
 (the gateway must route it). Output: one `<id>.json` per ask (model replies, fetch responses; headers
 are never stored and secret-looking query values are redacted) and the table printed at the end.
-Review cassettes for personal data before committing them. Note asks in sets B-G have no recorded
-card to carry a verdict, so their rows read `partial / unchecked` until a human reviews them; review
-`scored[].needs_review` in the `--out` file and add verdicts to the converter inputs.
+Review cassettes for personal data before committing them. Asks in sets B-G have no recorded
+card to carry a verdict, but the constraint checks still run: in the live run most of them got a
+definite right or wrong, not partial / unchecked. About 29 of the 175 rows were flagged
+`needs_review` (reason `unchecked`); review `scored[].needs_review` in the `--out` file and add
+verdicts to the converter inputs.
 
 ## Replay (offline, deterministic)
 
