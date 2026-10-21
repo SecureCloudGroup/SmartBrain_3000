@@ -59,15 +59,38 @@ class HtmlBody(FormatError):
 
 # A body that OPENS as a web page: optional BOM, an XML prolog and comments, then a doctype html, <html>,
 # <head> or <body>. Anchored to the start, so a feed or CSV that merely quotes markup later never matches.
-_HTML_OPEN_RE = re.compile(
-    r"^\ufeff?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--.*?-->\s*)*(?:<!doctype\s+html\b|<html[\s>]|<head[\s>]|<body[\s>])",
-    re.IGNORECASE | re.DOTALL)
+_HTML_OPENER_RE = re.compile(r"(?:<!doctype\s+html\b|<html[\s>]|<head[\s>]|<body[\s>])", re.IGNORECASE)
+_HTML_SNIFF_CHARS = 4096
+_COMMENT_MIN_CHARS = len("<!---->")
+
+
+def _skip_prolog(head: str) -> str | None:
+    """``head`` past a BOM, whitespace, one XML declaration and leading comments, in one
+    linear scan (no nested quantifiers: a body of many comments can't stall the parse).
+    None when a declaration or comment never closes."""
+    assert isinstance(head, str), "head required"
+    rest = head.lstrip("\ufeff").lstrip()
+    if rest.startswith("<?xml"):
+        end = rest.find("?>")
+        if end < 0:
+            return None
+        rest = rest[end + 2:].lstrip()
+    for _ in range(len(head) // _COMMENT_MIN_CHARS + 1):  # each pass consumes a whole comment
+        if not rest.startswith("<!--"):
+            return rest
+        end = rest.find("-->", 4)
+        if end < 0:
+            return None
+        rest = rest[end + 3:].lstrip()
+    assert not rest.startswith("<!--"), "every comment pass consumes at least one comment"
+    return rest
 
 
 def looks_like_html(text: str) -> bool:
     """True when ``text`` opens as a web page, whatever its content-type said (the body decides)."""
     assert isinstance(text, str), "text required"
-    return _HTML_OPEN_RE.match(text[:4096]) is not None
+    rest = _skip_prolog(text[:_HTML_SNIFF_CHARS])
+    return rest is not None and _HTML_OPENER_RE.match(rest) is not None
 
 
 def _refuse_html(text: str) -> None:

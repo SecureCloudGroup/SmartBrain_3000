@@ -107,3 +107,19 @@ def test_a_picked_json_row_that_answers_with_a_page_moves_on_saying_so(monkeypat
     out = ni_flow.run_flow(store, item_id, gateway_call=lambda m, p: _syn_model(p), ni_route_model="mlx/test-local")
     assert out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
     assert whys == ["returned a web page, not its data"]
+
+
+def test_many_leading_comments_sniff_in_linear_time() -> None:
+    """A body of many leading comments and no page opener is data, decided fast; the same
+    comments ahead of ``<html>`` are a page. No pattern may backtrack across comments."""
+    import time
+
+    from smartbrain_3000 import formats
+
+    banner = "<!-- x -->\n" * 400
+    started = time.monotonic()
+    assert formats.looks_like_html(banner + "<rss/>") is False
+    assert time.monotonic() - started < 0.05
+    assert formats.looks_like_html("<!-- x -->\n" * 300 + "<html><body>maintenance</body></html>") is True
+    assert formats.looks_like_html("<!-- never closed <html>") is False
+    assert formats.looks_like_html('<?xml version="1.0"?>\n<!-- a --><!DOCTYPE html><html>') is True
