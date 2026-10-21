@@ -702,100 +702,30 @@ export interface VaultSubscribeResult extends VaultImportResult {
 // Every payload the backend returns is BOUND (data inlined per §4.3); the client
 // only validates + renders. Secrets are always names, never values.
 import type { SceneNode } from "$lib/ni/scene";
+import type * as G from "$lib/ni/types.gen";
 
-export type NiState =
-  | "draft"
-  | "commissioning"
-  | "live"
-  | "degraded"
-  | "failing"
-  | "broken"
-  | "paused";
+// Generated from the Python sources (tools/gen-ni-schema.py); see $lib/ni/types.gen.
+export type NiState = G.ItemState;
 
 // "tall" (1 column x 2 rows, Phase 1a-4): read-ready ahead of the engine change that
 // emits it for a 1x2 design — today a 1x2 design seals as "large" (2x2) instead.
-export interface NiDisplay { size: "small" | "wide" | "large" | "tall" }
+export type NiDisplay = G.Display;
 
 // Natural-Interface flow (creation/remap pipeline). Non-null on a board row while the
 // engine is actively assembling — or has ended abnormally — a card; null once the
 // item is settled (draft/live/etc rendered from spec + payload). `error` carries the
 // host-free class the friendlyErrorClass map explains (used by the failed/unsupported
 // paths on the card body).
-export type NiFlowState =
-  | "intent"
-  | "source"
-  // The picked source needs the user's own key and/or contact email (`access` says which).
-  | "awaiting_access"
-  | "sampling"
-  | "mapping"
-  | "assembling"
-  | "awaiting_credential"
-  | "awaiting_params"
-  | "ready"
-  | "unsupported"
-  | "failed";
+export type NiFlowState = G.FlowState;
 
-export interface NiSuggestion {
-  title: string;
-  host: string;
-  url: string;
-  kind?: "library" | "link";
-  // kind:"link" rows: what was found — a Library dataset or a web page
-  found?: "dataset" | "page";
-  evidence?: string[];
-  // Library rows: what the tap asks for before the first fetch ("key", "contact")
-  needs?: string[];
-}
+export type NiSuggestion = G.Suggestion;
 
 // v2 build progress (flow field, read-only from the backend): a 4-step bar from the flow state.
 // `gate` names what a waiting flow waits on ("access", "credential", "params", "links");
 // `try` shows while the auto-pick works through Library sources.
-export interface NiFlowProgress {
-  step: number;
-  of: number;
-  label: string;
-  gate?: string;
-  try?: { n: number; of: number; host: string };
-}
+export type NiFlowProgress = G.FlowProgress;
 
-export interface NiItemFlow {
-  state: NiFlowState;
-  error?: string;
-  // v2 only: the card actions the backend declares for this flow (closed vocabulary; the client
-  // ignores kinds it does not know). Absent under v1.
-  actions?: string[];
-  // v2 only: build progress. Absent under v1 and for ready / terminal flows.
-  progress?: NiFlowProgress;
-  // The source-pick pause: kind:"library" rows are SmartBrain Library sources that declare
-  // their answers, with the address already filled from the user's words (evidence = provider
-  // · authority, and the reading when the words fit several — the tap answers it). A tap is
-  // the consent and builds the card. kind:"link" rows (ruling 2026-10-05: "Library cards; web
-  // as links") are pages that may help — a Library dataset without declared answers
-  // (found:"dataset", its page, never its API address) or a web page the search found
-  // (found:"page"). They open in a new tab and never build a card (the pick route refuses
-  // them); paste-a-URL always works.
-  suggestions?: NiSuggestion[];
-  // G1 (rounds 7-8, single-writer law): terminal records carry the master's
-  // derivation — one honest reason sentence, an optional answerable question,
-  // and the reopen affordances. The card renders these verbatim; no more
-  // frontend-guessed failure copy.
-  reason?: string;
-  // model_consent (ruling 2) also names the non-local model and the local alternative.
-  question?: { kind: string; prompt?: string; model?: string; local?: string };
-  reopen?: string[];
-  // awaiting_access: what the card asks for (from the sealed record — never a value).
-  access?: {
-    host: string;
-    provider: string;
-    key: { docs_url: string } | null;
-    contact: boolean;
-  };
-  // Round 20 (B3a): the source pick's paste. `render_notice` = a pasted page may be read in the
-  // page browser here, and that one visit may also load the sites it depends on (≤ site_cap).
-  tap?: { render_notice: boolean; site_cap: number };
-  // Round 20 (B3a): set while the build waits for the page browser's first install or check.
-  browser?: { phase: string; pct: number };
-}
+export type NiItemFlow = G.Flow;
 
 // G1 oversight plane: one watcher finding (ni_findings row, code-authored
 // host-free title). Severity high additionally rides the carrier row.
@@ -822,15 +752,7 @@ export interface NiFit {
   missing: string[];
 }
 
-export interface NiAwaitingYes {
-  // "library": a card the v2 auto-pick built from an installed Library source (YES reads "Keep").
-  from: "page" | "dataset" | "library";
-  host: string;
-  title: string; // "" when the source had none (a pasted link)
-  // "library" cards only: true when the build used a key the user typed on the card. Additive;
-  // absent from a server that does not send it (the key sentence is then left out).
-  used_key?: boolean;
-}
+export type NiAwaitingYes = G.AwaitingYes;
 
 // GET /api/ni/items/{id}/flow (v2 only): one item's flow fields for the 3 s poll.
 export interface NiFlowPoll {

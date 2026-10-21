@@ -10,6 +10,7 @@
 
 import type { NiAwaitingYes, NiItemFlow, NiSuggestion } from "$lib/api";
 import { browserWaitLabel } from "$lib/ni/browser";
+import { ACTION_KINDS } from "$lib/ni/types.gen";
 
 // Marker the backend sets on flow.error when a `source` state is parked pending the
 // user picking between candidate sources (a resume_ni_flow approval will be parked
@@ -56,11 +57,7 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
 
 /** The action kinds this client knows how to render. The backend vocabulary is closed
  *  (ni_master.ACTION_KINDS); a kind outside this set (a newer server) is ignored, never shown. */
-export const KNOWN_ACTIONS: ReadonlySet<string> = new Set([
-  "keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "pause", "resume",
-  "edit", "delete", "activate", "activate_sites", "give_access", "answer_date",
-  "allow_model", "use_local", "fill_param", "add_credential", "review_fix",
-]);
+export const KNOWN_ACTIONS: ReadonlySet<string> = new Set<string>(ACTION_KINDS);
 
 /** The backend-declared actions of a board row, unknown kinds dropped; `null` for a v1 row (no
  *  `actions` key), which keeps the page's own client-side conditions. A flow's own list wins over
