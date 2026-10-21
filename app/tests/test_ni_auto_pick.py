@@ -398,3 +398,89 @@ def test_keep_on_an_auto_card_is_audited(client, lib, monkeypatch) -> None:  # n
     assert client.post(f"/api/ni/items/{item_id}/validate", json={"ok": True}).status_code == 200
     kept = [r for r in client.app.state.audit.list(500) if r["tool"] == "ni_keep"]
     assert len(kept) == 1 and "api.open-meteo.com" in kept[0]["args_summary"]
+
+
+# --- class tests: the sealed format is read at fetch time; an unattended pick honours a fit "no" ---
+
+_SYN_URL = "https://data.synthetic.example/series.csv"
+_SYN_FEED = "https://data.synthetic.example/feed.xml"
+_SYN_CSV = "name,count\nalpha,3\nbeta,5\n"
+_SYN_ANSWERS = [{"name": "tally", "label": "Tally", "kind": "list", "primary": True,
+                 "words": ["tally", "count", "temperature"], "path": "rows",
+                 "row": [{"path": "name", "label": "Name", "type": "text"},
+                         {"path": "count", "label": "Count", "type": "number"}]}]
+
+
+class _SynLib(_Wrap):
+    """A Library whose rows are synthetic sources (any format), answering with the table above."""
+
+    def answers(self, source_id: str) -> list[dict]:
+        fmt = self.cands[0].get("format")
+        if fmt == "feed":  # a feed parses to ``items`` carrying ``title``
+            return [{**_SYN_ANSWERS[0], "path": "items",
+                     "row": [{"path": "title", "label": "Name", "type": "text"}]}]
+        return copy.deepcopy(_SYN_ANSWERS)
+
+    def get(self, source_id: str) -> dict | None:
+        return {"id": source_id, "name": source_id}
+
+
+def _syn_model(prompt: str) -> str:
+    if _QUERY_MARK in prompt:
+        return _ir_reply("tally")
+    if "one JSON object" in prompt or "kind" in prompt and "external_data" in prompt:
+        return json.dumps({**_INTENT, "subject": "synthetic tally", "wants": ["tally"]})
+    return '{"serves": true, "gaps": [], "wrong": []}'
+
+
+def _run_flow_default_fetch(monkeypatch, fmt: str, url: str, body: str, store=None):
+    """run_flow with NO injected fetcher: the real default fetcher, over a faked netguard whose JSON
+    door refuses (not_json) and whose text door serves ``body`` only for the declared ``fmt``."""
+    store = store or _store()
+    seen: list[str] = []
+
+    def no_json(u: str, *a, **k):
+        raise ni_flow._netguard_mod.FetchError("not json", kind="not_json")
+
+    def text(u: str, f: str = "text", *a, **k):
+        seen.append(f)
+        return {"text": body}
+
+    monkeypatch.setattr(ni_flow._netguard_mod, "safe_fetch_json", no_json)
+    monkeypatch.setattr(ni_flow._netguard_mod, "safe_fetch_text", text)
+    wrap = _SynLib(None, [_row("syn", url, format=fmt)])
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: wrap)
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
+    request = "synthetic tally"
+    item_id = ni_flow.create_shell_item(store, request)
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(request, "intent"))
+    out = ni_flow.run_flow(store, item_id, gateway_call=lambda m, p: _syn_model(p),
+                           ni_route_model="mlx/test-local")
+    return store, item_id, out, seen
+
+
+_SYN_RSS = ("<?xml version='1.0'?><rss version='2.0'><channel><title>t</title>"
+            "<item><title>alpha</title><link>https://data.synthetic.example/a</link></item>"
+            "<item><title>beta</title><link>https://data.synthetic.example/b</link></item></channel></rss>")
+
+
+@pytest.mark.parametrize("fmt,url,body", [("csv", _SYN_URL, _SYN_CSV), ("feed", _SYN_FEED, _SYN_RSS)])
+def test_v2_auto_pick_of_a_non_json_row_parses_the_declared_format(monkeypatch, fmt, url, body) -> None:
+    store, item_id, out, seen = _run_flow_default_fetch(monkeypatch, fmt, url, body)
+    assert seen and set(seen) == {fmt}  # the declared parser ran, never the paste-URL sniff
+    assert out["state"] == "ready", out.get("notes")
+    assert (ni_flow._flow_read(store, item_id) or {}).get("_format") == fmt
+
+
+def test_v1_tap_of_a_non_json_row_is_unchanged(monkeypatch) -> None:
+    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")
+    store = _store()
+    request = "synthetic tally"
+    item_id = ni_flow.create_shell_item(store, request)
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(request, "intent"))
+    ni_flow.seal_library_pick(store, item_id, _SYN_URL, _row("syn", _SYN_URL, format="csv"))
+    rec = ni_flow._flow_read(store, item_id)
+    assert rec["_format"] == "csv" and rec["_library_format"] == "csv"
+    ni_flow.seal_library_pick(store, item_id, _SYN_URL, _row("syn", _SYN_URL, format="json"))
+    assert ni_flow._flow_read(store, item_id)["_library_format"] == "json"
+

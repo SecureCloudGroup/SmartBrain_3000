@@ -3642,6 +3642,9 @@ def run_flow(store: ni.NIStore, item_id: str, *,
 
     def default_fetcher(url: str) -> object:
         nonlocal sealed_fmt
+        # read at FETCH time like ``_access``: a v2 auto-pick seals ``_format`` inside this same run
+        live_fmt = str((_flow_read(store, item_id) or {}).get("_format") or "").strip().lower()
+        sealed_fmt = live_fmt or sealed_fmt
         """Fetch a sample under the netguard SSRF/redirect discipline.
 
         A sealed ``_format`` on the flow record (stamped by ``pick_flow_source``
@@ -4815,6 +4818,8 @@ def seal_library_pick(store: ni.NIStore, item_id: str, url: str, row: dict) -> N
     fmt = str(row.get("format") or "").strip().lower()
     if fmt in ni._HTTP_JSON_FORMATS and fmt != "json":
         record["_format"] = fmt
+    elif record.get("_library_url") != url:
+        record.pop("_format", None)  # a re-pick of another row keeps no earlier row's format
     source_id = str(row.get("source_id") or "")[:120] or None
     record["_library_source"] = source_id
     record["_library_url"] = url
