@@ -7452,6 +7452,7 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
     item = store.get_item(item_id)
     shell = bool(item and item["spec"].get("_shell"))
     if (state in _TERMINAL_STATES and not shell
+            and ni_master.question_for(state, record) is None
             and _item_has_renderable_payload(store, item_id)):
         # Terminal flow record hiding — FINALIZED tiles only (H2's original
         # intent): a failed remap must not mask the working card. G1 field
@@ -7841,12 +7842,18 @@ def sweep_stranded_flows(store: ni.NIStore) -> int:
         if state == _RETIRED_CONFIRM_STATE:
             reenter_source_pick(store, item["id"], _RETIRED_NOTE)
             continue
-        if state in ("awaiting_credential", "awaiting_params", "source", "awaiting_access"):
+        if state in ("awaiting_credential", "awaiting_params", "awaiting_access") or (
+                state == "source" and record.get("error") == AWAITING_SOURCE_PICK):
             # User-gated pauses are never stranded — sweeping a live consent
             # card after dinner told the user "creation stalled" (a lie),
             # destroyed the pending approval, and filed a bogus finding
-            # (claims audit 2026-09-21).
+            # (claims audit 2026-09-21). A bare ``source`` (no pick marker) is
+            # the locating window — work in progress that a restart can strand.
             continue
+        with _INFLIGHT_LOCK:
+            live_worker = item["id"] in _INFLIGHT
+        if live_worker:
+            continue  # a worker is still running this card — slow, not stranded
         updated_at = record.get("updated_at")
         if not isinstance(updated_at, str) or not updated_at:
             continue

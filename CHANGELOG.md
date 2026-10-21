@@ -19,6 +19,23 @@ to know when a release changes behavior.
   chat turn could never be resumed and a scheduled turn never finished. After 15
   minutes with no result the turn now resumes, and the model is told the action was
   interrupted and its outcome is unknown.
+- **Neural Interface cards no longer share one key field.** With two cards waiting for a
+  key, email, link or date, typing into one showed in the other, and Continue could send
+  one card's key to the other card's site. Each card now keeps its own fields.
+- **A finished card's question stays on the board.** Opening the board hid a finished
+  card's pending model-consent or date question, leaving the card with no way forward.
+- **A card stuck on "Finding a source…" after a restart recovers.** The stale sweep now
+  fails it after an hour so Retry works, instead of answering 409 forever. The sweep also
+  no longer fails a card whose build is still running.
+- **A refresh never calls a cloud model without that card's consent.** A card that asks a
+  model now refreshes on a non-local model only when the card recorded consent for that
+  exact model; otherwise it stops with `model_consent_required`. **Behavior change:** an
+  existing card of this kind with no recorded consent shows that error until rebuilt.
+- **A busy local model no longer counts as a card failure.** It is capacity, like a busy
+  page renderer, so the card stays due instead of sliding toward failing.
+- **Retry keeps a card's earlier answers** (declined sources, model consent, local-only
+  choice), and the dead-end watcher, which could never fire, now audits what the board
+  actually shows.
 
 ## [0.26.0] - 2026-10-14
 

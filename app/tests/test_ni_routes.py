@@ -1262,6 +1262,25 @@ def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> No
     assert fired.get("source_url") == "https://api.example.com/mine"
 
 
+def test_retry_keeps_the_cards_own_answers(client: TestClient, monkeypatch) -> None:
+    """Retry re-seeds the record but keeps declined sources, model consent and use-local."""
+    from smartbrain_3000 import ni_flow
+    _unlock(client)
+    store = client.app.state.ni
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
+    iid = client.post("/api/ni/intake", json={"request": "keep my answers"}).json()["id"]
+    ni_flow._fail(store, iid, "mapping", "mapping stage failed")
+    record = ni_flow._flow_read(store, iid)
+    record.update(_declined=["https://nope.example.com/a"], _model_consent="openai/gpt-x",
+                  _use_local=True)
+    ni_flow._flow_write(store, iid, record)
+    assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 200
+    after = ni_flow._flow_read(store, iid)
+    assert after["state"] == "intent"
+    assert after["_declined"] == ["https://nope.example.com/a"]
+    assert after["_model_consent"] == "openai/gpt-x" and after["_use_local"] is True
+
+
 def test_retry_refuses_finished_cards(client: TestClient) -> None:
     """A finalized (non-shell) card has nothing to retry — remap/fix owns it."""
     _unlock(client)

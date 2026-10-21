@@ -94,6 +94,21 @@ def resolve_finding(conn, finding_id: str) -> bool:
     return row is not None
 
 
+def _is_dead_end(store: ni.NIStore, item_id: str, shell: bool) -> bool:
+    """Would the board leave this terminal card with no reason or way out?
+
+    Audits what the board actually returns (``ni_flow.board_flow_field``), not
+    ``terminal_surface`` itself, which by construction always answers. A terminal
+    record hidden because a finalized card still renders its working payload is
+    deliberate, not a dead end.
+    """
+    assert store is not None and item_id, "args required"
+    view = ni_flow.board_flow_field(store, item_id)
+    if view is None:
+        return shell or not ni_flow._item_has_renderable_payload(store, item_id)
+    return not view.get("reason") or not (view.get("question") or view.get("reopen"))
+
+
 def watch_create(store: ni.NIStore) -> dict:
     """One W-CREATE pass. Returns a summary dict for the scheduler's log line.
 
@@ -132,10 +147,7 @@ def watch_create(store: ni.NIStore) -> dict:
             if state not in ("failed", "unsupported"):
                 continue
             shell = bool(item["spec"].get("_shell"))
-            surface = ni_master.terminal_surface(state, record, shell=shell)
-            dead_end = not surface.get("reason") or not (
-                surface.get("question") or surface.get("reopen"))
-            if dead_end and file_finding(
+            if _is_dead_end(store, item["id"], shell) and file_finding(
                     conn, "create", "high",
                     "a finished-with-failure card offers no reason or way out",
                     item_id=item["id"]):

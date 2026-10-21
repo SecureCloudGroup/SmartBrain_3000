@@ -1062,10 +1062,14 @@ def retry_flow(request: Request, item_id: str) -> dict:
     # Claims audit 2026-09-21: clear-then-spawn CRASHED the worker ("no flow
     # record") — Retry never worked; the mocked route test was the mask.
     # RE-SEED the record with the sealed request instead of clearing it.
-    ni_flow._flow_write(store, item_id, ni_flow._make_record(
+    fresh = ni_flow._make_record(
         request_text, "intent",
         source_url=source_url if keep_url else None,
-        notes=["retrying the build with the same request"]))
+        notes=["retrying the build with the same request"])
+    for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
+        if record.get(key) is not None:
+            fresh[key] = record[key]
+    ni_flow._flow_write(store, item_id, fresh)
     started = ni_flow.start_flow_worker(
         store, item_id, source_url=source_url if keep_url else None)
     request.app.state.audit.append(

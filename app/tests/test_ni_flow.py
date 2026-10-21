@@ -3035,3 +3035,57 @@ def test_remap_keeps_the_born_marker_on_api_cards(monkeypatch) -> None:
         lambda url: sample)
     assert result["state"] == "ready", result
     assert store.get_item(iid)["spec"].get("_born") == "flow"
+
+
+def test_sweep_strands_locating_source_but_keeps_pick_pause() -> None:
+    """A bare state=source (locating, no pick marker) can be stranded by a restart.
+
+    The sweep used to skip every ``source``, leaving "Finding a source…" forever
+    with retry/reopen answering 409. The real pick pause must still survive.
+    """
+    store, _conn = _store()
+    old = "2020-01-01T00:00:00+00:00"
+    locating = ni_flow.create_shell_item(store, "locating")
+    picking = ni_flow.create_shell_item(store, "picking")
+    for iid, error in ((locating, None), (picking, ni_flow.AWAITING_SOURCE_PICK)):
+        record = ni_flow._flow_read(store, iid) or {}
+        record.update(state="source", error=error, updated_at=old)
+        ni_flow._flow_write(store, iid, record)
+    assert ni_flow.sweep_stranded_flows(store) == 1
+    assert (ni_flow._flow_read(store, locating) or {})["state"] == "failed"
+    assert (ni_flow._flow_read(store, picking) or {})["state"] == "source"
+
+
+def test_sweep_skips_flow_with_live_worker() -> None:
+    """A slow but live worker (id in _INFLIGHT) must not be failed as stale."""
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "slow worker")
+    record = ni_flow._flow_read(store, item_id) or {}
+    record["updated_at"] = "2020-01-01T00:00:00+00:00"
+    ni_flow._flow_write(store, item_id, record)
+    assert ni_flow._claim(item_id)
+    try:
+        assert ni_flow.sweep_stranded_flows(store) == 0
+    finally:
+        ni_flow._release(item_id)
+    assert (ni_flow._flow_read(store, item_id) or {})["state"] != "failed"
+    assert ni_flow.sweep_stranded_flows(store) == 1
+
+
+def test_board_keeps_terminal_slot_that_carries_a_question() -> None:
+    """A finished card whose terminal asks model_consent must keep asking.
+
+    The H2 hiding used to delete that terminal slot, so the question vanished.
+    """
+    store, _conn = _store()
+    item_id = ni_flow.create_shell_item(store, "asks consent")
+    spec = dict(store.get_item(item_id)["spec"])
+    spec.pop("_shell", None)
+    store.update_spec(item_id, spec, origin="user")
+    store.write_snapshot(item_id, "latest", {"value": 1}, ok=True)
+    ni_flow._terminate_unsupported(
+        store, item_id, "building would use a cloud model",
+        question={"kind": "model_consent", "model": "cloud-x", "local": ""})
+    field = ni_flow.board_flow_field(store, item_id)
+    assert field is not None and field["question"]["kind"] == "model_consent"
+    assert ni_flow._flow_read(store, item_id) is not None, "slot must survive the read"
