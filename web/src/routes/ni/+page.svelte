@@ -10,6 +10,7 @@
   import { goto } from "$app/navigation";
   import CardShell from "$lib/components/CardShell.svelte";
   import BuildProgress from "$lib/components/BuildProgress.svelte";
+  import LinksStop from "$lib/components/LinksStop.svelte";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import { cardText, withoutCardText, type CardText } from "$lib/ni/cardText";
@@ -44,7 +45,7 @@
   } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { fitText } from "$lib/ni/fit";
-  import { allows, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
+  import { AWAITING_SOURCE_PICK, allows, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, rowActions, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -197,17 +198,19 @@
   let flowActionError = $state<Record<string, string>>({});
   let answerDateText = $state<CardText>({});
 
-  async function pickSource(item: NiBoardItem, urlOverride?: string): Promise<void> {
+  // Returns true when the server took the source. `pasted` marks the user's own link (default:
+  // the paste form, i.e. no urlOverride); the v2 stop card passes its pasted text with true.
+  async function pickSource(item: NiBoardItem, urlOverride?: string, pasted = urlOverride === undefined): Promise<boolean> {
     console.assert(item.flow?.state === "source", "pickSource: pause required");
     // A Library-row tap submits the sealed URL verbatim — the tap IS the consent.
     // No urlOverride = the paste form: the user's own link (it builds even when the
     // card offered the same page as a link; that card then waits for their YES).
     const url = (urlOverride ?? cardText(pickUrlText, item.id)).trim();
-    if (url.length < 8) return;
+    if (url.length < 8) return false;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
-      const out = await api.niFlowPickSource(item.id, url, urlOverride === undefined);
+      const out = await api.niFlowPickSource(item.id, url, pasted);
       pickUrlText = withoutCardText(pickUrlText, item.id);
       toast(out.needs && out.needs.length > 0
         ? "This source needs one more thing — see the card."
@@ -215,8 +218,10 @@
           ? "Source set — it starts as soon as a build slot frees up."
           : "Source set — sampling it now.");
       await load();
+      return true;
     } catch (err) {
       flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — check the URL." };
+      return false;
     } finally {
       busyId = null;
     }
@@ -1425,7 +1430,7 @@
                       onclick={() => retryFlow(item)}
                     >{busyId === item.id ? "Retrying…" : "Retry"}</button>
                   {/if}
-                  {#if item.shell && item.flow.reopen?.includes("pick_source")}
+                  {#if rowActions(item) === null && item.shell && item.flow.reopen?.includes("pick_source")}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
@@ -1436,6 +1441,19 @@
                 {/if}
                 {#if flowActionError[item.id]}
                   <p class="error ni-note-sp">{flowActionError[item.id]}</p>
+                {/if}
+              {:else if item.flow.state === "source" && rowActions(item) !== null}
+                <!-- v2: no source-pick UI. While the engine looks (or tries rows) the progress line
+                     above says so; when it stops for lack of a Library source the card lists the
+                     links read-only and keeps paste-a-link. -->
+                {#if item.flow.error === AWAITING_SOURCE_PICK || item.flow.progress?.gate === "links"}
+                  <LinksStop
+                    suggestions={item.flow.suggestions}
+                    busy={busyId === item.id}
+                    error={flowActionError[item.id] ?? ""}
+                    clause={tapClause(item.flow)}
+                    onPaste={(url) => pickSource(item, url, true)}
+                  />
                 {/if}
               {:else if item.flow.state === "source" && item.flow.suggestions === undefined}
                 <p class="muted ni-note">
