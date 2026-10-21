@@ -452,7 +452,7 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                 ct_ok = ctype.startswith(allowed_ct) or ("application/json" in allowed_ct and _is_json_type(ctype))
                 if not ct_ok and not accept_zip_magic:
                     raise FetchError(f"content-type not allowed: {ctype or 'unknown'}",
-                                     kind="not_json")
+                                     kind="not_json", content_type=_media_type(response))
                 content = _read_capped(response, max_bytes, deadline_seconds)
                 # accept_zip_magic: the header didn't match, but a real .sbvault is a ZIP — accept it
                 # if the bytes prove it, else it's the host's HTML/error page, so refuse clearly.
@@ -527,9 +527,14 @@ def safe_fetch_json(url: str, headers: dict | None = None,
 
     got = _guarded_get(url, ("application/json", "text/"), _MAX_BYTES,
                        extra_headers=_json_headers(headers), allow_redirects=allow_redirects)
+    text = decode_body(got["content"], got["content_type"])
     try:
-        return json.loads(decode_body(got["content"], got["content_type"]))
+        return json.loads(text)
     except ValueError:
+        from .formats import looks_like_html  # lazy: formats is a pure-text leaf
+        if looks_like_html(text):  # the body decides, not the header: a maintenance page served as JSON
+            raise FetchError("upstream returned a web page, not JSON", kind="not_json",
+                             content_type="text/html") from None
         raise FetchError("upstream returned invalid JSON", kind="not_json") from None
 
 

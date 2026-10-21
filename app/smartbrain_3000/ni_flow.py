@@ -4169,6 +4169,12 @@ def _sniffed_textual(url: str) -> tuple[object, str]:
     return _textual_parse(text, sniffed), sniffed
 
 
+def _is_web_page(exc: BaseException) -> bool:
+    """True when a fetch failure says the response was an HTML page (set by the guard's header refusal
+    or by a textual parser that saw a web page body), whichever format the source was sealed as."""
+    return str(getattr(exc, "content_type", "") or "") in ("text/html", "application/xhtml+xml")
+
+
 def _textual_parse(text: str, fmt: str) -> object:
     """Parse ``text`` per ``fmt``; a parse failure surfaces as FetchError kind=not_<fmt>."""
     from . import formats as _formats
@@ -4182,6 +4188,10 @@ def _textual_parse(text: str, fmt: str) -> object:
         if fmt == "xml":
             return _formats.parse_xml(text)
         return _formats.parse_text(text)
+    except _formats.HtmlBody:
+        raise _netguard_mod.FetchError(
+            f"{fmt} source returned a web page, not its data",
+            kind=_netguard_mod.format_error_kind(fmt), content_type="text/html") from None
     except _formats.FormatError as exc:
         raise _netguard_mod.FetchError(
             f"parse failed for {fmt}: {exc}",
@@ -5507,12 +5517,14 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         own = store.get_item(item_id) if remap else None
         own_page = bool(own) and \
             (own["spec"].get("source") or {}).get("type") == "http_page"
-        if not_json and picked:
+        web_page = _is_web_page(exc)  # any format: the body (or header) said HTML where data was sealed
+        if (not_json or web_page) and picked:
             # C12: a Library row promised its data; a page back is a broken contract, never a page
             # card (ruling 2026-10-05: a tapped Library row builds only from its declared answers)
-            moved = _move_on(store, item_id, pick_url, "did not return its data", request, intent, call_model)
+            why = "returned a web page, not its data" if web_page else "did not return its data"
+            moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
             return moved if moved is not None else \
-                _fail(store, item_id, "fetch", "the source did not return its data")
+                _fail(store, item_id, "fetch", f"the source {why}")
         if not_json and (not remap or own_page):
             # A remap of a PAGE card rebuilds against the same consented
             # URL (P2: Fix recompiles a drifted program); an http_json card

@@ -53,6 +53,30 @@ class FormatError(Exception):
     """A textual response did not parse to a bounded, walkable shape."""
 
 
+class HtmlBody(FormatError):
+    """The body is a web page (a maintenance or error page served 200), not the data the source promised."""
+
+
+# A body that OPENS as a web page: optional BOM, an XML prolog and comments, then a doctype html, <html>,
+# <head> or <body>. Anchored to the start, so a feed or CSV that merely quotes markup later never matches.
+_HTML_OPEN_RE = re.compile(
+    r"^\ufeff?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--.*?-->\s*)*(?:<!doctype\s+html\b|<html[\s>]|<head[\s>]|<body[\s>])",
+    re.IGNORECASE | re.DOTALL)
+
+
+def looks_like_html(text: str) -> bool:
+    """True when ``text`` opens as a web page, whatever its content-type said (the body decides)."""
+    assert isinstance(text, str), "text required"
+    return _HTML_OPEN_RE.match(text[:4096]) is not None
+
+
+def _refuse_html(text: str) -> None:
+    """Shared by every textual parser: a web page is a fetch failure, never a (garbage) parse."""
+    assert isinstance(text, str), "text required"
+    if looks_like_html(text):
+        raise HtmlBody("returned a web page, not its data")
+
+
 # --- CSV --------------------------------------------------------------------------
 
 def parse_csv(text: str) -> dict:
@@ -68,6 +92,7 @@ def parse_csv(text: str) -> dict:
     (field 2026-09-28: FRED unemployment showed 1948's 3.4). Row cap =
     MAX_CSV_ROWS (the newest rows are kept); cell length cap = MAX_CSV_CELL.
     """
+    _refuse_html(text)
     assert isinstance(text, str), "text required"
     assert len(text) >= 0, "text length invariant"
     if not text.strip():
@@ -192,6 +217,7 @@ def parse_feed(text: str) -> dict:
     the entity-declaration pre-check here is the defence against billion-laughs
     style expansion. Returns ``{"title", "items": [{title, link, summary, ...}]}``.
     """
+    _refuse_html(text)
     assert isinstance(text, str), "text required"
     assert len(text) >= 0, "text length invariant"
     _refuse_doctype(text)
@@ -213,6 +239,7 @@ def parse_xml(text: str) -> dict:
     names that don't fit are dropped so the pipeline never sees them. Walked
     iteratively (no recursion) with explicit depth + node bounds.
     """
+    _refuse_html(text)
     assert isinstance(text, str), "text required"
     assert MAX_XML_DEPTH > 0, "depth cap positive"
     _refuse_doctype(text)
