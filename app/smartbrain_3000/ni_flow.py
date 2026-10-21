@@ -6725,8 +6725,11 @@ def is_working(item_id: str) -> bool:
         return item_id in _INFLIGHT
 
 
-def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
+def board_flow_field(store: ni.NIStore, item_id: str, *, read_only: bool = False) -> dict | None:
     """Return the ``{state, error?}`` compact flow view for the board row.
+
+    ``read_only`` (v2 per-item poll): the same view with no bookkeeping writes (no retired-state re-pick,
+    no terminal-slot clear), so a poll can never change what it reads.
 
     ``None`` when no flow slot exists OR the flow reached ``ready``. In-progress
     states (intent/source/sampling/mapping/assembling/awaiting_credential/
@@ -6745,7 +6748,8 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         return None
     state = str(record.get("state") or "")
     if state == _RETIRED_CONFIRM_STATE:
-        record = reenter_source_pick(store, item_id, _RETIRED_NOTE)
+        record = (dict(record, state="source", error=AWAITING_SOURCE_PICK) if read_only
+                  else reenter_source_pick(store, item_id, _RETIRED_NOTE))
         state = "source"
     if state == "ready":
         return None
@@ -6760,7 +6764,8 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         # sample preview, and hiding the terminal record there erased the
         # honest reason AND the way out. Shells always tell the truth.
         try:
-            store.delete_snapshot(item_id, "flow")
+            if not read_only:
+                store.delete_snapshot(item_id, "flow")
         except Exception as exc:  # bookkeeping only
             log.warning("ni_flow: terminal-slot clear failed for %s: %s",
                         item_id, exc)

@@ -117,6 +117,17 @@ def _pick_board_snapshot(store: ni.NIStore, item: dict) -> dict | None:
     return None if fallback is None else {**fallback, "slot": "last_good"}
 
 
+def _awaiting_yes_of(item: dict) -> dict | None:
+    """The board's ``awaiting_yes`` block for one item (None unless it waits for the user's YES / Keep)."""
+    assert isinstance(item, dict), "item required"
+    built_from = item["spec"].get("_built_from") or {}
+    block = ({"from": {"page": "page", "auto": "library"}.get(built_from.get("path"), "dataset"),
+              "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
+             if ni.awaits_yes(item) else None)
+    assert block is None or set(block) == {"from", "host", "title"}, "closed keys"
+    return block
+
+
 def _board_row(store: ni.NIStore, item: dict, *,
                library_index: dict[str, dict] | None = None,
                library_pack_id: str | None = None,
@@ -145,7 +156,6 @@ def _board_row(store: ni.NIStore, item: dict, *,
     assert store is not None and item, "store + item required"
     snap = _pick_board_snapshot(store, item)
     slot = "preview" if item["state"] == "draft" else (snap.get("slot") if snap else None)
-    built_from = item["spec"].get("_built_from") or {}
     source_type = (item["spec"].get("source") or {}).get("type")
     # A flow SHELL (ni_flow._empty_shell_spec) carries a `model` placeholder source but has read
     # nothing: no "Interpreted" chip while it builds (found 2026-10-14 recording the NI clip —
@@ -179,10 +189,7 @@ def _board_row(store: ni.NIStore, item: dict, *,
         # model-mapped dataset shows its reading and where it came from, and waits for the
         # user's YES (POST /validate ok=true); NO (ok=false) re-lands the source pick without
         # that source. None for every other card.
-        "awaiting_yes": ({"from": {"page": "page", "auto": "library"}.get(built_from.get("path"), "dataset"),
-                          "host": str(built_from.get("host") or ""),
-                          "title": str(built_from.get("title") or "")}
-                         if ni.awaits_yes(item) else None),
+        "awaiting_yes": _awaiting_yes_of(item),
         # W2: True while the flow has not replaced the placeholder spec — the
         # card hides Activate and says creation didn't finish.
         "shell": item["spec"].get("_shell") is True,
@@ -446,6 +453,23 @@ def get_item_image(request: Request, item_id: str) -> Response:
     media_type = ni._IMAGE_MEDIA_BY_FORMAT.get(snap["format"], "application/octet-stream")
     return Response(content=snap["bytes"], media_type=media_type,
                     headers={"Cache-Control": "no-store"})
+
+
+@router.get("/api/ni/items/{item_id}/flow")
+def get_item_flow(request: Request, item_id: str) -> dict:
+    """v2 per-item poll: ``{state, flow, awaiting_yes, actions}`` for ONE item (the board row's own
+    pieces, without the other items' payloads). Strictly read-only; 404 for an unknown item or under v1."""
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None or ni_flow.flow_mode(store.conn) != "v2":
+        raise HTTPException(status_code=404, detail="item not found")
+    flow = ni_flow.board_flow_field(store, item_id, read_only=True)
+    waiting = _awaiting_yes_of(item)
+    actions = list(flow["actions"]) if flow and "actions" in flow else ni_master.actions_for(
+        "", {}, shell=item["spec"].get("_shell") is True, awaiting_yes=waiting is not None,
+        item_state=item["state"], has_payload=_pick_board_snapshot(store, item) is not None)
+    assert isinstance(actions, list), "actions are a list"
+    return {"id": item_id, "state": item["state"], "flow": flow, "awaiting_yes": waiting, "actions": actions}
 
 
 @router.get("/api/ni/items/{item_id}")
