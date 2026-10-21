@@ -34,6 +34,11 @@ only some asked places show; right when checks ran and passed. With nothing chec
 the human verdict, so replaying the 2026-10-05 results reproduces 13 / 6 / 4 / 27. `aggregate` gives
 counts and R, P, W, L rates per kind and overall (L = links + declined).
 
+The table prints a `review` column (`needs_review` in the `--out` table) right after `wrong`, for every kind
+row and for ALL: the number of runs the scorer flagged for a human look, whatever their class. Read "wrong 0"
+together with it. A built-source mismatch is scored `partial` with `needs_review`, not `wrong`, so a table
+with `wrong` 0 and `review` above 0 still has cards a person has not judged.
+
 The source check reads only the source the card was built from (`built_source`: the last tapped row,
 which under v2 is the row the flow picked for itself, or the web page / dataset an open-path card says
 it came from), in v1 and v2 alike. A row v1 tapped but did not build from never counts. A built source
