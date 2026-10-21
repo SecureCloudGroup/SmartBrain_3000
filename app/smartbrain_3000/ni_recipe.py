@@ -43,6 +43,7 @@ _BUDGET_KEYS = frozenset({"turns", "fetches", "searches", "seconds"})
 def _text(v: object, what: str, n: int, *, empty: bool = False) -> str:
     """A one-line printable string of at most ``n`` characters."""
     assert n > 0, "a positive bound"
+    assert what, "a field name for the error"
     if not isinstance(v, str) or len(v) > n or (not v and not empty) or not v.isprintable():
         raise ValueError(f"{what} must be one printable line of 1..{n} characters")
     return v
@@ -50,6 +51,8 @@ def _text(v: object, what: str, n: int, *, empty: bool = False) -> str:
 
 def _closed(d: object, keys: frozenset[str], what: str, *, required: frozenset[str] | None = None) -> dict:
     """A dict whose keys are all in ``keys`` and include ``required`` (default: all of ``keys``)."""
+    assert keys, "a closed key set"
+    assert required is None or required <= keys, "required keys must be allowed keys"
     if not isinstance(d, dict):
         raise ValueError(f"{what} must be an object")  # noqa: TRY004
     extra = set(d) - keys
@@ -60,12 +63,16 @@ def _closed(d: object, keys: frozenset[str], what: str, *, required: frozenset[s
 
 
 def _int(v: object, what: str, lo: int, hi: int) -> int:
+    assert lo <= hi, "a non-empty range"
+    assert what, "a field name for the error"
     if not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi:
         raise ValueError(f"{what} must be an integer {lo}..{hi}")
     return v
 
 
 def _strs(v: object, what: str, n: int, item: int) -> None:
+    assert n > 0 and item > 0, "positive bounds"
+    assert what, "a field name for the error"
     if not isinstance(v, list) or len(v) > n:
         raise ValueError(f"{what} must be a list of at most {n}")
     for x in v:  # bounded by n
@@ -73,6 +80,7 @@ def _strs(v: object, what: str, n: int, item: int) -> None:
 
 
 def _scalar(v: object, what: str) -> None:
+    assert what, "a field name for the error"
     ok = isinstance(v, (bool, int, float)) and not (isinstance(v, float) and not math.isfinite(v))
     if not (ok or isinstance(v, str)):
         raise ValueError(f"{what} must be a scalar")
@@ -201,6 +209,7 @@ def validate_recipe(value: object) -> None:
 
 def _has_secret(node: object, depth: int = 0) -> bool:
     """True when ``node`` holds a ``$secret`` ref or a secret-kind param anywhere (depth-bounded)."""
+    assert depth >= 0, "depth counts down from the root"
     if depth > 24:
         return True  # absurd nesting is refused, not walked
     if isinstance(node, dict):

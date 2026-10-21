@@ -42,9 +42,6 @@ to know when a release changes behavior.
 - **In the new flow, Delete is always offered**, including while a card builds or waits
   for Keep. A card that stopped on the links list no longer shows a Cancel button or a
   progress bar.
-
-### Fixed
-
 - **An approved action interrupted by a restart no longer parks its turn for good.**
   The approval row is marked as running before the action starts; if the app stopped
   before the result was recorded, that row counted as still running forever, so the

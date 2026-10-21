@@ -6089,6 +6089,8 @@ def _one_stretch(claims: list[list[int]], width: int) -> bool:
 
 # Tick-time upgrade seam (S4a): ni_flow registers its pre-F1 literal-date rewrite here at import,
 # so a tick never imports ni_flow (the ni -> ni_flow cycle). None until registered.
+# main.py imports ni_flow at startup, which fills it; a script that imports ni alone runs
+# ticks without the pre-F1 upgrade.
 _TICK_UPGRADE: Callable[[Any, dict], dict | None] | None = None
 
 
