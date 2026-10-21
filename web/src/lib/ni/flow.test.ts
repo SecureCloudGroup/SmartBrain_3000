@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AWAITING_SOURCE_PICK,
+  awaitingYesButtons,
   awaitingYesSource,
   flowStageLabel,
   hasAction,
@@ -188,5 +189,27 @@ describe("flowStageLabel with progress", () => {
   it("keeps the v1 labels without progress and never labels a terminal flow", () => {
     expect(flowStageLabel({ state: "source" })).toBe("Finding the source…");
     expect(flowStageLabel({ state: "failed", progress: { step: 1, of: 4, label: "x" } })).toBe("");
+  });
+});
+
+describe("awaiting-yes wording for from: library", () => {
+  it("names the Library source with its host", () => {
+    expect(awaitingYesSource({ from: "library", host: "data.cityofchicago.org", title: "Crimes" }))
+      .toBe("From the SmartBrain Library: Crimes (data.cityofchicago.org)");
+    expect(awaitingYesSource({ from: "library", host: "api.nasa.gov", title: "" }))
+      .toBe("From the SmartBrain Library: api.nasa.gov");
+    expect(awaitingYesSource({ from: "library", host: "", title: "" })).toBe("From the SmartBrain Library");
+  });
+
+  it("leaves the page and dataset sentences alone", () => {
+    expect(awaitingYesSource({ from: "page", host: "a.com", title: "T" })).toBe("From the web page a.com — T");
+    expect(awaitingYesSource({ from: "dataset", host: "a.com", title: "" })).toBe("From the dataset at a.com");
+  });
+
+  it("reads Keep / Try another source only for library", () => {
+    expect(awaitingYesButtons({ from: "library", host: "h", title: "t" }))
+      .toEqual({ yes: "Keep", yesBusy: "Keeping…", no: "Try another source" });
+    expect(awaitingYesButtons({ from: "page", host: "h", title: "t" }).yes).toBe("Yes, that’s it");
+    expect(awaitingYesButtons({ from: "dataset", host: "h", title: "t" }).no).toBe("No, try another source");
   });
 });

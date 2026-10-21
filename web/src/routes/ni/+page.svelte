@@ -43,7 +43,7 @@
   } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { fitText } from "$lib/ni/fit";
-  import { awaitingYesSource, flowStageLabel, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
+  import { awaitingYesButtons, awaitingYesSource, flowStageLabel, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -1675,6 +1675,7 @@
 
           {#if item.awaiting_yes && item.payload && !item.flow}
             {@const feeds = feedCandidates(item)}
+            {@const yesWords = awaitingYesButtons(item.awaiting_yes)}
             <!-- Ruling 2026-10-04 ("hold open paths for a YES"): a card built from a web page
                  or a model-mapped dataset shows the reading it found (the scene above) and
                  where it came from, and goes live only on the user's YES. NO goes back to
@@ -1687,12 +1688,12 @@
                   class="secondary"
                   disabled={busyId === item.id}
                   onclick={() => validateLooksRight(item)}
-                >{busyId === item.id ? "Checking…" : "Yes, that’s it"}</button>
+                >{busyId === item.id ? yesWords.yesBusy : yesWords.yes}</button>
                 <button
                   class="ghost"
                   disabled={busyId === item.id}
                   onclick={() => declineReading(item)}
-                >No, try another source</button>
+                >{yesWords.no}</button>
               </div>
               {#if feeds.length > 0}
                 <!-- Round 20 (B3a, R12): the page's own data feed, by its exact address. -->

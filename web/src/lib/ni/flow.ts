@@ -106,12 +106,28 @@ export function isFlowActive(flow: NiItemFlow | null | undefined): boolean {
 export function awaitingYesSource(a: NiAwaitingYes): string {
   console.assert(typeof a === "object" && a !== null, "awaitingYesSource: a is object");
   console.assert(typeof a.host === "string" && typeof a.title === "string", "awaitingYesSource: strings");
-  const kind = a.from === "page" ? "web page" : "dataset";
   const host = a.host.trim();
   const title = a.title.trim();
+  if (a.from === "library") {
+    // v2 auto-pick: an installed Library source the engine chose and built from.
+    const named = title !== "" && title.toLowerCase() !== host.toLowerCase();
+    const name = named ? title : host;
+    if (!name) return "From the SmartBrain Library";
+    return host && named ? `From the SmartBrain Library: ${title} (${host})` : `From the SmartBrain Library: ${name}`;
+  }
+  const kind = a.from === "page" ? "web page" : "dataset";
   const named = title !== "" && title.toLowerCase() !== host.toLowerCase();
   if (!host) return named ? `From the ${kind} “${title}”` : `From a ${kind}`;
   return named ? `From the ${kind} ${host} — ${title}` : `From the ${kind} at ${host}`;
+}
+
+/** The two buttons of the awaiting-yes block. A card the v2 auto-pick built from the Library
+ *  reads "Keep" / "Try another source"; every other card keeps its YES / NO wording. */
+export function awaitingYesButtons(a: NiAwaitingYes): { yes: string; yesBusy: string; no: string } {
+  console.assert(typeof a === "object" && a !== null, "awaitingYesButtons: a is object");
+  console.assert(typeof a.from === "string", "awaitingYesButtons: from is string");
+  if (a.from === "library") return { yes: "Keep", yesBusy: "Keeping…", no: "Try another source" };
+  return { yes: "Yes, that’s it", yesBusy: "Checking…", no: "No, try another source" };
 }
 
 /** The source-pick card's rows, split the way the card shows them (ruling 2026-10-05: "Library
