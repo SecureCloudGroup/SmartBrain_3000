@@ -827,6 +827,9 @@ export interface NiAwaitingYes {
   from: "page" | "dataset" | "library";
   host: string;
   title: string; // "" when the source had none (a pasted link)
+  // "library" cards only: true when the build used a key the user typed on the card. Additive;
+  // absent from a server that does not send it (the key sentence is then left out).
+  used_key?: boolean;
 }
 
 // GET /api/ni/items/{id}/flow (v2 only): one item's flow fields for the 3 s poll.

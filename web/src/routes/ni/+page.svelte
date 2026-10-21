@@ -44,7 +44,7 @@
   } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { fitText } from "$lib/ni/fit";
-  import { allows, awaitingYesButtons, awaitingYesSource, flowStageLabel, hasAction, pauseKind, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
+  import { allows, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -1700,6 +1700,9 @@
             <div class="ni-commission">
               <p class="ni-note-head">Is this what you asked for?</p>
               <p class="muted ni-yes-from">{awaitingYesSource(item.awaiting_yes)}</p>
+              {#if awaitingYesNotice(item.awaiting_yes)}
+                <p class="muted ni-yes-from">{awaitingYesNotice(item.awaiting_yes)}</p>
+              {/if}
               <div class="ni-actions">
                 {#if allows(item, "keep", true)}
                   <button

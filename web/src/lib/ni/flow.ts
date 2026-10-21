@@ -147,6 +147,17 @@ export function awaitingYesSource(a: NiAwaitingYes): string {
   return named ? `From the ${kind} ${host} — ${title}` : `From the ${kind} at ${host}`;
 }
 
+/** The consent line above Keep on an auto-picked Library card: the one read already made, and
+ *  that no further read happens until Keep. "" for page and dataset cards (their tap was the
+ *  consent). Mentions the typed key only when the backend says the build used one. */
+export function awaitingYesNotice(a: NiAwaitingYes): string {
+  console.assert(typeof a === "object" && a !== null, "awaitingYesNotice: a is object");
+  console.assert(typeof a.from === "string", "awaitingYesNotice: from is string");
+  if (a.from !== "library") return "";
+  const base = "SmartBrain read this source once to build this preview. It won’t read it again until you tap Keep.";
+  return a.used_key === true ? `${base} It used the key you typed.` : base;
+}
+
 /** The two buttons of the awaiting-yes block. A card the v2 auto-pick built from the Library
  *  reads "Keep" / "Try another source"; every other card keeps its YES / NO wording. */
 export function awaitingYesButtons(a: NiAwaitingYes): { yes: string; yesBusy: string; no: string } {

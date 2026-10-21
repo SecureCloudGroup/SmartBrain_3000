@@ -4,6 +4,7 @@ import {
   allows,
   pauseKind,
   awaitingYesButtons,
+  awaitingYesNotice,
   awaitingYesSource,
   flowStageLabel,
   hasAction,
@@ -247,5 +248,25 @@ describe("allows / pauseKind: rows to button sets", () => {
     expect(pauseKind({ enabled: true, actions: ["pause"] })).toBe("pause");
     expect(pauseKind({ enabled: false, actions: ["resume", "edit"] })).toBe("resume");
     expect(pauseKind({ enabled: true, actions: ["cancel"] })).toBe("");
+  });
+});
+
+describe("awaitingYesNotice", () => {
+  it("says the source was read once and not again until Keep", () => {
+    const text = awaitingYesNotice({ from: "library", host: "h", title: "t" });
+    expect(text).toContain("read this source once");
+    expect(text).toContain("until you tap Keep");
+    expect(text).not.toContain("key");
+  });
+
+  it("adds the typed key only when the build used one", () => {
+    expect(awaitingYesNotice({ from: "library", host: "h", title: "t", used_key: true }))
+      .toContain("It used the key you typed.");
+    expect(awaitingYesNotice({ from: "library", host: "h", title: "t", used_key: false })).not.toContain("key");
+  });
+
+  it("is empty for page and dataset cards", () => {
+    expect(awaitingYesNotice({ from: "page", host: "h", title: "t" })).toBe("");
+    expect(awaitingYesNotice({ from: "dataset", host: "h", title: "t", used_key: true })).toBe("");
   });
 });
