@@ -1,0 +1,216 @@
+"""S3 BE-4: v2 auto-pick. A new card fetches the top buildable Library source once, before any tap,
+falls through the remaining rows and prefers rows that need no key.
+
+Security posture (``test_security_*``): the only pre-Keep fetch is of an installed Library row through
+the flow's own fetcher; a row needing a key or contact email is never fetched (no secret is read).
+"""
+
+from __future__ import annotations
+
+import copy
+
+import duckdb
+import pytest
+from test_ni_answers import (  # noqa: F401  (lib is a fixture)
+    _INTENT,
+    _QUERY_MARK,
+    OPEN_METEO,
+    WEATHER_URL,
+    _ir_reply,
+    lib,
+)
+
+from smartbrain_3000 import db as dbmod
+from smartbrain_3000 import ni as nimod
+from smartbrain_3000 import ni_flow
+from smartbrain_3000.secrets import gen_master_key
+
+_QUAKE_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson"
+_RATES_URL = "https://api.rates.example.org/latest?base=USD"
+_KEY = {"in": "query", "name": "API_KEY", "prefix": "", "docs_url": "https://docs.rates.example.org/key"}
+_REQUEST = "NYC temperature and conditions"
+
+
+@pytest.fixture(autouse=True)
+def _v2_local(monkeypatch):
+    from smartbrain_3000 import gateway as _gateway
+    monkeypatch.setattr(_gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
+    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v2")
+    monkeypatch.setattr(ni_flow.pagegraph, "fetch_page_graph",
+                        lambda url, **kw: (_ for _ in ()).throw(AssertionError("no page fetch")))
+
+
+def _store() -> nimod.NIStore:
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    return nimod.NIStore(conn, gen_master_key())
+
+
+def _row(sid: str, url: str, **extra) -> dict:
+    return {"source_id": sid, "title": f"{sid} title", "host": url.split("/")[2], "url": url,
+            "provider": "Provider", "authority": "official", "label": "", "choice": False, **extra}
+
+
+class _Wrap:
+    """The real fixture Library for answers; locate offers ``cands`` (and records the limit asked)."""
+
+    def __init__(self, real, cands: list[dict]) -> None:
+        self.real, self.cands, self.limits = real, cands, []
+
+    def candidates(self, request: str, limit: int = 3, hint: dict | None = None):
+        self.limits.append(limit)
+        return copy.deepcopy(self.cands[:limit]), []
+
+    def answers(self, source_id: str) -> list[dict]:
+        return self.real.answers(source_id)
+
+    def get(self, source_id: str) -> dict | None:
+        return self.real.get(source_id)
+
+
+class _Search:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def search(self, query: str, limit: int = 10) -> dict:
+        self.queries.append(query)
+        return {"results": []}
+
+
+def _model(prompt: str) -> str:
+    if _QUERY_MARK in prompt:
+        return _ir_reply("temperature")
+    return '{"serves": true, "gaps": [], "wrong": []}'
+
+
+def _run(store, wrap, monkeypatch, fetch, *, search=None, request: str = _REQUEST) -> tuple[str, dict]:
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: wrap)
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", (lambda: search) if search else None)
+    item_id = ni_flow.create_shell_item(store, request)
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(request, "intent"))
+    out = ni_flow._run_external_flow(store, item_id, request, {**_INTENT, "wants": []}, None, _model, fetch)
+    return item_id, out
+
+
+def _fetcher(fetched: list[str], by_url: dict[str, object]):
+    def fetch(url: str) -> object:
+        fetched.append(url)
+        if url not in by_url:
+            raise AssertionError(f"fetched an address that is no Library row: {url}")
+        return copy.deepcopy(by_url[url])
+    return fetch
+
+
+def test_v2_builds_the_top_row_before_any_tap_and_holds_it_for_keep(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("open-meteo-forecast", WEATHER_URL)])
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {WEATHER_URL: OPEN_METEO}))
+    assert out["state"] == "ready" and fetched == [WEATHER_URL]
+    assert wrap.limits == [5]  # v2 looks five rows deep
+    assert store.get_item(item_id)["spec"]["_built_from"]["host"] == "api.open-meteo.com"
+    assert (ni_flow._flow_read(store, item_id) or {}).get("_try", {}).get("n") == 1
+
+
+def test_the_first_row_that_does_not_fit_falls_through_to_the_second(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("usgs-quakes", _QUAKE_URL), _row("open-meteo-forecast", WEATHER_URL)])
+    search = _Search()
+    item_id, out = _run(store, wrap, monkeypatch,
+                        _fetcher(fetched, {_QUAKE_URL: {"nothing": "here"}, WEATHER_URL: OPEN_METEO}), search=search)
+    assert out["state"] == "ready" and fetched == [_QUAKE_URL, WEATHER_URL]
+    assert search.queries == []  # a move-on with a row left never searches the web
+    record = ni_flow._flow_read(store, item_id)
+    assert record["_try"] == {"n": 2, "of": 2, "host": "api.open-meteo.com"}
+
+
+def test_exhausting_every_row_searches_the_web_once_and_stops_honestly(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("usgs-quakes", _QUAKE_URL), _row("open-meteo-forecast", WEATHER_URL)])
+    search = _Search()
+    item_id, out = _run(store, wrap, monkeypatch,
+                        _fetcher(fetched, {_QUAKE_URL: {"x": 1}, WEATHER_URL: {"y": 2}}), search=search)
+    assert fetched == [_QUAKE_URL, WEATHER_URL] and len(search.queries) == 1
+    assert out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
+    assert store.get_item(item_id)["spec"].get("_shell") is True  # nothing was built
+    assert not out.get("_auto_picked")
+
+
+def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is a link
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}))
+    assert fetched == [] and out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
+    assert store.get_item(item_id)["spec"].get("_shell") is True
+
+
+def test_a_keyless_row_is_tried_before_a_row_that_needs_a_key(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("fx-rates", _RATES_URL, needs_key=_KEY),
+                       _row("open-meteo-forecast", WEATHER_URL)])
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {WEATHER_URL: OPEN_METEO}))
+    assert out["state"] == "ready" and fetched == [WEATHER_URL]
+    assert (ni_flow._flow_read(store, item_id) or {}).get("_access") is None  # never asked for a key
+
+
+def test_v1_still_parks_on_the_pick(lib, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("open-meteo-forecast", WEATHER_URL)])
+    wrap.candidates = lambda request, hint=None: (copy.deepcopy(wrap.cands), [])  # the v1 call carries no limit
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}))
+    assert fetched == [] and out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
+    assert out["_ranked_library"][0]["url"] == WEATHER_URL and "_try" not in out
+
+
+def test_no_to_a_kept_reading_moves_on_to_the_next_source_automatically(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("open-meteo-forecast", WEATHER_URL), _row("usgs-quakes", _QUAKE_URL)])
+    fetch = _fetcher(fetched, {WEATHER_URL: OPEN_METEO, _QUAKE_URL: {"x": 1}})
+    item_id, out = _run(store, wrap, monkeypatch, fetch)
+    assert out["state"] == "ready" and fetched == [WEATHER_URL]
+    started: list[str] = []
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, i, **kw: started.append(i) or True)
+    assert ni_flow.decline_reading(store, item_id) == {"kind": "relocate"}  # never a pick pause
+    record = ni_flow._flow_read(store, item_id)
+    assert started == [item_id] and WEATHER_URL in record["_declined"] and record["state"] == "intent"
+    ni_flow._auto_pick(store, item_id, _REQUEST, _INTENT, _model, fetch)  # what the restarted worker runs
+    assert fetched == [WEATHER_URL, _QUAKE_URL]  # the declined row is not offered again
+
+
+# --- the security posture ----------------------------------------------------------------------
+
+def test_security_auto_fetch_only_reaches_library_rows_through_the_flow_fetcher(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("usgs-quakes", _QUAKE_URL), _row("open-meteo-forecast", WEATHER_URL)])
+    # nothing reaches the network except through the fetcher the flow was given (netguard's own door)
+    for name in ("safe_fetch_text", "safe_fetch_json"):
+        monkeypatch.setattr(ni_flow._netguard_mod, name,
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("a side fetch")))
+    _run(store, wrap, monkeypatch, _fetcher(fetched, {_QUAKE_URL: {"x": 1}, WEATHER_URL: OPEN_METEO}), search=_Search())
+    assert set(fetched) <= {r["url"] for r in wrap.cands}  # each fetch is a Library row's own address
+    assert len(fetched) == 2  # the page browser is guarded by the autouse fixture
+
+
+class _NoSecrets:
+    """A secret store that fails the test on any touch."""
+
+    def __getattr__(self, name: str):
+        raise AssertionError(f"a secret was touched before Keep: {name}")
+
+
+def test_security_a_row_that_needs_a_key_is_never_fetched_and_no_secret_is_read(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    ni_flow.set_secrets_provider(lambda: _NoSecrets())
+    monkeypatch.setattr(ni_flow, "_fetch_with_access",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("keyed fetch before Keep")))
+    try:
+        wrap = _Wrap(lib, [_row("fx-rates", _RATES_URL, needs_key=_KEY)])
+        item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}))
+    finally:
+        ni_flow.set_secrets_provider(None)
+    assert fetched == [] and out["state"] == "awaiting_access"  # pauses for access exactly as a tap does
+    assert out["source_url"] == _RATES_URL and (ni_flow._flow_read(store, item_id) or {})["_access"]["key"]
+    # a contact-email row is the same: nothing is sent until the user gives it
+    wrap = _Wrap(lib, [_row("fx-rates", _RATES_URL, needs_contact=True)])
+    _item2, out2 = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), request="SEC filings for Apple")
+    assert fetched == [] and out2["state"] == "awaiting_access"

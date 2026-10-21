@@ -3904,10 +3904,82 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
     tap or paste is the consent for the first fetch.
     """
     assert isinstance(intent, dict), "intent required"
+    v2 = _is_v2(store)
     if known_url:
-        return _sample_and_map(store, item_id, request, intent, known_url,
-                                call_model, do_fetch)
+        out = _sample_and_map(store, item_id, request, intent, known_url,
+                              call_model, do_fetch)
+        if v2 and out.get("_auto_picked") and out.get("state") == "source" \
+                and out.get("error") == AWAITING_SOURCE_PICK and _buildable(out.get("_ranked_library")):
+            return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
+        return out
+    if v2:
+        return _auto_pick(store, item_id, request, intent, call_model, do_fetch)
     return _pause_source_pick(store, item_id, request, intent, call_model)
+
+
+_AUTO_ROWS = 5  # v2: how deep locate looks, so fall-through has rows to fall to
+
+
+def _row_needs_access(row: dict) -> bool:
+    """True when a Library row asks for the user's key or contact email (never sent before Keep)."""
+    assert isinstance(row, dict), "row required"
+    need = _clean_key_need(row.get("needs_key")) is not None or bool(row.get("needs_contact"))
+    assert isinstance(need, bool), "a flag"
+    return need
+
+
+def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
+               call_model: Callable[[str], str], do_fetch: Callable[[str], object]) -> dict:
+    """v2: no pick pause. Seal the Library rows keyless-first, then try them in turn (``_auto_continue``).
+
+    Consent posture: the only fetch before the user's Keep is of an installed Library row that declares
+    its answers, through the same netguard path as a tap; a row needing a key or contact email goes last
+    and asks for it on the card. Nothing recurs until Keep (the card is held, ``_built_from.path`` auto).
+    No buildable row: the existing honest stop (links; ruling 2026-10-05)."""
+    assert store is not None and item_id, "store + id required"
+    rows = _without_declined(store, item_id, _library_candidates(request, intent, limit=_AUTO_ROWS))
+    buildable = _buildable(rows)
+    if not buildable:
+        return _pause_source_pick(store, item_id, request, intent, call_model, rows=rows)
+    ordered = [r for r in buildable if not _row_needs_access(r)] + [r for r in buildable if _row_needs_access(r)]
+    assert len(ordered) == len(buildable), "a partition loses no row"
+    ordered += [r for r in rows if r not in buildable]  # the link rows ride behind, for the honest stop
+    _transition(store, item_id, "source", note="finding the best SmartBrain Library source",
+                _ranked_library=ordered, _ranked_search=None, _auto_picked=True, _try=None)
+    return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
+
+
+def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
+                   call_model: Callable[[str], str], do_fetch: Callable[[str], object]) -> dict:
+    """Try the sealed buildable rows in order until one builds, one needs access, or none is left.
+
+    Each try is one ``_sample_and_map``: it either lands the card (every existing post-fetch check is the
+    gate) or moves on, dropping the row — and runs the web search only once no buildable row is left."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(intent, dict) and callable(do_fetch), "intent + fetcher required"
+    rec: dict = {}
+    for _ in range(_AUTO_ROWS + 1):  # bounded: a try drops a row, and a row is tried once
+        rec = _flow_read(store, item_id) or {}
+        rows = _buildable(rec.get("_ranked_library"))
+        if rec.get("_cancel") or not rows or rec.get("state") != "source":
+            break
+        row, url = rows[0], str(rows[0].get("url") or "")
+        seal_library_pick(store, item_id, url, row)
+        done = int((rec.get("_try") or {}).get("n") or 0)
+        mark = {"n": done + 1, "of": done + len(rows), "host": str(row.get("host") or "")[:120]}
+        access = seal_access(store, item_id, url, row)
+        if access is not None:  # keyed rows are last: ask on the card, send nothing
+            _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark)
+            return pause_for_access(store, item_id, url,
+                                    [k for k, on in (("key", access["key"]), ("contact", access["contact"])) if on])
+        _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark,
+                    note=f"trying {mark['host']} ({mark['n']} of {mark['of']})")
+        out = _sample_and_map(store, item_id, request, intent, url, call_model, do_fetch)
+        if out.get("state") != "source":
+            return out
+    rec = {**(_flow_read(store, item_id) or rec), "_auto_picked": None}  # an honest stop is not an auto build
+    _flow_write(store, item_id, rec)
+    return rec
 
 
 # R2 (field 2026-09-15): desktop-side secrets access for remap sampling ONLY.
@@ -4112,15 +4184,17 @@ def _library_hint(intent: dict | None) -> dict:
             "place": intent.get("place"), "frame_kind": intent.get("frame_kind")}
 
 
-def _library_candidates(request: str, intent: dict | None = None) -> list[dict]:
+def _library_candidates(request: str, intent: dict | None = None, *, limit: int | None = None) -> list[dict]:
     """Library sources whose parameters all fill from the user's words, as sealable rows. The intent's
     frame rides as the hint (C1). No row (locate found no source about the ask, or the Library failed)
-    → the web stage runs. Each row says whether its source declares its answers (ruling 2026-10-05)."""
+    → the web stage runs. Each row says whether its source declares its answers (ruling 2026-10-05).
+    ``limit`` (v2 auto-pick only) deepens the list; None keeps the Library's own default."""
     lib = _resolve_library()
     if lib is None:
         return []
     try:
-        cands, _skipped = lib.candidates(request, hint=_library_hint(intent))
+        extra = {} if limit is None else {"limit": limit}
+        cands, _skipped = lib.candidates(request, hint=_library_hint(intent), **extra)
     except Exception as exc:
         log.warning("ni_flow: library candidates failed: %s", type(exc).__name__)
         return []
@@ -5042,7 +5116,8 @@ def _page_wrong_outlet(url: str, request: str, intent: dict) -> str:
 
 
 def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
-                       intent: dict, call_model: Callable[[str], str]) -> dict:
+                       intent: dict, call_model: Callable[[str], str],
+                       rows: list[dict] | None = None) -> dict:
     """The ONE source-pick pause. Layer 1 is the SmartBrain Library: sources
     whose parameters all fill from the user's words seal on the record. Ruling
     2026-10-05 ("Library cards; web as links"): only a source that declares its
@@ -5053,7 +5128,8 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
     found, providers unwired, or total failure → the plain pause (paste a URL),
     never a failed flow.
     """
-    library = _without_declined(store, item_id, _library_candidates(request, intent))
+    library = _without_declined(store, item_id,
+                                _library_candidates(request, intent) if rows is None else rows)
     if _buildable(library):
         _transition(store, item_id, "source",
                     error=AWAITING_SOURCE_PICK,
@@ -7005,10 +7081,13 @@ def decline_reading(store: ni.NIStore, item_id: str) -> dict:
         raise ValueError("item not found")
     url = str((item["spec"].get("source") or {}).get("url") or "")
     record = _flow_read(store, item_id) or {}
-    declined = [u for u in record.get("_declined") or [] if isinstance(u, str) and u != url]
-    declined = (declined + [url] if url else declined)[-_MAX_DECLINED:]
+    v2 = _is_v2(store)
+    named = [url, str(record.get("_library_url") or "")] if v2 else [url]  # v2: the filled address the row carries
+    declined = [u for u in record.get("_declined") or [] if isinstance(u, str) and u not in named]
+    declined = (declined + [u for u in named if u])[-_MAX_DECLINED:]
     _flow_write(store, item_id, {**record, "_declined": declined})
-    moved = _repick_without(store, item_id, url, why="isn't what you wanted (you said no)") if url else None
+    # v2: "No" never parks on a pick; it re-runs from the user's words and auto-picks the next source
+    moved = _repick_without(store, item_id, url, why="isn't what you wanted (you said no)") if url and not v2 else None
     if moved is not None and (moved.get("_ranked_library") or moved.get("_ranked_search")):
         _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
                     **{key: None for key in _PICK_SEAL_KEYS})
