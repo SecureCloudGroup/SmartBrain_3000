@@ -285,6 +285,8 @@ def _transition(store: ni.NIStore, item_id: str, state: str, **fields: Any) -> d
     """
     assert store is not None and item_id and isinstance(state, str), "args required"
     current = _flow_read(store, item_id) or {}
+    if current.get("_cancel") and "_cancel" not in fields:
+        return current  # v2 Cancel: a stage of the stopped worker must not revive the flow
     request = str(fields.pop("request", current.get("request", "")))
     source_url = fields.pop("source_url", current.get("source_url"))
     intent = fields.pop("intent", current.get("intent"))
@@ -6417,6 +6419,8 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     """
     assert store is not None and item_id, "args required"
     assert born is None or born in BORN_MARKERS, "born marker must be closed"
+    if (_flow_read(store, item_id) or {}).get("_cancel"):  # v2 Cancel: the user stopped it; seal nothing
+        return _flow_read(store, item_id) or {}
     if built_from is not None:
         spec["_built_from"] = built_from
     if render is not None and render.get("feeds"):
@@ -6696,6 +6700,29 @@ def start_flow_worker(store: ni.NIStore, item_id: str, *,
               f"OS refused to start the flow worker ({type(exc).__name__}); retry later")
         return False
     return True
+
+
+def cancel_flow(store: ni.NIStore, item_id: str) -> bool:
+    """v2 Cancel: stop a running (non-terminal) flow. Cooperative: a Python thread cannot be killed, so
+    the record is sealed ``failed(cancelled)`` with ``_cancel`` at once; the worker's later stage writes
+    are ignored (``_transition``), ``_auto_continue`` stops trying rows, and ``_finalize`` seals nothing.
+    The item keeps its spec (a shell stays a shell; a Fix leaves the working card). False when there is
+    no active flow to stop."""
+    assert store is not None and item_id, "store + id required"
+    record = _flow_read(store, item_id)
+    if record is None or str(record.get("state") or "") in _TERMINAL_STATES | {"ready"}:
+        return False
+    _transition(store, item_id, "failed", error="cancelled: stopped by you", note="cancelled by you",
+                _cancel=True, _question=None)
+    assert (_flow_read(store, item_id) or {}).get("_cancel") is True, "the cancel is sealed"
+    return True
+
+
+def is_working(item_id: str) -> bool:
+    """True while a flow worker still holds ``item_id`` (a cancelled one finishes its current fetch)."""
+    assert isinstance(item_id, str) and item_id, "id required"
+    with _INFLIGHT_LOCK:
+        return item_id in _INFLIGHT
 
 
 def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:

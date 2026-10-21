@@ -208,6 +208,9 @@ def choose_move(*, state: str, error_class: str, shell: bool) -> dict:
         # The source (or the worker) let the shell down — offer both roads.
         return {"move": "park", "question": None,
                 "reopen": ["retry", "pick_source"]}
+    if state == "failed" and error_class == "cancelled":
+        # v2 Cancel: the user stopped it; the one way on is to run the same request again
+        return {"move": "park", "question": None, "reopen": ["retry"]}
     if state in ("failed", "unsupported"):
         return {"move": "park", "question": None, "reopen": ["retry"]}
     return {"move": "advance", "question": None, "reopen": []}
@@ -231,6 +234,7 @@ _REASONS: dict[str, str] = {
     "busy": "Another card was building — this one couldn't start.",
     "worker": "The build crashed — retry runs it again from your request.",
     "remap": "The rebuild couldn't start from this card's source.",
+    "cancelled": "You stopped this build.",
 }
 
 

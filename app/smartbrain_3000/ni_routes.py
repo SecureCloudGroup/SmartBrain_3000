@@ -1052,6 +1052,8 @@ def retry_flow(request: Request, item_id: str) -> dict:
         raise HTTPException(
             status_code=409,
             detail=f"nothing to retry (flow state {state or 'none'!r})")
+    if ni_flow.flow_mode(store.conn) == "v2" and ni_flow.is_working(item_id):
+        raise HTTPException(status_code=409, detail="still stopping the last build — try again in a moment")
     request_text = str(record.get("request") or item["spec"].get("goal") or "")
     if not request_text:
         raise HTTPException(status_code=409, detail="flow record lost the request")
@@ -1076,6 +1078,25 @@ def retry_flow(request: Request, item_id: str) -> dict:
         result_summary=tools.summarize({"started": bool(started)}),
     )
     return {"id": item_id, "started": bool(started)}
+
+
+@router.post("/api/ni/items/{item_id}/flow/cancel")
+def cancel_item_flow(request: Request, item_id: str) -> dict:
+    """v2 Cancel: stop the card's running flow (cooperative; the worker finishes its current fetch and
+    seals nothing). Desktop-local, audited. 404 under v1 and for an unknown item; 409 unless a flow is
+    running (not ready, not already ended)."""
+    _require_desktop_local(request)
+    store = _store(request)
+    if ni_flow.flow_mode(store.conn) != "v2" or store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if not ni_flow.cancel_flow(store, item_id):
+        raise HTTPException(status_code=409, detail="nothing is building on this card")
+    request.app.state.audit.append(
+        "user", "ni_flow_cancel", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"cancelled": True}),
+    )
+    return {"ok": True, "cancelled": True}
 
 
 class PickSourceIn(BaseModel):
