@@ -37,6 +37,7 @@ import re
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -6058,6 +6059,18 @@ def _one_stretch(claims: list[list[int]], width: int) -> bool:
     return False
 
 
+# Tick-time upgrade seam (S4a): ni_flow registers its pre-F1 literal-date rewrite here at import,
+# so a tick never imports ni_flow (the ni -> ni_flow cycle). None until registered.
+_TICK_UPGRADE: Callable[[Any, dict], dict | None] | None = None
+
+
+def set_tick_upgrade(fn: Callable[[Any, dict], dict | None] | None) -> None:
+    """Register (or clear, with None) the best-effort per-tick spec upgrade ``run_item`` calls first."""
+    global _TICK_UPGRADE
+    assert fn is None or callable(fn), "upgrade must be callable or None"
+    _TICK_UPGRADE = fn
+
+
 def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
              schedules_store=None, kb: object | None = None,
              reserve_repair: object | None = None) -> dict:
@@ -6098,8 +6111,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     # any failure inside leaves the card alone (host-free log) so a broken upgrade can never
     # brick a tick.
     try:
-        from . import ni_flow as _ni_flow_mod
-        upgraded = _ni_flow_mod.upgrade_pre_f1_literal_dates(store, item)
+        upgraded = _TICK_UPGRADE(store, item) if _TICK_UPGRADE is not None else None
     except Exception:  # defensive: the upgrade is best-effort, never a run blocker
         log.info("ni upgrade: pre-F1 literal-date rewrite raised; card left untouched")
         upgraded = None

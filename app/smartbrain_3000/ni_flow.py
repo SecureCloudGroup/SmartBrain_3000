@@ -7373,3 +7373,6 @@ def sweep_stranded_flows(store: ni.NIStore) -> int:
               f"flow record older than {_STRANDED_HOURS}h at unlock/sweep")
         swept += 1
     return swept
+
+
+ni.set_tick_upgrade(upgrade_pre_f1_literal_dates)  # S4a: ni's tick reaches this through a seam, not an import
