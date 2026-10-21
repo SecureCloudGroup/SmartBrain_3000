@@ -397,7 +397,7 @@ def test_keep_on_an_auto_card_is_audited(client, lib, monkeypatch) -> None:  # n
     assert "ni_auto_pick" in before and "ni_keep" not in before  # the worker's fetch reached the real log
     assert client.post(f"/api/ni/items/{item_id}/validate", json={"ok": True}).status_code == 200
     kept = [r for r in client.app.state.audit.list(500) if r["tool"] == "ni_keep"]
-    assert len(kept) == 1 and "api.open-meteo.com" in kept[0]["args_summary"]
+    assert len(kept) == 1 and json.loads(kept[0]["args_summary"])["host"] == "api.open-meteo.com"
 
 
 # --- class tests: the sealed format is read at fetch time; an unattended pick honours a fit "no" ---
