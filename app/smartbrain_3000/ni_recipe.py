@@ -33,6 +33,7 @@ MAX_SOURCES = 6
 MAX_CONSTRAINTS = 12
 MAX_LIST = 8
 MAX_TURNS = 12
+CADENCE_MINUTES = {"realtime": 15, "hourly": 60, "daily": 1440, "weekly": 10080}  # floor: 15 minutes (plan D9)
 _QUESTION_KEYS = frozenset({"kind", "subject", "places", "entities", "window", "threshold", "order", "limit",
                             "compare_count", "units", "cadence"})
 _RECIPE_KEYS = frozenset({"question", "sources", "constraints", "tier", "verification", "provenance", "research"})
@@ -229,6 +230,17 @@ def is_researcher_draft(spec: dict) -> bool:
     return isinstance(prov, dict) and prov.get("author") == "researcher"
 
 
+def cadence_minutes(spec: dict) -> int | None:
+    """The refresh interval the code stamps from ``recipe.question.cadence`` (floored at 15 minutes), else None."""
+    assert isinstance(spec, dict), "spec must be a dict"
+    recipe = spec.get("recipe")
+    question = recipe.get("question") if isinstance(recipe, dict) else None
+    cadence = question.get("cadence") if isinstance(question, dict) else None
+    out = CADENCE_MINUTES.get(cadence) if isinstance(cadence, str) else None
+    assert out is None or out >= CADENCE_MINUTES["realtime"], "the cadence floor holds"
+    return out
+
+
 def check_researcher_draft(spec: dict) -> None:
     """Plan 6.4: a researcher draft may not carry an ``llm`` stage, a ``$secret`` (or secret param), a model
     or MCP source, or a model-chosen interval (the cadence comes from the question, stamped by code)."""
@@ -239,5 +251,5 @@ def check_researcher_draft(spec: dict) -> None:
         raise ValueError("researcher draft: mcp_tool and model sources are refused")
     if _has_secret(spec.get("source")) or _has_secret(spec.get("params")) or _has_secret(spec.get("pipeline")):
         raise ValueError("researcher draft: $secret and secret params are refused")
-    if "interval_minutes" in spec:
+    if "interval_minutes" in spec and spec["interval_minutes"] != cadence_minutes(spec):
         raise ValueError("researcher draft: interval_minutes is code-stamped from the question cadence, not chosen")

@@ -121,7 +121,7 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     """The board's ``awaiting_yes`` block for one item (None unless it waits for the user's YES / Keep)."""
     assert isinstance(item, dict), "item required"
     built_from = item["spec"].get("_built_from") or {}
-    block = ({"from": {"page": "page", "auto": "library"}.get(built_from.get("path"), "dataset"),
+    block = ({"from": {"page": "page", "auto": "library", "research": "library"}.get(built_from.get("path"), "dataset"),
               "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
              if ni.awaits_yes(item) else None)
     if block is not None and _used_access(item["spec"].get("source")):
@@ -522,7 +522,7 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
                                 presentation_id=body.presentation_id if body.ok else None)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    if body.ok and held and (before["spec"].get("_built_from") or {}).get("path") == "auto":
+    if body.ok and held and (before["spec"].get("_built_from") or {}).get("path") in ("auto", "research"):
         request.app.state.audit.append(  # Keep: the user accepts SmartBrain's own pick; recurring begins
             "user", "ni_keep", "reviewed", "executed", True,
             args_summary=tools.summarize({"item_id": item_id, "host": (before["spec"].get("_built_from") or {}).get("host")}))
