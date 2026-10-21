@@ -5647,8 +5647,11 @@ def tick(app, pass_budget_seconds: float = 20.0,
                     fired.extend(result.get("alerts") or [])
                     repaired.extend(result.get("repaired") or [])
             except NIError as exc:
-                if exc.kind != "model_busy":  # a busy local slot is no attempt: the card stays due
-                    store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
+                if exc.kind == "model_busy":
+                    # A busy local slot is no attempt: the card stays due (no stamp) and costs
+                    # no quota (L3), else unstamped busy cards sort first and starve the rest.
+                    continue
+                store.mark_checked(item["id"], exc.kind[:_MAX_STATUS])
             except Exception:  # last-resort net: one bad item must not stop the pass
                 log.warning("ni item run failed with unexpected error: item=%s", item["id"])
                 store.mark_checked(item["id"], "internal")
@@ -8348,12 +8351,13 @@ def _first_local_model(gateway_mod, routes: dict) -> str | None:
 
 
 def _card_model(spec: dict, gateway_mod, routes: dict, store: NIStore, item_id: str) -> str | None:
-    """The model a model-source card refreshes on, mirroring the build path.
+    """The model a model-source card refreshes on, following the build path's route order.
 
     An item-level ``spec.model`` wins. Else the ``ni`` route, then a LOCAL chat / agent model,
     then whatever chat / agent is. A model off this computer needs this card's consent
     (``spec._model_consent``); without it, or when the owner chose local (flow ``_use_local``),
-    the card refreshes on the first local model, and only with none does it raise.
+    the card refreshes on the first local model, and only with none does it raise. Unlike the
+    build path, an unconsented cloud ``ni`` route falls back to local here rather than asking.
     """
     assert isinstance(spec, dict) and isinstance(routes, dict), "spec + routes required"
     assert store is not None, "store required"

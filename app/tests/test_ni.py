@@ -5008,3 +5008,28 @@ def test_tick_model_busy_leaves_the_card_due(monkeypatch: pytest.MonkeyPatch) ->
     assert store.get_item(busy_iid)["last_checked"] is None
     assert busy_iid in {item["id"] for item in store.due_items()}
     assert store.get_item(bad_iid)["last_status"] == "fetch_failed"
+
+
+def test_tick_model_busy_cards_do_not_starve_a_plain_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Busy model cards stay unstamped and sort first; they must cost no quota, so a
+    plain card behind them still runs while the local slot is held."""
+    store, conn, key = _store()
+    busy = [store.add_item(_fetching_scene_spec(), _fetching_preview())
+            for _ in range(nimod._MAX_ITEMS_PER_PASS)]
+    plain = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    for iid in [*busy, plain]:
+        store.set_state(iid, "live")
+    conn.execute("UPDATE ni_items SET last_checked = NULL;")
+    conn.execute("UPDATE ni_items SET last_checked = TIMESTAMP '2000-01-01' WHERE id = ?;", [plain])
+    ran: list[str] = []
+
+    def fake_run_item(_store, item_id, **_kwargs):
+        if item_id in busy:
+            raise nimod.NIError("model_busy")
+        ran.append(item_id)
+
+    monkeypatch.setattr(nimod, "run_item", fake_run_item)
+    for _ in range(3):
+        nimod.tick(_fake_app(conn, key))
+    assert plain in ran
+    assert all(store.get_item(iid)["last_checked"] is None for iid in busy)
