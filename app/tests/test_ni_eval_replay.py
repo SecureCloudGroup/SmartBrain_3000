@@ -158,6 +158,17 @@ def test_aggregate_counts_per_kind_and_overall() -> None:
     assert "ALL" in ne.format_table(table)
 
 
+def test_needs_review_is_counted_next_to_wrong_overall_and_per_kind() -> None:
+    scored = [{"kind": "a", "cls": "partial", "needs_review": True}, {"kind": "a", "cls": "right", "needs_review": False},
+              {"kind": "b", "cls": "partial", "needs_review": True}, {"kind": "b", "cls": "wrong"}]
+    table = ne.aggregate(scored)
+    assert (table["a"]["needs_review"], table["b"]["needs_review"], table["ALL"]["needs_review"]) == (1, 1, 2)
+    lines = ne.format_table(table).splitlines()
+    assert lines[0].index("wrong") < lines[0].index("review") < lines[0].index("links")
+    all_row = next(line for line in lines if line.startswith("ALL"))
+    assert all_row.split()[4:6] == ["1", "2"], "wrong, then review"
+
+
 def test_waiting_is_its_own_column_not_links() -> None:
     scored = [{"kind": "a", "cls": "waiting"}, {"kind": "a", "cls": "links"}, {"kind": "a", "cls": "right"}]
     table = ne.aggregate(scored)

@@ -15,7 +15,8 @@
     onCancelled = () => {},
   }: {
     itemId: string;
-    progress: NiFlowProgress;
+    // null / absent when nothing is building (the backend omits it): the component then renders nothing.
+    progress?: NiFlowProgress | null;
     // The row's backend actions include "cancel".
     canCancel?: boolean;
     // The page passes api.niFlowCancel; tests pass a stub (this file imports no api).
@@ -27,10 +28,10 @@
   let busy = $state(false);
   let failure = $state("");
 
-  const of = $derived(Math.max(1, progress.of));
-  const step = $derived(Math.min(of, Math.max(0, progress.step)));
+  const of = $derived(Math.max(1, progress?.of ?? 1));
+  const step = $derived(Math.min(of, Math.max(0, progress?.step ?? 0)));
   const attempt = $derived(
-    progress.try && progress.try.of > 1
+    progress?.try && progress.try.of > 1
       ? `Trying source ${progress.try.n} of ${progress.try.of}${progress.try.host ? ` (${progress.try.host})` : ""}`
       : "",
   );
@@ -51,6 +52,7 @@
   }
 </script>
 
+{#if progress}
 <div class="bp">
   <div
     class="bp-bar"
@@ -78,6 +80,7 @@
     <p class="error bp-error">{failure}</p>
   {/if}
 </div>
+{/if}
 
 <style>
   .bp {

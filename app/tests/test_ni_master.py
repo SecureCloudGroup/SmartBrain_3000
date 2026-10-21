@@ -155,6 +155,7 @@ def test_actions_for_flow_states_are_closed_and_never_dead_ends(state, shell, aw
                                      item_state="live", has_payload=True)
         assert set(acts) <= ni_master.ACTION_KINDS, "closed vocabulary"
         assert len(acts) == len(set(acts)), "no duplicates"
+        assert "delete" in acts, "delete exists on every card, building or held"
         if state in ("failed", "unsupported"):
             assert acts, "a terminal flow always has a way out"
         elif state != "ready":
@@ -164,7 +165,7 @@ def test_actions_for_flow_states_are_closed_and_never_dead_ends(state, shell, aw
 def test_actions_for_items_without_a_flow() -> None:
     held = ni_master.actions_for("", {}, shell=False, awaiting_yes=True,
                                  item_state="commissioning", has_payload=True)
-    assert held == ["keep", "dismiss"]
+    assert held == ["keep", "dismiss", "delete"]
     live = ni_master.actions_for("", {}, shell=False, awaiting_yes=False,
                                  item_state="live", has_payload=True)
     assert "run" in live and "pause" in live and "delete" in live
@@ -187,3 +188,12 @@ def test_actions_for_answerable_terminals() -> None:
         "failed", {"_question": {"kind": "model_consent", "model": "m", "local": "l"}},
         shell=True, awaiting_yes=False, item_state="", has_payload=False)
     assert {"allow_model", "use_local"} <= set(consent)
+
+
+def test_a_flow_parked_on_the_pick_marker_offers_no_cancel_but_still_delete() -> None:
+    parked = ni_master.actions_for("source", {"state": "source", "error": ni_master.PARKED_MARKER},
+                                   shell=False, awaiting_yes=False, item_state="", has_payload=False)
+    assert "cancel" not in parked and "delete" in parked
+    running = ni_master.actions_for("source", {"state": "source"}, shell=False, awaiting_yes=False,
+                                    item_state="", has_payload=False)
+    assert "cancel" in running, "a source search that is running can still be cancelled"

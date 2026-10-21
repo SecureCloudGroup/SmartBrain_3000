@@ -3100,7 +3100,7 @@ def test_board_flow_field_actions_only_in_v2(monkeypatch) -> None:
     assert v1 == {"state": "sampling"}, "v1 payload is untouched"
     dbmod.meta_set(conn, "ni_flow", "v2")
     v2 = ni_flow.board_flow_field(store, item_id)
-    assert v2 == {"state": "sampling", "actions": ["cancel"],
+    assert v2 == {"state": "sampling", "actions": ["cancel", "delete"],
                   "progress": {"step": 3, "of": 4, "label": "Reading a sample"}}
 
 
@@ -3112,8 +3112,8 @@ def test_build_progress_is_monotone_gated_and_v2_only(monkeypatch) -> None:
     for gate in ("access", "credential", "params"):
         got = ni_flow.build_progress({"state": f"awaiting_{gate}"})
         assert got["gate"] == gate and 1 <= got["step"] <= ni_flow.PROGRESS_OF
-    stop = ni_flow.build_progress({"state": "source", "error": ni_flow.AWAITING_SOURCE_PICK, "_try": {"n": 1, "of": 2}})
-    assert stop["gate"] == "links" and "try" not in stop  # an honest stop is not "trying"
+    stop = {"state": "source", "error": ni_flow.AWAITING_SOURCE_PICK, "_try": {"n": 1, "of": 2}}
+    assert ni_flow.build_progress(stop) is None  # an honest stop builds nothing: no bar, no "trying"
     trying = ni_flow.build_progress({"state": "sampling", "_try": {"n": 2, "of": 3, "host": "api.example.org"}})
     assert trying["try"] == {"n": 2, "of": 3, "host": "api.example.org"}
     monkeypatch.delenv("SMARTBRAIN_NI_FLOW", raising=False)

@@ -37,6 +37,7 @@ import re
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -46,6 +47,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from . import ni_recipe
 from .zones import zone_named
 
 log = logging.getLogger("smartbrain.ni")
@@ -553,7 +555,7 @@ def _closed_keys(node: dict, allowed: set[str], what: str) -> None:
         raise ValueError(f"{what} has unknown keys: {sorted(extra)}")
 
 
-def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
+def validate_spec(spec: object, *, allow_empty_params: bool = False, researcher: bool = False) -> dict:
     """Validate an item spec (§2) end-to-end; return the validated dict.
 
     Refuses unknown top-level keys, checks every enum, delegates §3/§4/§5 shape to their
@@ -565,6 +567,10 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     placeholder — filled in at install time. When True this only relaxes the per-param
     VALUE checks (labels + kinds + shape are still enforced); everything else — source
     URL shape, header rules, pipeline, scene, alerts, history — is validated verbatim.
+
+    ``researcher`` (S4a, plan 6.4): treat the spec as a researcher-authored draft even when it carries
+    no ``recipe.provenance`` marker — ``llm`` stages, ``$secret``, model / MCP sources and a chosen
+    ``interval_minutes`` are refused. A spec that marks itself researcher-authored gets the same rules.
     """
     body = _require_dict(spec, "spec")
     # interval_minutes is a first-class spec field (``_clamp_interval`` reads it from here on
@@ -582,7 +588,7 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
                "_l1_last_attempt", "_l1_trial", "_template",
                "_l2_last_attempt", "_l2_proposal", "_born", "_shell",
                "_model_consent", "_built_from", "_present_ok", "_fit", "query", "interpretation",
-               "_render_ok", "_feed_candidates"}
+               "_render_ok", "_feed_candidates", "recipe"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
     _validate_built_from(body.get("_built_from"))
@@ -591,6 +597,9 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     _validate_fit(body.get("_fit"))
     _validate_query(body.get("query"))
     _validate_interpretation(body.get("interpretation"))
+    # S4a (plan 6.1/6.4): the sealed recipe block; a researcher-marked draft (or a caller that says so)
+    # also meets the researcher rules (no llm / $secret / model or MCP source / chosen interval).
+    ni_recipe.validate_recipe(body.get("recipe"))
     # W2 (2026-09-15): ``_shell`` is the flow's not-yet-finalized marker —
     # boolean-true or absent, nothing else (the commission door reads it).
     if "_shell" in body and body["_shell"] is not True:
@@ -629,6 +638,8 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False) -> dict:
     _validate_l1_system_keys(body)
     _validate_l2_system_keys(body)
     _validate_template_provenance(body.get("_template"))
+    if researcher or ni_recipe.is_researcher_draft(body):
+        ni_recipe.check_researcher_draft(body)
     return body
 
 
@@ -6058,6 +6069,18 @@ def _one_stretch(claims: list[list[int]], width: int) -> bool:
     return False
 
 
+# Tick-time upgrade seam (S4a): ni_flow registers its pre-F1 literal-date rewrite here at import,
+# so a tick never imports ni_flow (the ni -> ni_flow cycle). None until registered.
+_TICK_UPGRADE: Callable[[Any, dict], dict | None] | None = None
+
+
+def set_tick_upgrade(fn: Callable[[Any, dict], dict | None] | None) -> None:
+    """Register (or clear, with None) the best-effort per-tick spec upgrade ``run_item`` calls first."""
+    global _TICK_UPGRADE
+    assert fn is None or callable(fn), "upgrade must be callable or None"
+    _TICK_UPGRADE = fn
+
+
 def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
              schedules_store=None, kb: object | None = None,
              reserve_repair: object | None = None) -> dict:
@@ -6098,8 +6121,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
     # any failure inside leaves the card alone (host-free log) so a broken upgrade can never
     # brick a tick.
     try:
-        from . import ni_flow as _ni_flow_mod
-        upgraded = _ni_flow_mod.upgrade_pre_f1_literal_dates(store, item)
+        upgraded = _TICK_UPGRADE(store, item) if _TICK_UPGRADE is not None else None
     except Exception:  # defensive: the upgrade is best-effort, never a run blocker
         log.info("ni upgrade: pre-F1 literal-date rewrite raised; card left untouched")
         upgraded = None

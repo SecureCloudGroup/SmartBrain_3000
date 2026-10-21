@@ -152,6 +152,8 @@ def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) 
     assert fetched == [] and out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
     assert store.get_item(item_id)["spec"].get("_shell") is True
     assert search.queries == [] and not out.get("_ranked_search")  # no web search, no web pages
+    field = ni_flow.board_flow_field(store, item_id)  # the stop draws no bar and offers no Cancel
+    assert "progress" not in field and "cancel" not in field["actions"] and "delete" in field["actions"]
 
 
 def test_a_keyless_row_is_tried_before_a_row_that_needs_a_key(lib, monkeypatch) -> None:  # noqa: F811
@@ -265,7 +267,7 @@ def test_the_board_asks_keep_on_the_auto_built_card_with_its_preview(client, lib
     row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == item_id)
     assert row["awaiting_yes"] == {"from": "library", "host": "api.open-meteo.com", "title": "open-meteo-forecast title"}
     assert row["payload_slot"] == "preview" and row["payload"] is not None
-    assert row["actions"] == ["keep", "dismiss"]
+    assert row["actions"] == ["keep", "dismiss", "delete"]
 
 
 def test_keep_is_the_existing_yes_and_releases_the_card_to_cadence(client, lib, monkeypatch) -> None:  # noqa: F811

@@ -73,7 +73,7 @@ htmlcov/
 coverage.xml
 
 # ---- Node / SvelteKit / Vite ------------------------------------------------
-node_modules/
+node_modules
 .svelte-kit/
 .vite/
 *.tsbuildinfo

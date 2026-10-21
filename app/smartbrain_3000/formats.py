@@ -53,6 +53,53 @@ class FormatError(Exception):
     """A textual response did not parse to a bounded, walkable shape."""
 
 
+class HtmlBody(FormatError):
+    """The body is a web page (a maintenance or error page served 200), not the data the source promised."""
+
+
+# A body that OPENS as a web page: optional BOM, an XML prolog and comments, then a doctype html, <html>,
+# <head> or <body>. Anchored to the start, so a feed or CSV that merely quotes markup later never matches.
+_HTML_OPENER_RE = re.compile(r"(?:<!doctype\s+html\b|<html[\s>]|<head[\s>]|<body[\s>])", re.IGNORECASE)
+_HTML_SNIFF_CHARS = 4096
+_COMMENT_MIN_CHARS = len("<!---->")
+
+
+def _skip_prolog(head: str) -> str | None:
+    """``head`` past a BOM, whitespace, one XML declaration and leading comments, in one
+    linear scan (no nested quantifiers: a body of many comments can't stall the parse).
+    None when a declaration or comment never closes."""
+    assert isinstance(head, str), "head required"
+    rest = head.lstrip("\ufeff").lstrip()
+    if rest.startswith("<?xml"):
+        end = rest.find("?>")
+        if end < 0:
+            return None
+        rest = rest[end + 2:].lstrip()
+    for _ in range(len(head) // _COMMENT_MIN_CHARS + 1):  # each pass consumes a whole comment
+        if not rest.startswith("<!--"):
+            return rest
+        end = rest.find("-->", 4)
+        if end < 0:
+            return None
+        rest = rest[end + 3:].lstrip()
+    assert not rest.startswith("<!--"), "every comment pass consumes at least one comment"
+    return rest
+
+
+def looks_like_html(text: str) -> bool:
+    """True when ``text`` opens as a web page, whatever its content-type said (the body decides)."""
+    assert isinstance(text, str), "text required"
+    rest = _skip_prolog(text[:_HTML_SNIFF_CHARS])
+    return rest is not None and _HTML_OPENER_RE.match(rest) is not None
+
+
+def _refuse_html(text: str) -> None:
+    """Shared by every textual parser: a web page is a fetch failure, never a (garbage) parse."""
+    assert isinstance(text, str), "text required"
+    if looks_like_html(text):
+        raise HtmlBody("returned a web page, not its data")
+
+
 # --- CSV --------------------------------------------------------------------------
 
 def parse_csv(text: str) -> dict:
@@ -68,6 +115,7 @@ def parse_csv(text: str) -> dict:
     (field 2026-09-28: FRED unemployment showed 1948's 3.4). Row cap =
     MAX_CSV_ROWS (the newest rows are kept); cell length cap = MAX_CSV_CELL.
     """
+    _refuse_html(text)
     assert isinstance(text, str), "text required"
     assert len(text) >= 0, "text length invariant"
     if not text.strip():
@@ -192,6 +240,7 @@ def parse_feed(text: str) -> dict:
     the entity-declaration pre-check here is the defence against billion-laughs
     style expansion. Returns ``{"title", "items": [{title, link, summary, ...}]}``.
     """
+    _refuse_html(text)
     assert isinstance(text, str), "text required"
     assert len(text) >= 0, "text length invariant"
     _refuse_doctype(text)
@@ -213,6 +262,7 @@ def parse_xml(text: str) -> dict:
     names that don't fit are dropped so the pipeline never sees them. Walked
     iteratively (no recursion) with explicit depth + node bounds.
     """
+    _refuse_html(text)
     assert isinstance(text, str), "text required"
     assert MAX_XML_DEPTH > 0, "depth cap positive"
     _refuse_doctype(text)

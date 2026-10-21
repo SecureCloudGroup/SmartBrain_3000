@@ -134,7 +134,7 @@ FLOW_STATES: frozenset[str] = frozenset({
 # C2/H3 (audit 2026-09-13): host-free error MARKER the frontend labels
 # ("Waiting for you to pick a source"). Sealed alongside the paused ``source``
 # state, where a normal error string would be a lie.
-AWAITING_SOURCE_PICK = "awaiting_pick"
+AWAITING_SOURCE_PICK = ni_master.PARKED_MARKER
 # The retired built-in recipe catalog paused at ``confirm_source``; a record
 # still sitting there after an upgrade re-lands the pick pause (Library first).
 _RETIRED_CONFIRM_STATE = "confirm_source"
@@ -4169,6 +4169,12 @@ def _sniffed_textual(url: str) -> tuple[object, str]:
     return _textual_parse(text, sniffed), sniffed
 
 
+def _is_web_page(exc: BaseException) -> bool:
+    """True when a fetch failure says the response was an HTML page (set by the guard's header refusal
+    or by a textual parser that saw a web page body), whichever format the source was sealed as."""
+    return str(getattr(exc, "content_type", "") or "") in ("text/html", "application/xhtml+xml")
+
+
 def _textual_parse(text: str, fmt: str) -> object:
     """Parse ``text`` per ``fmt``; a parse failure surfaces as FetchError kind=not_<fmt>."""
     from . import formats as _formats
@@ -4182,6 +4188,10 @@ def _textual_parse(text: str, fmt: str) -> object:
         if fmt == "xml":
             return _formats.parse_xml(text)
         return _formats.parse_text(text)
+    except _formats.HtmlBody:
+        raise _netguard_mod.FetchError(
+            f"{fmt} source returned a web page, not its data",
+            kind=_netguard_mod.format_error_kind(fmt), content_type="text/html") from None
     except _formats.FormatError as exc:
         raise _netguard_mod.FetchError(
             f"parse failed for {fmt}: {exc}",
@@ -5507,12 +5517,14 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         own = store.get_item(item_id) if remap else None
         own_page = bool(own) and \
             (own["spec"].get("source") or {}).get("type") == "http_page"
-        if not_json and picked:
+        web_page = _is_web_page(exc)  # any format: the body (or header) said HTML where data was sealed
+        if (not_json or web_page) and picked:
             # C12: a Library row promised its data; a page back is a broken contract, never a page
             # card (ruling 2026-10-05: a tapped Library row builds only from its declared answers)
-            moved = _move_on(store, item_id, pick_url, "did not return its data", request, intent, call_model)
+            why = "returned a web page, not its data" if web_page else "did not return its data"
+            moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
             return moved if moved is not None else \
-                _fail(store, item_id, "fetch", "the source did not return its data")
+                _fail(store, item_id, "fetch", f"the source {why}")
         if not_json and (not remap or own_page):
             # A remap of a PAGE card rebuilds against the same consented
             # URL (P2: Fix recompiles a drifted program); an http_json card
@@ -6922,21 +6934,20 @@ _PROGRESS_STAGES: dict[str, tuple[int, str]] = {
 
 def build_progress(record: dict) -> dict | None:
     """``{step, of, label}`` for a non-terminal flow record (+ ``gate`` when it waits on the user, + ``try``
-    ``{n, of, host}`` while the v2 auto-pick works through Library sources); None for ready / terminal.
+    ``{n, of, host}`` while the v2 auto-pick works through Library sources); None for ready / terminal /
+    parked on the pick (nothing builds).
     Monotone in the state order, so a progress bar never moves back."""
     assert isinstance(record, dict), "record required"
     state = str(record.get("state") or "")
     stage = _PROGRESS_STAGES.get(state)
-    if stage is None:
-        return None
+    if stage is None or (state == "source" and record.get("error") == AWAITING_SOURCE_PICK):
+        return None  # parked on the pick marker: nothing is building, so there is no bar
     out: dict = {"step": stage[0], "of": PROGRESS_OF, "label": stage[1]}
     if state.startswith("awaiting_"):
         out["gate"] = state.removeprefix("awaiting_")
-    elif state == "source" and record.get("error") == AWAITING_SOURCE_PICK:
-        out.update(label="Stopped: no source to build from", gate="links")
     tried = record.get("_try")
     if isinstance(tried, dict) and isinstance(tried.get("n"), int) and isinstance(tried.get("of"), int) \
-            and 2 <= stage[0] <= 4 and out.get("gate") != "links":
+            and 2 <= stage[0] <= 4:
         out["try"] = {"n": tried["n"], "of": tried["of"], "host": str(tried.get("host") or "")[:120]}
     assert 1 <= out["step"] <= PROGRESS_OF, "a step on the bar"
     return out
@@ -7374,3 +7385,6 @@ def sweep_stranded_flows(store: ni.NIStore) -> int:
               f"flow record older than {_STRANDED_HOURS}h at unlock/sweep")
         swept += 1
     return swept
+
+
+ni.set_tick_upgrade(upgrade_pre_f1_literal_dates)  # S4a: ni's tick reaches this through a seam, not an import

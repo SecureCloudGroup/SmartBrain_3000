@@ -39,7 +39,7 @@ def test_the_poll_shape_equals_the_board_rows_flow_fields(client) -> None:
     body, row = r.json(), _board_row(client, item_id)
     assert set(body) == {"id", "state", "flow", "awaiting_yes", "actions"}
     assert body["flow"] == row["flow"] and body["awaiting_yes"] == row["awaiting_yes"]
-    assert body["actions"] == row["actions"] == ["cancel"] and body["state"] == row["state"]
+    assert body["actions"] == row["actions"] == ["cancel", "delete"] and body["state"] == row["state"]
     assert body["flow"]["progress"]["try"] == {"n": 2, "of": 3, "host": "api.example.org"}
 
 

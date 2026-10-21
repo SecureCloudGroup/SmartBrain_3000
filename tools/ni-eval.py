@@ -193,15 +193,17 @@ def score_ask(run: dict, gold: dict) -> dict:
 
 
 def aggregate(scored: list[dict]) -> dict:
-    """Counts and R/P/W/L per kind plus an ALL row. L = links + declined; errors are counted apart."""
+    """Counts and R/P/W/L per kind plus an ALL row. L = links + declined; errors are counted apart;
+    ``needs_review`` counts the runs flagged for a human look, whatever their class."""
     assert isinstance(scored, list), "scored list required"
     table: dict[str, dict] = {}
     for item in scored:
         assert item["cls"] in CLASSES, f"unknown class {item['cls']}"
         for key in (str(item.get("kind") or "unknown"), "ALL"):
-            row = table.setdefault(key, {"n": 0, **{c: 0 for c in CLASSES}})
+            row = table.setdefault(key, {"n": 0, "needs_review": 0, **{c: 0 for c in CLASSES}})
             row["n"] += 1
             row[item["cls"]] += 1
+            row["needs_review"] += bool(item.get("needs_review"))  # a card a human still has to look at
     for row in table.values():
         n = row["n"]
         row["R"], row["P"], row["W"] = (row[c] / n for c in ("right", "partial", "wrong"))
@@ -211,11 +213,11 @@ def aggregate(scored: list[dict]) -> dict:
 
 def format_table(table: dict) -> str:
     assert isinstance(table, dict), "table required"
-    lines = [f"{'kind':<14}{'n':>4}{'right':>7}{'part':>6}{'wrong':>7}{'links':>7}{'decl':>6}{'wait':>6}{'err':>5}"]
+    lines = [f"{'kind':<14}{'n':>4}{'right':>7}{'part':>6}{'wrong':>7}{'review':>7}{'links':>7}{'decl':>6}{'wait':>6}{'err':>5}"]
     for key in sorted(table, key=lambda k: (k == "ALL", k)):
         r = table[key]
         lines.append(f"{key:<14}{r['n']:>4}{r['right']:>7}{r['partial']:>6}{r['wrong']:>7}"
-                     f"{r['links']:>7}{r['declined']:>6}{r['waiting']:>6}{r['error']:>5}")
+                     f"{r['needs_review']:>7}{r['links']:>7}{r['declined']:>6}{r['waiting']:>6}{r['error']:>5}")
     assert lines, "header at least"
     return "\n".join(lines)
 

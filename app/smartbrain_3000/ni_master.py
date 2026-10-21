@@ -106,11 +106,16 @@ _ITEM_ACTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
+# The flow marker for "stopped, nothing building" (ni_flow.AWAITING_SOURCE_PICK is the same text).
+PARKED_MARKER = "awaiting_pick"
+
+
 def actions_for(state: str, record: dict, *, shell: bool, awaiting_yes: bool,
                 item_state: str, has_payload: bool) -> list[str]:
     """The card actions the backend declares (pure, no store). ``state`` is the flow state
-    ('' when there is no live flow). Law: a non-terminal flow always offers ``cancel``; a
-    terminal one always offers at least one way out; every kind is in ``ACTION_KINDS``."""
+    ('' when there is no live flow). Law: a RUNNING flow always offers ``cancel`` (a flow parked on
+    the pick marker runs nothing, so it has none); a terminal one always
+    offers at least one way out; ``delete`` is on every list; every kind is in ``ACTION_KINDS``."""
     assert isinstance(record, dict), "record required"
     assert isinstance(state, str) and isinstance(item_state, str), "states are text"
     out: list[str] = []
@@ -123,15 +128,18 @@ def actions_for(state: str, record: dict, *, shell: bool, awaiting_yes: bool,
             out += ("delete",) if shell else ("fix", "refine", "delete")
         else:
             out += _GATE_ACTIONS.get(state, ())
-            out.append("cancel")
+            if not (state == "source" and record.get("error") == PARKED_MARKER):
+                out.append("cancel")
     elif awaiting_yes:
         out += ("keep", "dismiss")
     else:
         out += _ITEM_ACTIONS.get(item_state, ())
         if item_state == "draft" and has_payload:
             out.insert(0, "activate")
+    out.append("delete")  # the card chrome always has Delete, whatever the card is doing
     result = list(dict.fromkeys(out))
     assert all(kind in ACTION_KINDS for kind in result), "closed vocabulary"
+    assert "delete" in result, "delete always exists"
     return result
 
 
