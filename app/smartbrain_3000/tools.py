@@ -1207,7 +1207,7 @@ def _explain_state(item: dict) -> tuple[str, str]:
             )
         if ni.awaits_yes(item):
             built = spec.get("_built_from") or {}
-            origin = "a web page" if built.get("path") == "page" else "a dataset"
+            origin = {"page": "a web page", "auto": "a SmartBrain Library source"}.get(built.get("path"), "a dataset")
             return (
                 f"this card was built from {origin} ({built.get('host') or 'unknown host'}) and is "
                 "WAITING FOR THE USER'S YES — it does not refresh and is NOT live until they confirm "
@@ -2009,6 +2009,8 @@ def _run_ni_item_now(ctx: ToolContext, args: dict) -> dict:
         raise ValueError("cannot run a broken item — edit + re-commission first")
     if not item["enabled"]:
         raise ValueError("cannot run a paused item — resume it first (set_ni_item_enabled)")
+    if ni.awaits_yes(item):
+        raise ValueError("cannot run a card that is waiting for the user's Keep — the user taps Keep on the card first")
     ctx.ni.clear_last_checked(args["item_id"])
     return {"ok": True, "id": args["item_id"]}
 
@@ -2300,11 +2302,7 @@ def _remap_ni_item(ctx: ToolContext, args: dict) -> dict:
             "fills it on the card first"
         )
     request = str(item["spec"].get("goal") or item["spec"].get("title") or "remap")
-    record = ni_flow._make_record(request, "sampling", source_url=url,
-                                    notes=["remap re-entering flow at sampling"])
-    record["_remap"] = True
-    ni_flow._flow_write(ctx.ni, item_id, record)
-    started = ni_flow.start_flow_worker(ctx.ni, item_id, source_url=url)
+    started = ni_flow.start_remap(ctx.ni, item_id, request, url)
     return _flow_tool_result(ctx.ni, item_id, started=bool(started),
                               fallback_url=url)
 

@@ -374,6 +374,7 @@ def _make_lifespan(mcp):
         # unlock transitions are honored on every call.
         ni_flow.set_secrets_provider(
             lambda: getattr(application.state, "secret_store", None))
+        ni_flow.set_audit_sink(lambda: getattr(application.state, "audit", None))  # v2 auto-pick fetches
 
         # S2 (round 9/10): the flow worker's web-search service for source
         # research on a catalog miss. Configured providers when the store is

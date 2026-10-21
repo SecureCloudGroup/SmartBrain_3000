@@ -118,6 +118,33 @@ def _tap_first(store, item_id: str, secrets, tapped: list, links: list) -> tuple
     return url, f"{first.get('kind')}: {first['title']} — {first.get('host')}"
 
 
+def stop_label(suggestions: list) -> tuple[str, list[dict]]:
+    """The one terminal label of a parked pick, the same under v1 and v2: ``waiting-pick`` only while a
+    buildable Library row is still untried, else ``links`` when the flow offers link rows, else
+    ``no-source``. Returns (label, link rows)."""
+    assert isinstance(suggestions, list), "suggestions required"
+    links = [{"host": x.get("host") or "", "title": x.get("title") or "", "url": x.get("url") or "",
+              "found": x.get("found") or ""} for x in suggestions if x.get("kind") == "link"]
+    untried = any(x.get("kind") == "library" for x in suggestions)
+    label = "waiting-pick" if untried else "links" if links else "no-source"
+    assert label in ("waiting-pick", "links", "no-source"), "a known label"
+    return label, links
+
+
+def _v2_stop(store, item_id: str, rec: dict, out: dict) -> dict:
+    """Under v2 the flow parks only at an honest stop (links) or at a key it will not send before Keep."""
+    assert isinstance(rec, dict) and isinstance(out, dict), "records required"
+    out["notes"] = [str(n) for n in rec.get("notes") or []]
+    if rec.get("state") == "awaiting_access":
+        need = (rec.get("_access") or {})
+        out["outcome"] = "needs-key" if need.get("key") else "needs-email"
+        out["source"] = str(rec.get("source_url") or "")
+        return out
+    sugs = (ni_flow.board_flow_field(store, item_id) or {}).get("suggestions") or []
+    out["outcome"], out["links"] = stop_label(sugs)
+    return out
+
+
 def run_one(ask: str, idx, llm, model: str) -> dict:
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
@@ -133,7 +160,10 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     try:
         item_id = ni_flow.create_shell_item(store, ask)
         rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model)
-        for _tap in range(3):  # a source that refuses us re-lands the pick: tap the next one, like a person
+        v2 = ni_flow._is_v2(store)  # v2 auto-picks inside run_flow: nothing to tap
+        if v2 and rec.get("state") in ("source", "awaiting_access"):
+            return _v2_stop(store, item_id, rec, out)
+        for _tap in range(0 if v2 else 3):  # a source that refuses us re-lands the pick: tap the next one, like a person
             if rec.get("state") != "source":
                 break
             url, what = _tap_first(store, item_id, secrets, out["tapped"], out["links"])
@@ -143,11 +173,21 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
                 out["notes"] = [str(n) for n in rec.get("notes") or []]
                 return out
             rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model, source_url=url)
+        if v2 and rec.get("_library_url"):  # the row the flow picked for itself reads as the tapped one
+            out["tapped"].append({"title": next((r.get("title") for r in rec.get("_ranked_library") or []
+                                                 if r.get("url") == rec["_library_url"]), ""),
+                                  "url": rec["_library_url"], "label": rec.get("_library_label") or "",
+                                  "params": rec.get("_library_params") or {},
+                                  "scope": rec.get("_library_scope")})
         state = str(rec.get("state") or "")
         out["detail"] = str(rec.get("error") or "")[:160]
         out["notes"] = [str(n) for n in rec.get("notes") or []]  # the flow's own account: frame, verify
         if state != "ready":
+            parked = state == "source" and rec.get("error") == ni_flow.AWAITING_SOURCE_PICK
             out["outcome"] = "failed" if state in ("failed", "unsupported") else state
+            if parked:  # taps spent with the record still parked: the label v2 would give
+                sugs = (ni_flow.board_flow_field(store, item_id) or {}).get("suggestions") or []
+                out["outcome"], out["links"] = stop_label(sugs)
             return out
         out["answers"] = next((str(n) for n in reversed(rec.get("notes") or [])
                                if "declared answers" in str(n)), "")
@@ -159,7 +199,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
             found = store.read_snapshot(item_id, "preview")
             origin = built["spec"].get("_built_from") or {}
             out["reading"] = _texts(found["payload"] if found else None)
-            out["from"] = {"kind": "web page" if origin.get("path") == "page" else "dataset",
+            out["from"] = {"kind": {"page": "web page", "auto": "library"}.get(origin.get("path"), "dataset"),
                            "host": origin.get("host") or "", "title": origin.get("title") or ""}
         run = _eval._engine_first_run(store, conn, item_id, llm, model, ni, key)
         out["outcome"] = "awaiting-yes" if out.get("from") else "live" if run == "ok" else "built-no-run"

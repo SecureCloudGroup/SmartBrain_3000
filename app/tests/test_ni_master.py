@@ -137,3 +137,53 @@ def test_choose_move_is_total_over_moves() -> None:
                 move = ni_master.choose_move(state=state, error_class=klass,
                                              shell=shell)
                 assert move["move"] in ni_master.MOVES
+
+
+# --- card actions (v2 contract) ----------------------------------------------
+
+_FLOW_STATES = ("intent", "source", "awaiting_access", "sampling", "mapping", "assembling",
+                "awaiting_credential", "awaiting_params", "ready", "unsupported", "failed")
+
+
+@pytest.mark.parametrize("shell", [True, False])
+@pytest.mark.parametrize("awaiting_yes", [True, False])
+@pytest.mark.parametrize("state", _FLOW_STATES)
+def test_actions_for_flow_states_are_closed_and_never_dead_ends(state, shell, awaiting_yes) -> None:
+    for error in (None, "fetch: down", "declined: no", "computed-only: needs a date"):
+        record = {"state": state, **({"error": error} if error else {})}
+        acts = ni_master.actions_for(state, record, shell=shell, awaiting_yes=awaiting_yes,
+                                     item_state="live", has_payload=True)
+        assert set(acts) <= ni_master.ACTION_KINDS, "closed vocabulary"
+        assert len(acts) == len(set(acts)), "no duplicates"
+        if state in ("failed", "unsupported"):
+            assert acts, "a terminal flow always has a way out"
+        elif state != "ready":
+            assert "cancel" in acts, "every non-terminal flow can be cancelled"
+
+
+def test_actions_for_items_without_a_flow() -> None:
+    held = ni_master.actions_for("", {}, shell=False, awaiting_yes=True,
+                                 item_state="commissioning", has_payload=True)
+    assert held == ["keep", "dismiss"]
+    live = ni_master.actions_for("", {}, shell=False, awaiting_yes=False,
+                                 item_state="live", has_payload=True)
+    assert "run" in live and "pause" in live and "delete" in live
+    draft = ni_master.actions_for("", {}, shell=False, awaiting_yes=False,
+                                  item_state="draft", has_payload=True)
+    assert draft[0] == "activate"
+    assert "activate" not in ni_master.actions_for(
+        "", {}, shell=False, awaiting_yes=False, item_state="draft", has_payload=False)
+    for item_state in ("commissioning", "live", "degraded", "failing", "broken", "paused", "draft"):
+        acts = ni_master.actions_for("", {}, shell=False, awaiting_yes=False,
+                                     item_state=item_state, has_payload=False)
+        assert acts and set(acts) <= ni_master.ACTION_KINDS
+
+
+def test_actions_for_answerable_terminals() -> None:
+    date = ni_master.actions_for("unsupported", {"error": "computed-only: x"}, shell=True,
+                                 awaiting_yes=False, item_state="", has_payload=False)
+    assert "answer_date" in date and "retry" in date
+    consent = ni_master.actions_for(
+        "failed", {"_question": {"kind": "model_consent", "model": "m", "local": "l"}},
+        shell=True, awaiting_yes=False, item_state="", has_payload=False)
+    assert {"allow_model", "use_local"} <= set(consent)

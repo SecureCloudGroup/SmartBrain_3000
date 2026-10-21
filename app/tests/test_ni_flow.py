@@ -3089,3 +3089,56 @@ def test_board_keeps_terminal_slot_that_carries_a_question() -> None:
     field = ni_flow.board_flow_field(store, item_id)
     assert field is not None and field["question"]["kind"] == "model_consent"
     assert ni_flow._flow_read(store, item_id) is not None, "slot must survive the read"
+
+
+def test_board_flow_field_actions_only_in_v2(monkeypatch) -> None:
+    monkeypatch.delenv("SMARTBRAIN_NI_FLOW", raising=False)
+    store, conn = _store()
+    item_id = ni_flow.create_shell_item(store, "needs a pick")
+    ni_flow._transition(store, item_id, "sampling")
+    v1 = ni_flow.board_flow_field(store, item_id)
+    assert v1 == {"state": "sampling"}, "v1 payload is untouched"
+    dbmod.meta_set(conn, "ni_flow", "v2")
+    v2 = ni_flow.board_flow_field(store, item_id)
+    assert v2 == {"state": "sampling", "actions": ["cancel"],
+                  "progress": {"step": 3, "of": 4, "label": "Reading a sample"}}
+
+
+def test_build_progress_is_monotone_gated_and_v2_only(monkeypatch) -> None:
+    order = ["intent", "source", "sampling", "mapping", "assembling"]
+    steps = [ni_flow.build_progress({"state": st})["step"] for st in order]
+    assert steps == sorted(steps) and steps[0] == 1 and steps[-1] == ni_flow.PROGRESS_OF
+    assert all(ni_flow.build_progress({"state": st}) is None for st in ("ready", "failed", "unsupported"))
+    for gate in ("access", "credential", "params"):
+        got = ni_flow.build_progress({"state": f"awaiting_{gate}"})
+        assert got["gate"] == gate and 1 <= got["step"] <= ni_flow.PROGRESS_OF
+    stop = ni_flow.build_progress({"state": "source", "error": ni_flow.AWAITING_SOURCE_PICK, "_try": {"n": 1, "of": 2}})
+    assert stop["gate"] == "links" and "try" not in stop  # an honest stop is not "trying"
+    trying = ni_flow.build_progress({"state": "sampling", "_try": {"n": 2, "of": 3, "host": "api.example.org"}})
+    assert trying["try"] == {"n": 2, "of": 3, "host": "api.example.org"}
+    monkeypatch.delenv("SMARTBRAIN_NI_FLOW", raising=False)
+    store, conn = _store()
+    item_id = ni_flow.create_shell_item(store, "progress ask")
+    ni_flow._transition(store, item_id, "mapping")
+    before = ni_flow._flow_read(store, item_id)
+    assert "progress" not in ni_flow.board_flow_field(store, item_id)  # v1 payload is untouched
+    dbmod.meta_set(conn, "ni_flow", "v2")
+    assert ni_flow.board_flow_field(store, item_id)["progress"]["step"] == 4
+    assert ni_flow._flow_read(store, item_id) == before, "a board read writes nothing"
+
+
+def test_routes_never_write_flow_state():
+    """P34: flow-slot writes live in ni_flow only (routes, chat tools and MCP call its public
+    functions). ``clear_flow_slot`` is the allowed public helper."""
+    import ast
+
+    banned = {"_flow_write", "_make_record", "_transition"}
+    root = Path(ni_flow.__file__).parent
+    for name in ("ni_routes.py", "tools.py", "ni_mcp.py"):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        hits = sorted({n.attr if isinstance(n, ast.Attribute) else n.id
+                       for n in ast.walk(tree)
+                       if (isinstance(n, ast.Attribute) and n.attr in banned)
+                       or (isinstance(n, ast.Name) and n.id in banned)})
+        assert hits == [], f"{name} writes flow state directly via {hits}"
+    assert callable(ni_flow.clear_flow_slot), "the allowed helper stays public"

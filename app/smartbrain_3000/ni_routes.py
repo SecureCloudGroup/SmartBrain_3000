@@ -30,6 +30,7 @@ from . import (
     ni,
     ni_flow,
     ni_library,
+    ni_master,
     ni_mcp,
     ni_watch,
     tools,
@@ -116,6 +117,28 @@ def _pick_board_snapshot(store: ni.NIStore, item: dict) -> dict | None:
     return None if fallback is None else {**fallback, "slot": "last_good"}
 
 
+def _awaiting_yes_of(item: dict) -> dict | None:
+    """The board's ``awaiting_yes`` block for one item (None unless it waits for the user's YES / Keep)."""
+    assert isinstance(item, dict), "item required"
+    built_from = item["spec"].get("_built_from") or {}
+    block = ({"from": {"page": "page", "auto": "library"}.get(built_from.get("path"), "dataset"),
+              "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
+             if ni.awaits_yes(item) else None)
+    if block is not None and _used_access(item["spec"].get("source")):
+        block["used_key"] = True  # the preview fetch spent a key or contact email the user typed
+    assert block is None or set(block) <= {"from", "host", "title", "used_key"}, "closed keys"
+    return block
+
+
+def _used_access(source: object) -> bool:
+    """True when a source carries a typed key (a ``$secret`` ref in its headers or query) or the contact email."""
+    assert source is None or isinstance(source, dict), "source is a dict"
+    if not isinstance(source, dict):
+        return False
+    refs = [*(source.get("headers") or {}).values(), *(source.get("secret_query") or {}).values()]
+    return bool(source.get("contact_ua")) or any(isinstance(r, dict) and "$secret" in r for r in refs)
+
+
 def _board_row(store: ni.NIStore, item: dict, *,
                library_index: dict[str, dict] | None = None,
                library_pack_id: str | None = None,
@@ -144,7 +167,6 @@ def _board_row(store: ni.NIStore, item: dict, *,
     assert store is not None and item, "store + item required"
     snap = _pick_board_snapshot(store, item)
     slot = "preview" if item["state"] == "draft" else (snap.get("slot") if snap else None)
-    built_from = item["spec"].get("_built_from") or {}
     source_type = (item["spec"].get("source") or {}).get("type")
     # A flow SHELL (ni_flow._empty_shell_spec) carries a `model` placeholder source but has read
     # nothing: no "Interpreted" chip while it builds (found 2026-10-14 recording the NI clip —
@@ -178,10 +200,7 @@ def _board_row(store: ni.NIStore, item: dict, *,
         # model-mapped dataset shows its reading and where it came from, and waits for the
         # user's YES (POST /validate ok=true); NO (ok=false) re-lands the source pick without
         # that source. None for every other card.
-        "awaiting_yes": ({"from": "page" if built_from.get("path") == "page" else "dataset",
-                          "host": str(built_from.get("host") or ""),
-                          "title": str(built_from.get("title") or "")}
-                         if ni.awaits_yes(item) else None),
+        "awaiting_yes": _awaiting_yes_of(item),
         # W2: True while the flow has not replaced the placeholder spec — the
         # card hides Activate and says creation didn't finish.
         "shell": item["spec"].get("_shell") is True,
@@ -215,6 +234,12 @@ def _board_row(store: ni.NIStore, item: dict, *,
         row["fit"] = fit
     if ni.spec_renders(item["spec"]):  # Round 20 (B3a): ride only on a page-browser card
         row.update(_render_fields(item))
+    if ni_flow.flow_mode(store.conn) == "v2":  # v1 rows omit the key
+        flow = row["flow"]  # a live flow declares its own actions (it holds the record)
+        row["actions"] = list(flow["actions"]) if flow and "actions" in flow else \
+            ni_master.actions_for(
+                "", {}, shell=row["shell"], awaiting_yes=row["awaiting_yes"] is not None,
+                item_state=item["state"], has_payload=snap is not None)
     return row
 
 
@@ -441,6 +466,23 @@ def get_item_image(request: Request, item_id: str) -> Response:
                     headers={"Cache-Control": "no-store"})
 
 
+@router.get("/api/ni/items/{item_id}/flow")
+def get_item_flow(request: Request, item_id: str) -> dict:
+    """v2 per-item poll: ``{state, flow, awaiting_yes, actions}`` for ONE item (the board row's own
+    pieces, without the other items' payloads). Strictly read-only; 404 for an unknown item or under v1."""
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None or ni_flow.flow_mode(store.conn) != "v2":
+        raise HTTPException(status_code=404, detail="item not found")
+    flow = ni_flow.board_flow_field(store, item_id, read_only=True)
+    waiting = _awaiting_yes_of(item)
+    actions = list(flow["actions"]) if flow and "actions" in flow else ni_master.actions_for(
+        "", {}, shell=item["spec"].get("_shell") is True, awaiting_yes=waiting is not None,
+        item_state=item["state"], has_payload=_pick_board_snapshot(store, item) is not None)
+    assert isinstance(actions, list), "actions are a list"
+    return {"id": item_id, "state": item["state"], "flow": flow, "awaiting_yes": waiting, "actions": actions}
+
+
 @router.get("/api/ni/items/{item_id}")
 def get_item(request: Request, item_id: str) -> dict:
     """One item: spec (secrets are stored as $secret NAMES, never values), health, run tail."""
@@ -480,6 +522,10 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
                                 presentation_id=body.presentation_id if body.ok else None)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    if body.ok and held and (before["spec"].get("_built_from") or {}).get("path") == "auto":
+        request.app.state.audit.append(  # Keep: the user accepts SmartBrain's own pick; recurring begins
+            "user", "ni_keep", "reviewed", "executed", True,
+            args_summary=tools.summarize({"item_id": item_id, "host": (before["spec"].get("_built_from") or {}).get("host")}))
     if not body.ok and held:
         # NO to a web page / dataset reading: back to the source pick without that source —
         # never a dead end (the declined address is never offered on this card again)
@@ -766,6 +812,8 @@ def run_item(request: Request, item_id: str) -> dict:
                             detail=f"run refused: state={item['state']!r}")
     if not item["enabled"]:
         raise HTTPException(status_code=409, detail="run refused: item paused")
+    if ni.awaits_yes(item):
+        raise HTTPException(status_code=409, detail="run refused: this card is waiting for you — tap Keep first")
     if ni.spec_renders(item["spec"]) and browser_runner.slot_busy():
         return _render_busy_conflict()
     result = _execute_manual_run(request, store, item)
@@ -1045,6 +1093,8 @@ def retry_flow(request: Request, item_id: str) -> dict:
         raise HTTPException(
             status_code=409,
             detail=f"nothing to retry (flow state {state or 'none'!r})")
+    if ni_flow.flow_mode(store.conn) == "v2" and ni_flow.is_working(item_id):
+        raise HTTPException(status_code=409, detail="still stopping the last build — try again in a moment")
     request_text = str(record.get("request") or item["spec"].get("goal") or "")
     if not request_text:
         raise HTTPException(status_code=409, detail="flow record lost the request")
@@ -1062,22 +1112,32 @@ def retry_flow(request: Request, item_id: str) -> dict:
     # Claims audit 2026-09-21: clear-then-spawn CRASHED the worker ("no flow
     # record") — Retry never worked; the mocked route test was the mask.
     # RE-SEED the record with the sealed request instead of clearing it.
-    fresh = ni_flow._make_record(
-        request_text, "intent",
-        source_url=source_url if keep_url else None,
-        notes=["retrying the build with the same request"])
-    for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
-        if record.get(key) is not None:
-            fresh[key] = record[key]
-    ni_flow._flow_write(store, item_id, fresh)
-    started = ni_flow.start_flow_worker(
-        store, item_id, source_url=source_url if keep_url else None)
+    started = ni_flow.reseed_for_retry(store, item_id, record, request_text, keep_url)
     request.app.state.audit.append(
         "user", "ni_intake_retry", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),
         result_summary=tools.summarize({"started": bool(started)}),
     )
     return {"id": item_id, "started": bool(started)}
+
+
+@router.post("/api/ni/items/{item_id}/flow/cancel")
+def cancel_item_flow(request: Request, item_id: str) -> dict:
+    """v2 Cancel: stop the card's running flow (cooperative; the worker finishes its current fetch and
+    seals nothing). Desktop-local, audited. 404 under v1 and for an unknown item; 409 unless a flow is
+    running (not ready, not already ended)."""
+    _require_desktop_local(request)
+    store = _store(request)
+    if ni_flow.flow_mode(store.conn) != "v2" or store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if not ni_flow.cancel_flow(store, item_id):
+        raise HTTPException(status_code=409, detail="nothing is building on this card")
+    request.app.state.audit.append(
+        "user", "ni_flow_cancel", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"cancelled": True}),
+    )
+    return {"ok": True, "cancelled": True}
 
 
 class PickSourceIn(BaseModel):
@@ -1117,39 +1177,23 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
         ni._validate_http_json_url_shape(url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"url: {exc}") from None
-    if ni_flow.link_row_for(record, url) is not None:
-        if not body.pasted:
-            raise HTTPException(
-                status_code=409,
-                detail="that page is offered as a link — SmartBrain can't keep a live card from it "
-                       "yet; open it, or paste a link to the data")
-        ni_flow.mark_pasted(store, item_id, url)
-    # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
-    # named a non-JSON format) seals ``_format`` on the flow record so sampling +
-    # every subsequent refresh parse the fetched body the same way — CSV / RSS /
-    # XML / text, not just JSON — plus the Library source it came from (its declared
-    # answers build the card). Both writes happen BEFORE the worker starts so
-    # the sampling fetcher sees the sealed format on first read.
-    lib_row = next((r for r in ni_flow._buildable(record.get("_ranked_library"))
-                    if r.get("url") == url), None)
-    if lib_row:
-        ni_flow.seal_library_pick(store, item_id, url, lib_row)
+    if ni_flow.link_row_for(record, url) is not None and not body.pasted:
+        raise HTTPException(
+            status_code=409,
+            detail="that page is offered as a link — SmartBrain can't keep a live card from it "
+                   "yet; open it, or paste a link to the data")
+
+    def _vote(lib_row: dict) -> None:
         try:
             source_id = str(lib_row.get("source_id") or "")
             library_index.LocalSources(store).record_yes(source_id)
             library_client.queue_vote(store, source_id)  # sent by the tick (R6: a Yes is a vote)
         except Exception as exc:  # the vote must never break the pick
             log.warning("ni: recording a Library yes failed: %s", type(exc).__name__)
-    # a source that takes the user's own key or contact email asks for it on the card
-    # BEFORE the first fetch; a same-host key the user already gave is reused
-    missing: list[str] = []
-    if lib_row and ni_flow.seal_access(store, item_id, url, lib_row) is not None:
-        missing = ni_flow.missing_access(store, item_id, getattr(request.app.state, "secret_store", None))
-    if missing:
-        ni_flow.pause_for_access(store, item_id, url, missing)
-        started = False
-    else:
-        started = ni_flow.start_flow_worker(store, item_id, source_url=url)
+
+    _lib_row, missing, started = ni_flow.apply_pick(
+        store, item_id, url, record, pasted=body.pasted,
+        secrets=getattr(request.app.state, "secret_store", None), on_library_row=_vote)
     request.app.state.audit.append(
         "user", "ni_flow_pick_source", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "url": url}),
@@ -1285,10 +1329,7 @@ def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         raise HTTPException(status_code=400,
                             detail="date must be written as YYYY-MM-DD")
-    ni_flow._transition(store, item_id, "intent",
-                         note=f"user supplied the date {value}",
-                         _supplied={"date": value}, _question=None)
-    started = ni_flow.start_flow_worker(store, item_id)
+    started = ni_flow.supply_date(store, item_id, value)
     request.app.state.audit.append(
         "user", "ni_flow_answer", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "kind": body.kind}),
@@ -1304,16 +1345,9 @@ def _answer_model_consent(request: Request, store, item_id: str, stamped: dict,
     local model the question offered."""
     model = str(stamped.get("model") or "")
     local = str(stamped.get("local") or "")
-    if value == "allow" and model:
-        fields: dict = {"_model_consent": model}
-    elif value == "local" and local:
-        fields = {"_use_local": True}
-    else:
+    started = ni_flow.answer_model_consent(store, item_id, stamped, value)
+    if started is None:
         raise HTTPException(status_code=400, detail="answer 'allow' or 'local'")
-    ni_flow._transition(store, item_id, "intent", _question=None, error=None,
-                         note=("user allowed " + model) if value == "allow"
-                         else "user chose the local model", **fields)
-    started = ni_flow.start_flow_worker(store, item_id)
     request.app.state.audit.append(
         "user", "ni_flow_answer", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "kind": "model_consent",

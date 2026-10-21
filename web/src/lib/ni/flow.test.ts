@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   AWAITING_SOURCE_PICK,
+  allows,
+  pauseKind,
+  awaitingYesButtons,
+  awaitingYesNotice,
   awaitingYesSource,
   flowStageLabel,
+  hasAction,
+  rowActions,
   isFlowActive,
   linkWhat,
   pickRows,
@@ -145,5 +151,122 @@ describe("pickRows (ruling 2026-10-05: Library cards; web as links)", () => {
     expect(linkWhat(dataset)).toBe("data.ny.gov · dataset");
     expect(linkWhat(page)).toBe("rivers.example.org · web page");
     expect(linkWhat({ ...page, host: " " })).toBe("web page");
+  });
+});
+
+describe("rowActions / hasAction", () => {
+  it("is null for a v1 row (no actions key) and hasAction is false", () => {
+    expect(rowActions({})).toBeNull();
+    expect(rowActions(null)).toBeNull();
+    expect(hasAction({ flow: { state: "failed" } as never }, "retry")).toBe(false);
+  });
+
+  it("reads the row's actions and ignores unknown kinds", () => {
+    const row = { actions: ["run", "from_the_future", "delete"] };
+    expect(rowActions(row)).toEqual(["run", "delete"]);
+    expect(hasAction(row, "run")).toBe(true);
+    expect(hasAction(row, "from_the_future")).toBe(false);
+  });
+
+  it("prefers the flow's own actions while a flow is present", () => {
+    const row = { actions: ["run"], flow: { actions: ["cancel"] } };
+    expect(rowActions(row)).toEqual(["cancel"]);
+    expect(hasAction(row, "cancel")).toBe(true);
+    expect(hasAction(row, "run")).toBe(false);
+  });
+
+  it("an empty list is a v2 row with no buttons, not a v1 row", () => {
+    expect(rowActions({ actions: [] })).toEqual([]);
+    expect(hasAction({ actions: [] }, "keep")).toBe(false);
+  });
+});
+
+describe("flowStageLabel with progress", () => {
+  it("uses the backend progress label when present", () => {
+    const progress = { step: 2, of: 4, label: "Finding a source" };
+    expect(flowStageLabel({ state: "source", progress })).toBe("Finding a source");
+    expect(flowStageLabel({ state: "sampling", progress: { ...progress, step: 3, label: "Reading a sample" } }))
+      .toBe("Reading a sample");
+  });
+
+  it("keeps the v1 labels without progress and never labels a terminal flow", () => {
+    expect(flowStageLabel({ state: "source" })).toBe("Finding the source…");
+    expect(flowStageLabel({ state: "failed", progress: { step: 1, of: 4, label: "x" } })).toBe("");
+  });
+});
+
+describe("awaiting-yes wording for from: library", () => {
+  it("names the Library source with its host", () => {
+    expect(awaitingYesSource({ from: "library", host: "data.cityofchicago.org", title: "Crimes" }))
+      .toBe("From the SmartBrain Library: Crimes (data.cityofchicago.org)");
+    expect(awaitingYesSource({ from: "library", host: "api.nasa.gov", title: "" }))
+      .toBe("From the SmartBrain Library: api.nasa.gov");
+    expect(awaitingYesSource({ from: "library", host: "", title: "" })).toBe("From the SmartBrain Library");
+  });
+
+  it("leaves the page and dataset sentences alone", () => {
+    expect(awaitingYesSource({ from: "page", host: "a.com", title: "T" })).toBe("From the web page a.com — T");
+    expect(awaitingYesSource({ from: "dataset", host: "a.com", title: "" })).toBe("From the dataset at a.com");
+  });
+
+  it("reads Keep / Try another source only for library", () => {
+    expect(awaitingYesButtons({ from: "library", host: "h", title: "t" }))
+      .toEqual({ yes: "Keep", yesBusy: "Keeping…", no: "Try another source" });
+    expect(awaitingYesButtons({ from: "page", host: "h", title: "t" }).yes).toBe("Yes, that’s it");
+    expect(awaitingYesButtons({ from: "dataset", host: "h", title: "t" }).no).toBe("No, try another source");
+  });
+});
+
+describe("allows / pauseKind: rows to button sets", () => {
+  const BUTTONS = ["keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "edit", "delete", "activate"];
+  const shown = (row: Parameters<typeof allows>[0]) => BUTTONS.filter((k) => allows(row, k, false));
+
+  it("v2 rows show exactly the declared buttons, unknown kinds ignored", () => {
+    expect(shown({ actions: ["keep", "dismiss"] })).toEqual(["keep", "dismiss"]);
+    expect(shown({ flow: { actions: ["cancel"] }, actions: ["cancel"] })).toEqual(["cancel"]);
+    expect(shown({ actions: ["retry", "delete", "teleport"] })).toEqual(["retry", "delete"]);
+    expect(shown({ actions: ["run", "pause", "edit", "refine", "delete"] }))
+      .toEqual(["refine", "run", "edit", "delete"]);
+    expect(shown({ actions: ["activate", "edit", "refine", "delete"] }))
+      .toEqual(["refine", "edit", "delete", "activate"]);
+  });
+
+  it("a v1 row (no actions) keeps the page's own condition, true or false", () => {
+    expect(allows({ flow: null }, "retry", true)).toBe(true);
+    expect(allows({ flow: null }, "retry", false)).toBe(false);
+    expect(allows({}, "fix", true)).toBe(true);
+  });
+
+  it("v2 ignores the legacy condition", () => {
+    expect(allows({ actions: [] }, "delete", true)).toBe(false);
+    expect(allows({ actions: ["delete"] }, "delete", false)).toBe(true);
+  });
+
+  it("pauseKind follows enabled on v1 and the declared list on v2", () => {
+    expect(pauseKind({ enabled: true })).toBe("pause");
+    expect(pauseKind({ enabled: false })).toBe("resume");
+    expect(pauseKind({ enabled: true, actions: ["pause"] })).toBe("pause");
+    expect(pauseKind({ enabled: false, actions: ["resume", "edit"] })).toBe("resume");
+    expect(pauseKind({ enabled: true, actions: ["cancel"] })).toBe("");
+  });
+});
+
+describe("awaitingYesNotice", () => {
+  it("says the source was read once and not again until Keep", () => {
+    const text = awaitingYesNotice({ from: "library", host: "h", title: "t" });
+    expect(text).toContain("read this source once");
+    expect(text).toContain("until you tap Keep");
+    expect(text).not.toContain("key");
+  });
+
+  it("adds the typed key only when the build used one", () => {
+    expect(awaitingYesNotice({ from: "library", host: "h", title: "t", used_key: true }))
+      .toContain("It used the key you typed.");
+    expect(awaitingYesNotice({ from: "library", host: "h", title: "t", used_key: false })).not.toContain("key");
+  });
+
+  it("is empty for page and dataset cards", () => {
+    expect(awaitingYesNotice({ from: "page", host: "h", title: "t" })).toBe("");
+    expect(awaitingYesNotice({ from: "dataset", host: "h", title: "t", used_key: true })).toBe("");
   });
 });

@@ -1,8 +1,8 @@
 // Board store for /ni: the item list, load(), the soft 10 s poll, the bounded 3 s fast poll
 // while a card walks a creation flow, visibility handling, and the `gen` stale-response guard.
 // Dependencies are injected so the timing rules are unit-testable with fake timers.
-import type { NiBoardItem } from "$lib/api";
-import { isFlowActive } from "$lib/ni/flow";
+import type { NiBoardItem, NiFlowPoll } from "$lib/api";
+import { isFlowActive, rowActions } from "$lib/ni/flow";
 
 export const SLOW_POLL_MS = 10_000;
 export const FAST_POLL_MS = 3_000;
@@ -10,6 +10,10 @@ export const FAST_POLL_MS = 3_000;
 export interface BoardDeps {
   fetchBoard: () => Promise<{ items: NiBoardItem[] }>;
   isUnlocked: () => boolean;
+  // v2 only: one item's flow fields (GET /api/ni/items/{id}/flow). When given, the 3 s fast poll
+  // reads only the active v2 items through it instead of the whole board; a v1 board (rows
+  // without `actions`) keeps the board-wide fast poll.
+  fetchFlow?: (id: string) => Promise<NiFlowPoll>;
   // Called for every non-stale load outcome: null on success, else the raw error (the page
   // turns it into words with describeError — kept out of here so the store has no api import).
   onLoad?: (err: unknown) => void;
@@ -26,6 +30,10 @@ export function createBoard(deps: BoardDeps) {
   let gen = 0;
   // A boolean derive: the fast-poll effect re-runs only when this flips, not on every load.
   const anyActive = $derived(items.some((it) => isFlowActive(it.flow ?? null)));
+  // Per-item poll bookkeeping: a response is dropped when a board load started after the request
+  // (`gen` moved) or a newer poll of the same item superseded it; one request per item at a time.
+  const pollSeq = new Map<string, number>();
+  const polling = new Set<string>();
   let slow: ReturnType<typeof setInterval> | null = null;
   let stopRoot: (() => void) | null = null;
 
@@ -51,6 +59,42 @@ export function createBoard(deps: BoardDeps) {
     }
   }
 
+  /** Poll ONE item's flow (v2). Merges {state, flow, awaiting_yes, actions} into its row; when the
+   *  flow is no longer active (finished, failed, cancelled) the whole board reloads once so the
+   *  card picks up its payload. Errors are ignored: the slow board poll reports them. */
+  async function pollItem(id: string): Promise<void> {
+    console.assert(typeof id === "string" && id !== "", "pollItem: id required");
+    console.assert(typeof deps.fetchFlow === "function", "pollItem: fetchFlow present");
+    if (!deps.isUnlocked() || !deps.fetchFlow || polling.has(id)) return;
+    const g = gen;
+    const seq = (pollSeq.get(id) ?? 0) + 1;
+    pollSeq.set(id, seq);
+    polling.add(id);
+    try {
+      const r = await deps.fetchFlow(id);
+      if (g !== gen || pollSeq.get(id) !== seq) return;
+      if (!items.some((it) => it.id === id)) return;
+      items = items.map((it) => it.id === id
+        ? { ...it, state: r.state, flow: r.flow, awaiting_yes: r.awaiting_yes, actions: r.actions }
+        : it);
+      if (!isFlowActive(r.flow)) void load();
+    } catch {
+      // the next tick or the slow board poll retries
+    } finally {
+      polling.delete(id);
+    }
+  }
+
+  /** The 3 s tick while a card walks a flow: active v2 items poll one by one; any active v1 item
+   *  (or no fetchFlow) keeps the board-wide reload. */
+  function fastTick(): void {
+    if (document.visibilityState !== "visible") return;
+    const active = items.filter((it) => isFlowActive(it.flow ?? null));
+    const v2 = active.filter((it) => rowActions(it) !== null);
+    if (!deps.fetchFlow || v2.length < active.length) { void load(); return; }
+    for (const it of v2) void pollItem(it.id);
+  }
+
   function tick(): void {
     if (document.visibilityState === "visible") void load();
   }
@@ -63,7 +107,7 @@ export function createBoard(deps: BoardDeps) {
     stopRoot = $effect.root(() => {
       $effect(() => {
         if (!anyActive) return;
-        const fast = setInterval(tick, FAST_POLL_MS);
+        const fast = setInterval(fastTick, FAST_POLL_MS);
         return () => clearInterval(fast);
       });
     });
@@ -85,6 +129,7 @@ export function createBoard(deps: BoardDeps) {
     get lastError() { return lastError; },
     get anyActive() { return anyActive; },
     load,
+    pollItem,
     start,
     stop,
   };

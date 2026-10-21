@@ -24,6 +24,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -37,10 +38,10 @@ from zoneinfo import ZoneInfo
 
 from . import browsers as _browsers_mod
 from . import claudecli as _claudecli_mod
+from . import db, ni, ni_master, ni_query, page_verify, pagegraph
 from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
-from . import ni, ni_master, ni_query, page_verify, pagegraph
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import resolve_lookup
@@ -163,6 +164,7 @@ _MAX_ERROR = 200
 _MAX_CONCURRENT = 2
 _INFLIGHT: set[str] = set()
 _INFLIGHT_LOCK = threading.Lock()
+_FLOW_LOCK = threading.RLock()  # v2 Cancel: cancel_flow and every flow-slot write take it, so a stage cannot undo a cancel
 
 # Downsampling caps (§29 sampling): trim every list to 2 exemplars; if the
 # downsampled JSON still exceeds 30KB, re-trim to 1 exemplar.
@@ -238,18 +240,34 @@ def _flow_read(store: ni.NIStore, item_id: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _flow_write(store: ni.NIStore, item_id: str, record: dict) -> None:
+def _flow_lock_is_reentrant() -> bool:
+    """True when the flow lock can be taken twice by one thread (``cancel_flow`` -> ``_transition`` -> ``_flow_write``)."""
+    with _FLOW_LOCK:
+        got = _FLOW_LOCK.acquire(blocking=False)
+        assert got, "the flow lock must be reentrant"
+        _FLOW_LOCK.release()
+    return got
+
+
+def _flow_write(store: ni.NIStore, item_id: str, record: dict, *, revive: bool = False) -> None:
     """Seal a full flow record into the ``flow`` slot (upsert).
 
     ``ok`` is always True on the flow slot — it is a status record, not a
     payload success signal (the board's latest-if-ok-else-last_good fallback
     never consults this slot).
+
+    v2 Cancel: under the flow lock, a stored record that carries ``_cancel`` is never overwritten by one
+    that lacks it (a stage that read before the Cancel and writes after it). Only a true re-seed passes
+    ``revive=True``. Nothing sets ``_cancel`` under v1, so v1 writes are unchanged.
     """
     assert store is not None and item_id, "store + id required"
     assert isinstance(record, dict) and "state" in record, "record must carry a state"
     if record["state"] not in FLOW_STATES:
         raise ValueError(f"flow state must be one of {sorted(FLOW_STATES)}")
-    store.write_snapshot(item_id, "flow", record, ok=True)
+    with _FLOW_LOCK:
+        if not revive and not record.get("_cancel") and (_flow_read(store, item_id) or {}).get("_cancel"):
+            return  # the user stopped this flow: a stale stage write must not undo it
+        store.write_snapshot(item_id, "flow", record, ok=True)
 
 
 def _make_record(request: str, state: str, *, source_url: str | None = None,
@@ -284,6 +302,8 @@ def _transition(store: ni.NIStore, item_id: str, state: str, **fields: Any) -> d
     """
     assert store is not None and item_id and isinstance(state, str), "args required"
     current = _flow_read(store, item_id) or {}
+    if current.get("_cancel") and "_cancel" not in fields:
+        return current  # v2 Cancel: a stage of the stopped worker must not revive the flow
     request = str(fields.pop("request", current.get("request", "")))
     source_url = fields.pop("source_url", current.get("source_url"))
     intent = fields.pop("intent", current.get("intent"))
@@ -3533,7 +3553,7 @@ def create_shell_item(store: ni.NIStore, request: str, *,
     preview = _preview_for_shell(shell)
     item_id = store.add_item(shell, preview, origin="agent")
     _flow_write(store, item_id, _make_record(request, "intent",
-                                             notes=["shell item created"]))
+                                             notes=["shell item created"]), revive=True)
     _try_journal(store, item_id, "created",
                  "created via flow; source pending selection")
     return item_id
@@ -3622,6 +3642,9 @@ def run_flow(store: ni.NIStore, item_id: str, *,
 
     def default_fetcher(url: str) -> object:
         nonlocal sealed_fmt
+        # read at FETCH time like ``_access``: a v2 auto-pick seals ``_format`` inside this same run
+        live_fmt = str((_flow_read(store, item_id) or {}).get("_format") or "").strip().lower()
+        sealed_fmt = live_fmt or sealed_fmt
         """Fetch a sample under the netguard SSRF/redirect discipline.
 
         A sealed ``_format`` on the flow record (stamped by ``pick_flow_source``
@@ -3737,6 +3760,28 @@ def _ask_model_consent(store: ni.NIStore, item_id: str, model: str,
                   "prompt": f"This card is set to build with {model}. Building sends your "
                             "request and samples from the source to that service; the "
                             "finished card still refreshes on this computer."})
+
+
+FLOW_MODES = ("v1", "v2")
+
+
+def flow_mode(conn) -> str:
+    """The ``ni_flow`` flag, the single reader: env ``SMARTBRAIN_NI_FLOW`` wins, then the
+    ``ni_flow`` meta key (same store as the gateway routes), default ``v1``. Closed set:
+    anything else reads as ``v1``."""
+    assert conn is not None, "conn required"
+    raw = os.environ.get("SMARTBRAIN_NI_FLOW")
+    if raw is None or not raw.strip():
+        raw = db.meta_get(conn, "ni_flow")
+    mode = str(raw or "").strip().lower()
+    assert isinstance(mode, str), "mode is text"
+    return mode if mode in FLOW_MODES else "v1"
+
+
+def _is_v2(store: ni.NIStore) -> bool:
+    """True when the store's flow runs the v2 (auto-pick) posture."""
+    assert store is not None, "store required"
+    return flow_mode(store.conn) == "v2"
 
 
 def _resolve_flow_model(store: ni.NIStore) -> str | None:
@@ -3881,10 +3926,83 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
     tap or paste is the consent for the first fetch.
     """
     assert isinstance(intent, dict), "intent required"
+    v2 = _is_v2(store)
     if known_url:
-        return _sample_and_map(store, item_id, request, intent, known_url,
-                                call_model, do_fetch)
+        out = _sample_and_map(store, item_id, request, intent, known_url,
+                              call_model, do_fetch)
+        if v2 and out.get("_auto_picked") and out.get("state") == "source" \
+                and out.get("error") == AWAITING_SOURCE_PICK and _buildable(out.get("_ranked_library")):
+            return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
+        return out
+    if v2:
+        return _auto_pick(store, item_id, request, intent, call_model, do_fetch)
     return _pause_source_pick(store, item_id, request, intent, call_model)
+
+
+_AUTO_ROWS = 5  # v2: how deep locate looks, so fall-through has rows to fall to
+
+
+def _row_needs_access(row: dict) -> bool:
+    """True when a Library row asks for the user's key or contact email (never sent before Keep)."""
+    assert isinstance(row, dict), "row required"
+    need = _clean_key_need(row.get("needs_key")) is not None or bool(row.get("needs_contact"))
+    assert isinstance(need, bool), "a flag"
+    return need
+
+
+def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
+               call_model: Callable[[str], str], do_fetch: Callable[[str], object]) -> dict:
+    """v2: no pick pause. Seal the Library rows keyless-first, then try them in turn (``_auto_continue``).
+
+    Consent posture: the only fetch before the user's Keep is of an installed Library row that declares
+    its answers, through the same netguard path as a tap; a row needing a key or contact email goes last
+    and asks for it on the card. Nothing recurs until Keep (the card is held, ``_built_from.path`` auto).
+    No buildable row: the existing honest stop (links; ruling 2026-10-05)."""
+    assert store is not None and item_id, "store + id required"
+    rows = _without_declined(store, item_id, _library_candidates(request, intent, limit=_AUTO_ROWS))
+    buildable = _buildable(rows)
+    if not buildable:
+        return _pause_source_pick(store, item_id, request, intent, call_model, rows=rows, web=False)
+    ordered = [r for r in buildable if not _row_needs_access(r)] + [r for r in buildable if _row_needs_access(r)]
+    assert len(ordered) == len(buildable), "a partition loses no row"
+    ordered += [r for r in rows if r not in buildable]  # the link rows ride behind, for the honest stop
+    _transition(store, item_id, "source", note="finding the best SmartBrain Library source",
+                _ranked_library=ordered, _ranked_search=None, _auto_picked=True, _try=None)
+    return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
+
+
+def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
+                   call_model: Callable[[str], str], do_fetch: Callable[[str], object]) -> dict:
+    """Try the sealed buildable rows in order until one builds, one needs access, or none is left.
+
+    Each try is one ``_sample_and_map``: it either lands the card (every existing post-fetch check is the
+    gate) or moves on, dropping the row — and runs the web search only once no buildable row is left."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(intent, dict) and callable(do_fetch), "intent + fetcher required"
+    rec: dict = {}
+    for _ in range(_AUTO_ROWS + 1):  # bounded: a try drops a row, and a row is tried once
+        rec = _flow_read(store, item_id) or {}
+        rows = _buildable(rec.get("_ranked_library"))
+        if rec.get("_cancel") or not rows or rec.get("state") != "source":
+            break
+        row, url = rows[0], str(rows[0].get("url") or "")
+        seal_library_pick(store, item_id, url, row)
+        done = int((rec.get("_try") or {}).get("n") or 0)
+        mark = {"n": done + 1, "of": done + len(rows), "host": str(row.get("host") or "")[:120]}
+        access = seal_access(store, item_id, url, row)
+        if access is not None:  # keyed rows are last: ask on the card, send nothing
+            _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark)
+            return pause_for_access(store, item_id, url,
+                                    [k for k, on in (("key", access["key"]), ("contact", access["contact"])) if on])
+        _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark, _pick_url=url,
+                    note=f"trying {mark['host']} ({mark['n']} of {mark['of']})")
+        _audit_auto_pick(item_id, mark["host"], mark)  # the Library fetch the user did not tap for
+        out = _sample_and_map(store, item_id, request, intent, url, call_model, do_fetch)
+        if out.get("state") != "source":
+            return out
+    rec = {**(_flow_read(store, item_id) or rec), "_auto_picked": None}  # an honest stop is not an auto build
+    _flow_write(store, item_id, rec)
+    return rec
 
 
 # R2 (field 2026-09-15): desktop-side secrets access for remap sampling ONLY.
@@ -3901,6 +4019,33 @@ def set_secrets_provider(provider: Callable[[], object] | None) -> None:
     global _SECRETS_PROVIDER
     assert provider is None or callable(provider), "provider must be callable"
     _SECRETS_PROVIDER = provider
+
+
+_AUDIT_PROVIDER: Callable[[], object] | None = None
+
+
+def set_audit_sink(provider: Callable[[], object] | None) -> None:
+    """Install the app's audit-log accessor (app startup; tests). The flow worker has no request, so
+    the auto-pick fetch reaches the audit log only through this one provider."""
+    global _AUDIT_PROVIDER
+    assert provider is None or callable(provider), "provider must be callable"
+    _AUDIT_PROVIDER = provider
+
+
+def _audit_auto_pick(item_id: str, host: str, mark: dict) -> bool:
+    """Record one v2 auto-picked Library fetch (``ni_auto_pick``, with the host). Best effort: a locked or
+    unwired log never stops the build. True when a row was written."""
+    assert item_id and isinstance(mark, dict), "item id + mark required"
+    try:
+        log_ = _AUDIT_PROVIDER() if _AUDIT_PROVIDER is not None else None
+        if log_ is None:
+            return False
+        log_.append("assistant", "ni_auto_pick", "reviewed", "auto", True,
+                    args_summary=json.dumps({"item_id": item_id, "host": host[:120], "try": mark.get("n")}))
+        return True
+    except Exception as exc:  # the audit row is a record, never a gate
+        log.warning("ni_flow: auto-pick audit failed: %s", type(exc).__name__)
+        return False
 
 
 def _resolve_secrets_store() -> object | None:
@@ -4089,15 +4234,17 @@ def _library_hint(intent: dict | None) -> dict:
             "place": intent.get("place"), "frame_kind": intent.get("frame_kind")}
 
 
-def _library_candidates(request: str, intent: dict | None = None) -> list[dict]:
+def _library_candidates(request: str, intent: dict | None = None, *, limit: int | None = None) -> list[dict]:
     """Library sources whose parameters all fill from the user's words, as sealable rows. The intent's
     frame rides as the hint (C1). No row (locate found no source about the ask, or the Library failed)
-    → the web stage runs. Each row says whether its source declares its answers (ruling 2026-10-05)."""
+    → the web stage runs. Each row says whether its source declares its answers (ruling 2026-10-05).
+    ``limit`` (v2 auto-pick only) deepens the list; None keeps the Library's own default."""
     lib = _resolve_library()
     if lib is None:
         return []
     try:
-        cands, _skipped = lib.candidates(request, hint=_library_hint(intent))
+        extra = {} if limit is None else {"limit": limit}
+        cands, _skipped = lib.candidates(request, hint=_library_hint(intent), **extra)
     except Exception as exc:
         log.warning("ni_flow: library candidates failed: %s", type(exc).__name__)
         return []
@@ -4671,6 +4818,8 @@ def seal_library_pick(store: ni.NIStore, item_id: str, url: str, row: dict) -> N
     fmt = str(row.get("format") or "").strip().lower()
     if fmt in ni._HTTP_JSON_FORMATS and fmt != "json":
         record["_format"] = fmt
+    elif record.get("_library_url") != url:
+        record.pop("_format", None)  # a re-pick of another row keeps no earlier row's format
     source_id = str(row.get("source_id") or "")[:120] or None
     record["_library_source"] = source_id
     record["_library_url"] = url
@@ -5019,7 +5168,8 @@ def _page_wrong_outlet(url: str, request: str, intent: dict) -> str:
 
 
 def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
-                       intent: dict, call_model: Callable[[str], str]) -> dict:
+                       intent: dict, call_model: Callable[[str], str],
+                       rows: list[dict] | None = None, web: bool = True) -> dict:
     """The ONE source-pick pause. Layer 1 is the SmartBrain Library: sources
     whose parameters all fill from the user's words seal on the record. Ruling
     2026-10-05 ("Library cards; web as links"): only a source that declares its
@@ -5028,18 +5178,20 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
     own words, E-lite scores what the result pages contain, the model ranks the
     corpus, and ≤3 web pages seal — as links, next to the Library's. Nothing
     found, providers unwired, or total failure → the plain pause (paste a URL),
-    never a failed flow.
+    never a failed flow. ``web=False`` (v2 auto-pick): the user's consent was for a Library source, so no
+    search runs and no result page is read: the honest stop lists the Library's links only.
     """
-    library = _without_declined(store, item_id, _library_candidates(request, intent))
+    library = _without_declined(store, item_id,
+                                _library_candidates(request, intent) if rows is None else rows)
     if _buildable(library):
         _transition(store, item_id, "source",
                     error=AWAITING_SOURCE_PICK,
                     note="paused: sources from the SmartBrain Library are on the card",
                     _ranked_library=library, _ranked_search=None)
         return _flow_read(store, item_id) or {}
-    web = _pause_with_web(store, item_id, request, intent, call_model, links=library)
-    if web is not None:
-        return web
+    found = _pause_with_web(store, item_id, request, intent, call_model, links=library) if web else None
+    if found is not None:
+        return found
     _transition(store, item_id, "source",
                 error=AWAITING_SOURCE_PICK,
                 note=_NO_ANSWERING_SOURCE + (" — pages that may help are on the card" if library else
@@ -5454,7 +5606,9 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         return _handoff(store, item_id, request, intent, url, answered, answered["fields"],
                         answered["klass"], converted=[], judge=None, degrade_note=note,
                         remap=remap, keep_source=keep_source, keep_params=keep_params,
-                        fetch_now=fetch_now, path="declared", fit=fit, query=answered.get("query"))
+                        fetch_now=fetch_now, fit=fit, query=answered.get("query"),
+                        # v2: a source SmartBrain picked itself is held for the user's Keep (``auto``)
+                        path="auto" if live.get("_auto_picked") else "declared")
     # The model mapping path below now serves only a link the user pasted (held for their YES, §33)
     # and a Fix / remap of an existing card — a tapped Library row never reaches it (above).
     def misfit(stage: str, message: str) -> dict:
@@ -6316,6 +6470,8 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     """
     assert store is not None and item_id, "args required"
     assert born is None or born in BORN_MARKERS, "born marker must be closed"
+    if (_flow_read(store, item_id) or {}).get("_cancel"):  # v2 Cancel: the user stopped it; seal nothing
+        return _flow_read(store, item_id) or {}
     if built_from is not None:
         spec["_built_from"] = built_from
     if render is not None and render.get("feeds"):
@@ -6362,14 +6518,17 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     fit = visible_fit(spec, bound)  # the visible FIT advisory rides the C2 preview beside ``alternatives``
     if fit is not None:
         bound["fit"] = fit
-    try:
-        store.update_spec(item_id, spec, origin="agent")
-        store.write_snapshot(item_id, "preview", bound, ok=True)
-        # the stored outputs keep their instants (a time text's moment) so a §34 form rebuilt
-        # from the JSON snapshot — export, a later preview bind — still reads its time cells
-        store.write_snapshot(item_id, "preview_data", ni.json_instants(preview), ok=True)
-    except (ValueError, ni.NIError) as exc:
-        return _fail(store, item_id, "assembly", f"store update failed: {exc}")
+    with _FLOW_LOCK:
+        if (_flow_read(store, item_id) or {}).get("_cancel"):  # a Cancel landed since the first check
+            return _flow_read(store, item_id) or {}
+        try:
+            store.update_spec(item_id, spec, origin="agent")
+            store.write_snapshot(item_id, "preview", bound, ok=True)
+            # the stored outputs keep their instants (a time text's moment) so a §34 form rebuilt
+            # from the JSON snapshot — export, a later preview bind — still reads its time cells
+            store.write_snapshot(item_id, "preview_data", ni.json_instants(preview), ok=True)
+        except (ValueError, ni.NIError) as exc:
+            return _fail(store, item_id, "assembly", f"store update failed: {exc}")
     landing = _landing_state(spec)
     if ni.render_needs_consent(spec):
         # B3a (R6): the page loads other sites — a draft listing them until the user Activates
@@ -6597,8 +6756,41 @@ def start_flow_worker(store: ni.NIStore, item_id: str, *,
     return True
 
 
-def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
+def cancel_flow(store: ni.NIStore, item_id: str) -> bool:
+    """v2 Cancel: stop a running (non-terminal) flow. Cooperative: a Python thread cannot be killed, so
+    the record is sealed ``failed(cancelled)`` with ``_cancel`` at once; the worker's later stage writes
+    are ignored (``_transition``), ``_auto_continue`` stops trying rows, and ``_finalize`` seals nothing.
+    The item keeps its spec (a shell stays a shell; a Fix leaves the working card). False when there is
+    no active flow to stop."""
+    assert store is not None and item_id, "store + id required"
+    with _FLOW_LOCK:
+        record = _flow_read(store, item_id)
+        if record is None or str(record.get("state") or "") in _TERMINAL_STATES | {"ready"}:
+            return False
+        _transition(store, item_id, "failed", error="cancelled: stopped by you", note="cancelled by you",
+                    _cancel=True, _question=None)
+    assert (_flow_read(store, item_id) or {}).get("_cancel") is True, "the cancel is sealed"
+    return True
+
+
+def _cancel_pending(store: ni.NIStore, item_id: str) -> bool:
+    """True while the record carries ``_cancel`` and its worker still runs: deleting it would lose the stop."""
+    assert store is not None and item_id, "args required"
+    return bool((_flow_read(store, item_id) or {}).get("_cancel")) and is_working(item_id)
+
+
+def is_working(item_id: str) -> bool:
+    """True while a flow worker still holds ``item_id`` (a cancelled one finishes its current fetch)."""
+    assert isinstance(item_id, str) and item_id, "id required"
+    with _INFLIGHT_LOCK:
+        return item_id in _INFLIGHT
+
+
+def board_flow_field(store: ni.NIStore, item_id: str, *, read_only: bool = False) -> dict | None:
     """Return the ``{state, error?}`` compact flow view for the board row.
+
+    ``read_only`` (v2 per-item poll): the same view with no bookkeeping writes (no retired-state re-pick,
+    no terminal-slot clear), so a poll can never change what it reads.
 
     ``None`` when no flow slot exists OR the flow reached ``ready``. In-progress
     states (intent/source/sampling/mapping/assembling/awaiting_credential/
@@ -6617,7 +6809,8 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         return None
     state = str(record.get("state") or "")
     if state == _RETIRED_CONFIRM_STATE:
-        record = reenter_source_pick(store, item_id, _RETIRED_NOTE)
+        record = (dict(record, state="source", error=AWAITING_SOURCE_PICK) if read_only
+                  else reenter_source_pick(store, item_id, _RETIRED_NOTE))
         state = "source"
     if state == "ready":
         return None
@@ -6632,7 +6825,8 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
         # sample preview, and hiding the terminal record there erased the
         # honest reason AND the way out. Shells always tell the truth.
         try:
-            store.delete_snapshot(item_id, "flow")
+            if not read_only and not _cancel_pending(store, item_id):
+                store.delete_snapshot(item_id, "flow")
         except Exception as exc:  # bookkeeping only
             log.warning("ni_flow: terminal-slot clear failed for %s: %s",
                         item_id, exc)
@@ -6703,6 +6897,48 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
                          "provider": str(access.get("provider") or ""),
                          "key": {"docs_url": str(key.get("docs_url") or "")} if key else None,
                          "contact": bool(access.get("contact"))}
+    if _is_v2(store):  # v1 output stays byte-identical
+        out["actions"] = ni_master.actions_for(
+            state, record, shell=shell, awaiting_yes=False, item_state="", has_payload=False)
+        progress = build_progress(record)
+        if progress is not None:
+            out["progress"] = progress
+    return out
+
+
+# v2 build progress: four steps, from the flow state alone (a pure read; the board never writes it)
+PROGRESS_OF = 4
+_PROGRESS_STAGES: dict[str, tuple[int, str]] = {
+    "intent": (1, "Understanding your ask"),
+    "source": (2, "Finding a source"),
+    "awaiting_access": (2, "Waiting for your key or email"),
+    "sampling": (3, "Reading a sample"),
+    "mapping": (4, "Checking it answers your ask"),
+    "assembling": (4, "Building the card"),
+    "awaiting_credential": (4, "Waiting for your key"),
+    "awaiting_params": (4, "Waiting for a value"),
+}
+
+
+def build_progress(record: dict) -> dict | None:
+    """``{step, of, label}`` for a non-terminal flow record (+ ``gate`` when it waits on the user, + ``try``
+    ``{n, of, host}`` while the v2 auto-pick works through Library sources); None for ready / terminal.
+    Monotone in the state order, so a progress bar never moves back."""
+    assert isinstance(record, dict), "record required"
+    state = str(record.get("state") or "")
+    stage = _PROGRESS_STAGES.get(state)
+    if stage is None:
+        return None
+    out: dict = {"step": stage[0], "of": PROGRESS_OF, "label": stage[1]}
+    if state.startswith("awaiting_"):
+        out["gate"] = state.removeprefix("awaiting_")
+    elif state == "source" and record.get("error") == AWAITING_SOURCE_PICK:
+        out.update(label="Stopped: no source to build from", gate="links")
+    tried = record.get("_try")
+    if isinstance(tried, dict) and isinstance(tried.get("n"), int) and isinstance(tried.get("of"), int) \
+            and 2 <= stage[0] <= 4 and out.get("gate") != "links":
+        out["try"] = {"n": tried["n"], "of": tried["of"], "host": str(tried.get("host") or "")[:120]}
+    assert 1 <= out["step"] <= PROGRESS_OF, "a step on the bar"
     return out
 
 
@@ -6737,7 +6973,7 @@ def begin_switch_feed(store: ni.NIStore, item: dict, url: str) -> bool:
     record = _make_record(request, "intent", source_url=url,
                           notes=["switching to the site's data feed you picked"])
     record["_pasted"] = url
-    _flow_write(store, item["id"], record)
+    _flow_write(store, item["id"], record, revive=True)
     _try_journal(store, item["id"], "source_changed",
                  f"switched to the data feed on {_host_hint(url)} you picked")
     return start_flow_worker(store, item["id"], source_url=url)
@@ -6764,6 +7000,8 @@ def clear_flow_slot(store: ni.NIStore, item_id: str) -> None:
     slot is a no-op.
     """
     assert store is not None and item_id, "args required"
+    if _cancel_pending(store, item_id):
+        return  # a cancelled worker is still out: keep the record that stops it
     try:
         store.delete_snapshot(item_id, "flow")
     except Exception as exc:  # bookkeeping only
@@ -6797,11 +7035,100 @@ def begin_remap(store: ni.NIStore, item: dict) -> bool:
         raise ValueError(
             "this card is busy building — wait for it to settle, then fix")
     request = str(item["spec"].get("goal") or item["spec"].get("title") or "remap")
+    return start_remap(store, item["id"], request, url)
+
+
+def start_remap(store: ni.NIStore, item_id: str, request: str, url: str) -> bool:
+    """Seed the ``_remap`` flow record at sampling and spawn the worker (no guards:
+    callers check the source). The one writer behind the Fix button and the chat tool."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(request, str) and isinstance(url, str), "request + url"
     record = _make_record(request, "sampling", source_url=url,
                            notes=["remap re-entering flow at sampling"])
     record["_remap"] = True
-    _flow_write(store, item["id"], record)
-    return start_flow_worker(store, item["id"], source_url=url)
+    _flow_write(store, item_id, record, revive=True)
+    return start_flow_worker(store, item_id, source_url=url)
+
+
+def reseed_for_retry(store: ni.NIStore, item_id: str, record: dict,
+                     request_text: str, keep_url: bool) -> bool:
+    """Retry: RE-SEED the flow slot with the sealed request (clear-then-spawn crashed
+    the worker), carry the card's own answers, and spawn the worker. Returns started."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(record, dict) and request_text, "record + request required"
+    source_url = record.get("source_url")
+    fresh = _make_record(
+        request_text, "intent",
+        source_url=source_url if keep_url else None,
+        notes=["retrying the build with the same request"])
+    for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
+        if record.get(key) is not None:
+            fresh[key] = record[key]
+    _flow_write(store, item_id, fresh, revive=True)
+    return start_flow_worker(
+        store, item_id, source_url=source_url if keep_url else None)
+
+
+def supply_date(store: ni.NIStore, item_id: str, value: str) -> bool:
+    """The user's typed date is the truth: stamp ``_supplied`` and re-run the sealed request."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(value, str) and value, "date required"
+    _transition(store, item_id, "intent",
+                note=f"user supplied the date {value}",
+                _supplied={"date": value}, _question=None)
+    return start_flow_worker(store, item_id)
+
+
+def answer_model_consent(store: ni.NIStore, item_id: str, stamped: dict,
+                         value: str) -> bool | None:
+    """Ruling 2: "allow" seals consent for the named non-local model on this card; "local"
+    uses the local model the question offered. None when the answer does not fit the
+    question (nothing written); else whether the worker started."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(stamped, dict), "stamped question required"
+    model = str(stamped.get("model") or "")
+    local = str(stamped.get("local") or "")
+    if value == "allow" and model:
+        fields: dict = {"_model_consent": model}
+    elif value == "local" and local:
+        fields = {"_use_local": True}
+    else:
+        return None
+    _transition(store, item_id, "intent", _question=None, error=None,
+                note=("user allowed " + model) if value == "allow"
+                else "user chose the local model", **fields)
+    return start_flow_worker(store, item_id)
+
+
+def apply_pick(store: ni.NIStore, item_id: str, url: str, record: dict, *,
+               pasted: bool, secrets, on_library_row: Callable[[dict], None] | None = None
+               ) -> tuple[dict | None, list[str], bool]:
+    """Resume a source-pick pause with ``url``: mark a pasted link, seal a tapped Library
+    row (``on_library_row`` runs right after, for the vote), ask for missing access, or
+    start the worker. Returns ``(library_row, missing, started)``."""
+    assert store is not None and item_id and url, "store + id + url required"
+    assert isinstance(record, dict), "record required"
+    if pasted and link_row_for(record, url) is not None:
+        mark_pasted(store, item_id, url)
+    # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
+    # named a non-JSON format) seals ``_format`` on the flow record so sampling +
+    # every subsequent refresh parse the fetched body the same way. Both writes happen
+    # BEFORE the worker starts so the sampling fetcher sees the sealed format on first read.
+    lib_row = next((r for r in _buildable(record.get("_ranked_library"))
+                    if r.get("url") == url), None)
+    if lib_row:
+        seal_library_pick(store, item_id, url, lib_row)
+        if on_library_row is not None:
+            on_library_row(lib_row)
+    # a source that takes the user's own key or contact email asks for it on the card
+    # BEFORE the first fetch; a same-host key the user already gave is reused
+    missing: list[str] = []
+    if lib_row and seal_access(store, item_id, url, lib_row) is not None:
+        missing = missing_access(store, item_id, secrets)
+    if missing:
+        pause_for_access(store, item_id, url, missing)
+        return lib_row, missing, False
+    return lib_row, missing, start_flow_worker(store, item_id, source_url=url)
 
 
 def _repick_without(store: ni.NIStore, item_id: str, url: str,
@@ -6857,6 +7184,8 @@ def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, request: str, 
     moved = _repick_without(store, item_id, url, why=why, host_wide=host_wide)
     if moved is None or not research or _buildable(moved.get("_ranked_library")) or moved.get("_ranked_search"):
         return moved
+    if moved.get("_auto_picked") and _is_v2(store):
+        return moved  # v2 auto-pick exhausted the Library: stop on its links; no search, no page read before Keep
     web = _pause_with_web(store, item_id, request, intent, call_model, drop_why=why,
                           links=moved.get("_ranked_library"))
     return web if web is not None else moved
@@ -6890,10 +7219,14 @@ def decline_reading(store: ni.NIStore, item_id: str) -> dict:
         raise ValueError("item not found")
     url = str((item["spec"].get("source") or {}).get("url") or "")
     record = _flow_read(store, item_id) or {}
-    declined = [u for u in record.get("_declined") or [] if isinstance(u, str) and u != url]
-    declined = (declined + [url] if url else declined)[-_MAX_DECLINED:]
+    v2 = _is_v2(store)
+    # v2: the filled address the row carries, and the row's own pre-lookup address (what the pick compares)
+    named = [url, str(record.get("_library_url") or ""), str(record.get("_pick_url") or "")] if v2 else [url]
+    declined = [u for u in record.get("_declined") or [] if isinstance(u, str) and u not in named]
+    declined = (declined + [u for u in named if u])[-_MAX_DECLINED:]
     _flow_write(store, item_id, {**record, "_declined": declined})
-    moved = _repick_without(store, item_id, url, why="isn't what you wanted (you said no)") if url else None
+    # v2: "No" never parks on a pick; it re-runs from the user's words and auto-picks the next source
+    moved = _repick_without(store, item_id, url, why="isn't what you wanted (you said no)") if url and not v2 else None
     if moved is not None and (moved.get("_ranked_library") or moved.get("_ranked_search")):
         _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
                     **{key: None for key in _PICK_SEAL_KEYS})
@@ -6904,7 +7237,7 @@ def decline_reading(store: ni.NIStore, item_id: str) -> dict:
         current = (_flow_read(store, item_id) or {}).get(key)
         if current is not None:
             fresh[key] = current
-    _flow_write(store, item_id, fresh)
+    _flow_write(store, item_id, fresh, revive=True)
     start_flow_worker(store, item_id)
     return {"kind": "relocate"}
 
@@ -6986,7 +7319,7 @@ def begin_refine(store: ni.NIStore, item: dict, note: str) -> dict:
                            notes=[f"rebuilding from your note: {text[:120]}"])
     record["_remap"] = True
     record["_refine_note"] = text
-    _flow_write(store, item["id"], record)
+    _flow_write(store, item["id"], record, revive=True)
     _try_journal(store, item["id"], "c2_wrong", f"refine note: {text}")
     start_flow_worker(store, item["id"], source_url=url)
     return {"kind": "rebuild"}

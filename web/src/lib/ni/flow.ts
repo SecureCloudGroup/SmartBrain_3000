@@ -35,6 +35,8 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
   // with its percentage, in place of its stage.
   const wait = s === "failed" || s === "unsupported" ? "" : browserWaitLabel(flow);
   if (wait) return wait;
+  // v2: the backend's own progress label (terminal flows carry none and fall through).
+  if (flow.progress?.label && s !== "failed" && s !== "unsupported") return flow.progress.label;
   if (s === "intent") return "Understanding your request…";
   if (s === "source") {
     return flow.error === AWAITING_SOURCE_PICK
@@ -50,6 +52,62 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
   if (s === "ready") return "Building the card…";
   // failed / unsupported: caller renders friendlyErrorClass(flow.error).
   return "";
+}
+
+/** The action kinds this client knows how to render. The backend vocabulary is closed
+ *  (ni_master.ACTION_KINDS); a kind outside this set (a newer server) is ignored, never shown. */
+export const KNOWN_ACTIONS: ReadonlySet<string> = new Set([
+  "keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "pause", "resume",
+  "edit", "delete", "activate", "activate_sites", "give_access", "answer_date",
+  "allow_model", "use_local", "fill_param", "add_credential", "review_fix",
+]);
+
+/** The backend-declared actions of a board row, unknown kinds dropped; `null` for a v1 row (no
+ *  `actions` key), which keeps the page's own client-side conditions. A flow's own list wins over
+ *  the row's while it is active. */
+export function rowActions(row: { actions?: string[]; flow?: { actions?: string[] } | null } | null | undefined): string[] | null {
+  console.assert(row === null || row === undefined || typeof row === "object", "rowActions: row is object");
+  const list = row?.flow?.actions ?? row?.actions;
+  console.assert(list === undefined || Array.isArray(list), "rowActions: actions is an array when present");
+  if (!Array.isArray(list)) return null;
+  return list.filter((k) => typeof k === "string" && KNOWN_ACTIONS.has(k));
+}
+
+/** True when the row's backend-declared actions include `kind`. False for a v1 row and for an
+ *  unknown kind. */
+export function hasAction(
+  row: { actions?: string[]; flow?: { actions?: string[] } | null } | null | undefined,
+  kind: string,
+): boolean {
+  console.assert(typeof kind === "string" && kind !== "", "hasAction: kind required");
+  console.assert(row === null || row === undefined || typeof row === "object", "hasAction: row is object");
+  return rowActions(row)?.includes(kind) ?? false;
+}
+
+/** Whether a button shows. On a v2 row (backend `actions` present) the declared list decides and
+ *  `legacy` is ignored; on a v1 row (no `actions`) `legacy` is the page's own client-side
+ *  condition, unchanged. */
+export function allows(
+  row: { actions?: string[]; flow?: { actions?: string[] } | null } | null | undefined,
+  kind: string,
+  legacy: boolean,
+): boolean {
+  console.assert(typeof kind === "string" && kind !== "", "allows: kind required");
+  console.assert(typeof legacy === "boolean", "allows: legacy is boolean");
+  const list = rowActions(row);
+  return list === null ? legacy : list.includes(kind);
+}
+
+/** The card menu's pause/resume button: "pause" or "resume", or "" when the row offers neither
+ *  (v2 only). A v1 row keeps the toggle that follows `enabled`. */
+export function pauseKind(
+  row: { enabled?: boolean; actions?: string[]; flow?: { actions?: string[] } | null },
+): "pause" | "resume" | "" {
+  console.assert(typeof row === "object" && row !== null, "pauseKind: row is object");
+  const list = rowActions(row);
+  console.assert(list === null || Array.isArray(list), "pauseKind: list is array or null");
+  if (list === null) return row.enabled ? "pause" : "resume";
+  return list.includes("pause") ? "pause" : list.includes("resume") ? "resume" : "";
 }
 
 /** A flow is "in progress" (fast-poll worthy) when it's non-null and NOT in a
@@ -74,12 +132,39 @@ export function isFlowActive(flow: NiItemFlow | null | undefined): boolean {
 export function awaitingYesSource(a: NiAwaitingYes): string {
   console.assert(typeof a === "object" && a !== null, "awaitingYesSource: a is object");
   console.assert(typeof a.host === "string" && typeof a.title === "string", "awaitingYesSource: strings");
-  const kind = a.from === "page" ? "web page" : "dataset";
   const host = a.host.trim();
   const title = a.title.trim();
+  if (a.from === "library") {
+    // v2 auto-pick: an installed Library source the engine chose and built from.
+    const named = title !== "" && title.toLowerCase() !== host.toLowerCase();
+    const name = named ? title : host;
+    if (!name) return "From the SmartBrain Library";
+    return host && named ? `From the SmartBrain Library: ${title} (${host})` : `From the SmartBrain Library: ${name}`;
+  }
+  const kind = a.from === "page" ? "web page" : "dataset";
   const named = title !== "" && title.toLowerCase() !== host.toLowerCase();
   if (!host) return named ? `From the ${kind} “${title}”` : `From a ${kind}`;
   return named ? `From the ${kind} ${host} — ${title}` : `From the ${kind} at ${host}`;
+}
+
+/** The consent line above Keep on an auto-picked Library card: the one read already made, and
+ *  that no further read happens until Keep. "" for page and dataset cards (their tap was the
+ *  consent). Mentions the typed key only when the backend says the build used one. */
+export function awaitingYesNotice(a: NiAwaitingYes): string {
+  console.assert(typeof a === "object" && a !== null, "awaitingYesNotice: a is object");
+  console.assert(typeof a.from === "string", "awaitingYesNotice: from is string");
+  if (a.from !== "library") return "";
+  const base = "SmartBrain read this source once to build this preview. It won’t read it again until you tap Keep.";
+  return a.used_key === true ? `${base} It used the key you typed.` : base;
+}
+
+/** The two buttons of the awaiting-yes block. A card the v2 auto-pick built from the Library
+ *  reads "Keep" / "Try another source"; every other card keeps its YES / NO wording. */
+export function awaitingYesButtons(a: NiAwaitingYes): { yes: string; yesBusy: string; no: string } {
+  console.assert(typeof a === "object" && a !== null, "awaitingYesButtons: a is object");
+  console.assert(typeof a.from === "string", "awaitingYesButtons: from is string");
+  if (a.from === "library") return { yes: "Keep", yesBusy: "Keeping…", no: "Try another source" };
+  return { yes: "Yes, that’s it", yesBusy: "Checking…", no: "No, try another source" };
 }
 
 /** The source-pick card's rows, split the way the card shows them (ruling 2026-10-05: "Library

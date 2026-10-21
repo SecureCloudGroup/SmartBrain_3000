@@ -747,9 +747,25 @@ export interface NiSuggestion {
   needs?: string[];
 }
 
+// v2 build progress (flow field, read-only from the backend): a 4-step bar from the flow state.
+// `gate` names what a waiting flow waits on ("access", "credential", "params", "links");
+// `try` shows while the auto-pick works through Library sources.
+export interface NiFlowProgress {
+  step: number;
+  of: number;
+  label: string;
+  gate?: string;
+  try?: { n: number; of: number; host: string };
+}
+
 export interface NiItemFlow {
   state: NiFlowState;
   error?: string;
+  // v2 only: the card actions the backend declares for this flow (closed vocabulary; the client
+  // ignores kinds it does not know). Absent under v1.
+  actions?: string[];
+  // v2 only: build progress. Absent under v1 and for ready / terminal flows.
+  progress?: NiFlowProgress;
   // The source-pick pause: kind:"library" rows are SmartBrain Library sources that declare
   // their answers, with the address already filled from the user's words (evidence = provider
   // · authority, and the reading when the words fit several — the tap answers it). A tap is
@@ -807,9 +823,22 @@ export interface NiFit {
 }
 
 export interface NiAwaitingYes {
-  from: "page" | "dataset";
+  // "library": a card the v2 auto-pick built from an installed Library source (YES reads "Keep").
+  from: "page" | "dataset" | "library";
   host: string;
   title: string; // "" when the source had none (a pasted link)
+  // "library" cards only: true when the build used a key the user typed on the card. Additive;
+  // absent from a server that does not send it (the key sentence is then left out).
+  used_key?: boolean;
+}
+
+// GET /api/ni/items/{id}/flow (v2 only): one item's flow fields for the 3 s poll.
+export interface NiFlowPoll {
+  id: string;
+  state: NiState;
+  flow: NiItemFlow | null;
+  awaiting_yes: NiAwaitingYes | null;
+  actions: string[];
 }
 
 export interface NiBoardItem {
@@ -873,6 +902,10 @@ export interface NiBoardItem {
   // awaiting_credential / unsupported / failed. Null once the item is settled and
   // the card should render its bound payload (or Waiting/first-run copy).
   flow?: NiItemFlow | null;
+  // v2 only: the card actions the backend declares for this row (closed vocabulary, e.g. "keep",
+  // "cancel", "retry"). When present the card renders its buttons from this list and ignores
+  // unknown kinds; when absent (v1) the page keeps its own client-side conditions.
+  actions?: string[];
   // Round 20 interpretation line (ni-format §36): the code-authored sentence saying how
   // the ask was read ("Earthquakes · Magnitude > 4 · past 7 days · count", ≤200 chars)
   // and the per-clause coverage, as sealed on the spec (spec.interpretation,
@@ -1975,6 +2008,15 @@ export const api = {
     req<{ ok: boolean }>(`/api/ni/findings/${encodeURIComponent(id)}/resolve`, {
       method: "POST",
     }),
+  // v2: stop a building flow (cooperative). 409 when nothing is building; the card keeps its
+  // spec and Retry is offered.
+  niFlowCancel: (id: string) =>
+    req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/flow/cancel`, {
+      method: "POST",
+    }),
+  // v2: one item's flow, awaiting-yes block and actions (the per-item poll). 404 under v1.
+  niFlowGet: (id: string) =>
+    req<NiFlowPoll>(`/api/ni/items/${encodeURIComponent(id)}/flow`),
   niFlowRetry: (id: string) =>
     req<{ id: string; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/retry`, {

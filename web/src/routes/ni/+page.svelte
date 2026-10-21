@@ -9,6 +9,8 @@
   import { onDestroy, onMount, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import CardShell from "$lib/components/CardShell.svelte";
+  import BuildProgress from "$lib/components/BuildProgress.svelte";
+  import LinksStop from "$lib/components/LinksStop.svelte";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import { cardText, withoutCardText, type CardText } from "$lib/ni/cardText";
@@ -43,7 +45,7 @@
   } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { fitText } from "$lib/ni/fit";
-  import { awaitingYesSource, flowStageLabel, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
+  import { AWAITING_SOURCE_PICK, allows, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, rowActions, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -66,6 +68,7 @@
   // Board items + load/poll machinery live in the store (lib/ni/board.svelte.ts).
   const board = createBoard({
     fetchBoard: () => api.niBoard(),
+    fetchFlow: (id) => api.niFlowGet(id),
     isUnlocked: () => !!account.status?.unlocked,
     onLoad: (err) => {
       if (err === null) { error = ""; return; }
@@ -195,17 +198,19 @@
   let flowActionError = $state<Record<string, string>>({});
   let answerDateText = $state<CardText>({});
 
-  async function pickSource(item: NiBoardItem, urlOverride?: string): Promise<void> {
+  // Returns true when the server took the source. `pasted` marks the user's own link (default:
+  // the paste form, i.e. no urlOverride); the v2 stop card passes its pasted text with true.
+  async function pickSource(item: NiBoardItem, urlOverride?: string, pasted = urlOverride === undefined): Promise<boolean> {
     console.assert(item.flow?.state === "source", "pickSource: pause required");
     // A Library-row tap submits the sealed URL verbatim — the tap IS the consent.
     // No urlOverride = the paste form: the user's own link (it builds even when the
     // card offered the same page as a link; that card then waits for their YES).
     const url = (urlOverride ?? cardText(pickUrlText, item.id)).trim();
-    if (url.length < 8) return;
+    if (url.length < 8) return false;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
-      const out = await api.niFlowPickSource(item.id, url, urlOverride === undefined);
+      const out = await api.niFlowPickSource(item.id, url, pasted);
       pickUrlText = withoutCardText(pickUrlText, item.id);
       toast(out.needs && out.needs.length > 0
         ? "This source needs one more thing — see the card."
@@ -213,8 +218,10 @@
           ? "Source set — it starts as soon as a build slot frees up."
           : "Source set — sampling it now.");
       await load();
+      return true;
     } catch (err) {
       flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — check the URL." };
+      return false;
     } finally {
       busyId = null;
     }
@@ -1332,6 +1339,17 @@
                    line replaces the payload/first-run copy so the card tells one
                    truth at a time. failed/unsupported render the honest error via
                    friendlyErrorClass; every other state has a calm stage label. -->
+              {#if item.flow.progress && item.flow.state !== "failed" && item.flow.state !== "unsupported"}
+                <!-- v2: the backend's build progress (step bar, "Trying source n of m"), with Cancel
+                     when the row declares it. Its busy/error state lives in the component. -->
+                <BuildProgress
+                  itemId={item.id}
+                  progress={item.flow.progress}
+                  canCancel={hasAction(item, "cancel")}
+                  cancel={(id) => api.niFlowCancel(id)}
+                  onCancelled={() => void load()}
+                />
+              {/if}
               {#if item.flow.state === "failed" || item.flow.state === "unsupported"}
                 <!-- G1 single-writer law: the card renders the MASTER's reason
                      sentence, question, and reopen affordances verbatim — a
@@ -1354,12 +1372,14 @@
                     <p class="muted ni-note-sp">{consent.prompt}</p>
                   {/if}
                   <div class="ni-actions ni-actions-sp">
-                    <button
-                      class="secondary"
-                      disabled={busyId === item.id}
-                      onclick={() => answerConsent(item, "allow")}
-                    >Build with {consent.model}</button>
-                    {#if consent.local}
+                    {#if allows(item, "allow_model", true)}
+                      <button
+                        class="secondary"
+                        disabled={busyId === item.id}
+                        onclick={() => answerConsent(item, "allow")}
+                      >Build with {consent.model}</button>
+                    {/if}
+                    {#if consent.local && allows(item, "use_local", true)}
                       <button
                         class="ghost"
                         disabled={busyId === item.id}
@@ -1368,7 +1388,7 @@
                     {/if}
                   </div>
                 {/if}
-                {#if item.flow.question?.kind === "supply_date"}
+                {#if item.flow.question?.kind === "supply_date" && allows(item, "answer_date", true)}
                   {#if item.flow.question.prompt}
                     <p class="muted ni-note-sp">{item.flow.question.prompt}</p>
                   {/if}
@@ -1389,26 +1409,28 @@
                 {/if}
                 {#if !consent}
                 <div class="ni-actions ni-actions-sp">
-                  {#if !item.shell}
+                  {#if allows(item, "fix", !item.shell)}
                     <button
                       class="secondary"
                       disabled={busyId === item.id}
                       onclick={() => fixItem(item)}
                     >Fix</button>
+                  {/if}
+                  {#if allows(item, "refine", !item.shell)}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
                       onclick={() => openRefine(item)}
                     >Refine…</button>
                   {/if}
-                  {#if item.shell && item.flow.reopen?.includes("retry")}
+                  {#if allows(item, "retry", item.shell === true && !!item.flow.reopen?.includes("retry"))}
                     <button
                       class="secondary"
                       disabled={busyId === item.id}
                       onclick={() => retryFlow(item)}
                     >{busyId === item.id ? "Retrying…" : "Retry"}</button>
                   {/if}
-                  {#if item.shell && item.flow.reopen?.includes("pick_source")}
+                  {#if rowActions(item) === null && item.shell && item.flow.reopen?.includes("pick_source")}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
@@ -1419,6 +1441,19 @@
                 {/if}
                 {#if flowActionError[item.id]}
                   <p class="error ni-note-sp">{flowActionError[item.id]}</p>
+                {/if}
+              {:else if item.flow.state === "source" && rowActions(item) !== null}
+                <!-- v2: no source-pick UI. While the engine looks (or tries rows) the progress line
+                     above says so; when it stops for lack of a Library source the card lists the
+                     links read-only and keeps paste-a-link. -->
+                {#if item.flow.error === AWAITING_SOURCE_PICK || item.flow.progress?.gate === "links"}
+                  <LinksStop
+                    suggestions={item.flow.suggestions}
+                    busy={busyId === item.id}
+                    error={flowActionError[item.id] ?? ""}
+                    clause={tapClause(item.flow)}
+                    onPaste={(url) => pickSource(item, url, true)}
+                  />
                 {/if}
               {:else if item.flow.state === "source" && item.flow.suggestions === undefined}
                 <p class="muted ni-note">
@@ -1507,7 +1542,7 @@
                     <p class="error ni-note-sp">{flowActionError[item.id]}</p>
                   {/if}
                 </div>
-              {:else if item.flow.state === "awaiting_access" && item.flow.access}
+              {:else if item.flow.state === "awaiting_access" && item.flow.access && allows(item, "give_access", true)}
                 {@const access = item.flow.access}
                 <!-- The picked source needs the user's own free key and/or a contact email
                      (SEC, BLS). Nothing is fetched until this is sent; each value goes only to
@@ -1561,7 +1596,7 @@
                     <p class="error ni-note">{flowActionError[item.id]}</p>
                   {/if}
                 </form>
-              {:else}
+              {:else if !item.flow.progress}
                 <p class="muted ni-note">{flowStageLabel(item.flow)}</p>
               {/if}
             {:else if item.payload}
@@ -1592,7 +1627,7 @@
             {/if}
 
           {#snippet below()}
-          {#if !item.shell && !item.flow && (item.state === "failing" || item.state === "broken" || item.state === "degraded" || (item.state === "commissioning" && item.consecutive_failures > 0))}
+          {#if !item.flow && allows(item, "fix", !item.shell && (item.state === "failing" || item.state === "broken" || item.state === "degraded" || (item.state === "commissioning" && item.consecutive_failures > 0)))}
             <!-- P3: the card's Fix — re-derives against the card's OWN frozen
                  source (never a new host). Generic across every http card.
                  2026-09-23: also on a COMMISSIONING card whose run failed — a
@@ -1654,7 +1689,7 @@
             <p class="muted ni-note">
               Creation didn’t finish. Delete this card, or start again above.
             </p>
-          {:else if preview && !item.shell && !item.flow && draftSites}
+          {:else if preview && !item.shell && !item.flow && draftSites && (allows(item, "activate_sites", true) || hasAction(item, "activate"))}
             <!-- Round 20 (B3a, R6): this page also loads other sites — the panel lists them and
                  its Activate (POST /activate) is the consent; /commission refuses such a draft. -->
             <RenderSitesPanel
@@ -1663,7 +1698,7 @@
               error={flowActionError[item.id] ?? ""}
               onActivate={() => activateSites(item)}
             />
-          {:else if preview && !item.shell && !item.flow}
+          {:else if preview && !item.shell && !item.flow && allows(item, "activate", true)}
             <div class="ni-actions">
               <button
                 disabled={busyId === item.id}
@@ -1675,6 +1710,7 @@
 
           {#if item.awaiting_yes && item.payload && !item.flow}
             {@const feeds = feedCandidates(item)}
+            {@const yesWords = awaitingYesButtons(item.awaiting_yes)}
             <!-- Ruling 2026-10-04 ("hold open paths for a YES"): a card built from a web page
                  or a model-mapped dataset shows the reading it found (the scene above) and
                  where it came from, and goes live only on the user's YES. NO goes back to
@@ -1682,17 +1718,24 @@
             <div class="ni-commission">
               <p class="ni-note-head">Is this what you asked for?</p>
               <p class="muted ni-yes-from">{awaitingYesSource(item.awaiting_yes)}</p>
+              {#if awaitingYesNotice(item.awaiting_yes)}
+                <p class="muted ni-yes-from">{awaitingYesNotice(item.awaiting_yes)}</p>
+              {/if}
               <div class="ni-actions">
-                <button
-                  class="secondary"
-                  disabled={busyId === item.id}
-                  onclick={() => validateLooksRight(item)}
-                >{busyId === item.id ? "Checking…" : "Yes, that’s it"}</button>
-                <button
-                  class="ghost"
-                  disabled={busyId === item.id}
-                  onclick={() => declineReading(item)}
-                >No, try another source</button>
+                {#if allows(item, "keep", true)}
+                  <button
+                    class="secondary"
+                    disabled={busyId === item.id}
+                    onclick={() => validateLooksRight(item)}
+                  >{busyId === item.id ? yesWords.yesBusy : yesWords.yes}</button>
+                {/if}
+                {#if allows(item, "dismiss", true)}
+                  <button
+                    class="ghost"
+                    disabled={busyId === item.id}
+                    onclick={() => declineReading(item)}
+                  >{yesWords.no}</button>
+                {/if}
               </div>
               {#if feeds.length > 0}
                 <!-- Round 20 (B3a, R12): the page's own data feed, by its exact address. -->
@@ -1753,12 +1796,14 @@
                   onclick={() => openHistory(item)}
                   title="Show recent runs"
                 >History</button>
-                <button
-                  class="ghost"
-                  disabled={busyId === item.id}
-                  onclick={() => runNow(item)}
-                  title="Run now"
-                >{busyId === item.id ? "Running…" : "Run now"}</button>
+                {#if allows(item, "run", true)}
+                  <button
+                    class="ghost"
+                    disabled={busyId === item.id}
+                    onclick={() => runNow(item)}
+                    title="Run now"
+                  >{busyId === item.id ? "Running…" : "Run now"}</button>
+                {/if}
               {/if}
               <details class="ni-more">
                 <summary title="More actions" aria-label="More actions">⋯</summary>
@@ -1772,23 +1817,29 @@
                       disabled={busyId === item.id || historyFor !== null}
                       onclick={() => openHistory(item)}
                     >History</button>
+                    {#if allows(item, "run", true)}
+                      <button
+                        class="ghost"
+                        disabled={busyId === item.id}
+                        onclick={() => runNow(item)}
+                      >{busyId === item.id ? "Running…" : "Run now"}</button>
+                    {/if}
+                  {/if}
+                  {#if pauseKind(item)}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
-                      onclick={() => runNow(item)}
-                    >{busyId === item.id ? "Running…" : "Run now"}</button>
+                      onclick={() => togglePause(item)}
+                    >{pauseKind(item) === "pause" ? "Pause" : "Resume"}</button>
                   {/if}
-                  <button
-                    class="ghost"
-                    disabled={busyId === item.id}
-                    onclick={() => togglePause(item)}
-                  >{item.enabled ? "Pause" : "Resume"}</button>
-                  <button
-                    class="ghost"
-                    disabled={busyId === item.id}
-                    onclick={() => openEdit(item)}
-                  >Edit…</button>
-                  {#if !item.shell}
+                  {#if allows(item, "edit", true)}
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id}
+                      onclick={() => openEdit(item)}
+                    >Edit…</button>
+                  {/if}
+                  {#if allows(item, "refine", !item.shell)}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
@@ -1800,11 +1851,13 @@
                     disabled={busyId === item.id}
                     onclick={() => openRepair(item)}
                   >Repair settings</button>
-                  <button
-                    class="ghost ni-danger"
-                    disabled={busyId === item.id}
-                    onclick={() => remove(item)}
-                  >Delete</button>
+                  {#if allows(item, "delete", true)}
+                    <button
+                      class="ghost ni-danger"
+                      disabled={busyId === item.id}
+                      onclick={() => remove(item)}
+                    >Delete</button>
+                  {/if}
                 </div>
               </details>
             </span>
