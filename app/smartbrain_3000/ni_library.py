@@ -272,7 +272,7 @@ def _validate_template_spec_and_preview(template: dict, where: str) -> None:
     forbidden = {"contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_attempt", "_l1_trial", "_template",
                  "_l2_last_attempt", "_l2_proposal", "repair_policy", "_born",
                  "_shell", "_model_consent", "_built_from", "query", "interpretation",
-                 "_render_ok", "_feed_candidates"}
+                 "_render_ok", "_feed_candidates", "recipe"}
     present = sorted(forbidden.intersection(spec.keys()))
     if present:
         raise LibraryError(
@@ -746,7 +746,7 @@ def _pack_cache_put(created_at: str,
 _TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_attempt", "_l1_trial",
                         "_l2_last_attempt", "_l2_proposal", "_template",
                         "repair_policy", "_born", "_shell", "_model_consent",
-                        "_built_from", "query", "interpretation", "_render_ok", "_feed_candidates")
+                        "_built_from", "query", "interpretation", "_render_ok", "_feed_candidates", "recipe")
 # B3a: the page-browser seal inside the source (``render`` + ``sites``) — never installed
 _TEMPLATE_STRIP_SOURCE_KEYS = ("render", "sites")
 

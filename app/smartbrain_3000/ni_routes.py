@@ -2077,7 +2077,7 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 _EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
                       "_born", "_model_consent", "_built_from", "query", "interpretation",
-                      "_render_ok", "_feed_candidates")
+                      "_render_ok", "_feed_candidates", "recipe")
 # B3a: the page-browser seal lives INSIDE the source — an exported template is a plain page card
 _EXPORT_STRIP_SOURCE_KEYS = ("render", "sites")
 
