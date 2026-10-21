@@ -43,7 +43,6 @@ from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
 from . import ni_fetch as _ni_fetch
-from . import ni_polite as _ni_polite
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import resolve_lookup

@@ -276,3 +276,34 @@ def test_netguard_is_untouched_by_default(wire) -> None:
     for _ in range(ni_polite.HOST_BURST + 3):
         assert netguard.safe_fetch_json("https://plain-host.example:9000/x") == {"text": "hello"}
     assert wire.count("plain-host.example:9000") == ni_polite.HOST_BURST + 3
+
+
+@pytest.mark.parametrize("path", ["json", "csv", "sniff", "research"])
+def test_every_ni_fetch_path_is_engaged_once_at_the_shared_chokepoint(wire, monkeypatch, path) -> None:
+    """json, textual, sniffed and research fetches all run politeness-engaged (the thread-local object is
+    installed inside ``ni_fetch._get``, once per request) and the engagement does not leak afterwards."""
+    from smartbrain_3000 import ni_fetch
+    from smartbrain_3000.ni_research import tools as research_tools
+    from smartbrain_3000.ni_research.ctx import ResearchCtx
+
+    url = "https://shared.example.org/data"
+    csv = {"final_url": url, "status": 200, "content_type": "text/csv", "content": b"a,b\n1,2\n", "text": "a,b\n1,2\n"}
+    seen: list[object] = []
+    real = netguard.active_politeness
+    monkeypatch.setattr(netguard, "active_politeness", lambda: seen.append(real()) or real())
+    if path in ("csv", "research"):
+        wire.answers[url] = csv
+    if path == "json":
+        ni_fetch.fetch_parsed(url, "json")
+    elif path == "csv":
+        ni_fetch.fetch_parsed(url, "csv")
+    elif path == "sniff":
+        ni_fetch.sniff_fetch(url)
+    else:
+        ctx = ResearchCtx(request="synthetic", question={}, library=None,
+                          now=datetime(2026, 10, 21, tzinfo=UTC))
+        research_tools._fetch_and_digest(ctx, url, "csv")
+    assert wire.calls == [url], "one request, through the shared path"
+    assert seen and all(p is ni_polite.SHARED for p in seen), "the request ran politeness-engaged"
+    monkeypatch.undo()
+    assert netguard.active_politeness() is None, "engagement does not leak past the fetch"
