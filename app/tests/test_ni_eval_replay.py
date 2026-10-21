@@ -37,6 +37,14 @@ def _load():
 ne = _load()
 
 
+def _load_e2e():
+    spec = importlib.util.spec_from_file_location("_ni_live_e2e_tool", _REPO / "tools" / "ni-live-e2e.py")
+    assert spec is not None and spec.loader is not None, "spec load must succeed"
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 @pytest.fixture(autouse=True)
 def _local_route(monkeypatch):
     from smartbrain_3000 import gateway
@@ -94,9 +102,36 @@ def test_places_partial_when_only_some_are_named() -> None:
     assert res["cls"] == "partial" and "1/2" in res["reason"], res
 
 
-def test_acceptable_source_mismatch_is_wrong() -> None:
-    assert ne.score_ask(_card(["1"]), _gold(acceptable_sources=["other.example"]))["cls"] == "wrong"
+def test_a_source_outside_a_narrow_gold_list_needs_review_not_wrong() -> None:
+    res = ne.score_ask(_card(["1"]), _gold(acceptable_sources=["other.example"]))
+    assert (res["cls"], res["needs_review"], res["reason"]) == ("partial", True, ne.SOURCE_REVIEW), res
     assert ne.score_ask(_card(["1"]), _gold(acceptable_sources=["a.example"]))["cls"] == "right"
+    failed = ne.score_ask(_card(["12"], url="https://a.example/q"),
+                          _gold(acceptable_sources=["other.example"], constraints={"threshold": 4.0}))
+    assert failed["cls"] == "wrong", "a failed constraint stays wrong whatever the source"
+
+
+def test_only_the_built_source_counts_in_v1_and_v2_alike() -> None:
+    tried = {"title": "", "label": "", "url": "https://tried.example/x", "params": {}}
+    built = {"title": "", "label": "", "url": "https://built.example/x", "params": {}}
+    gold = _gold(acceptable_sources=["tried.example"])
+    v1 = {**_card(["1"]), "tapped": [tried, built], "source": "library: tried.example → built.example"}
+    v2 = {**_card(["1"]), "tapped": [built]}
+    for run in (v1, v2):  # a url that was tapped but not built from is no evidence for the card
+        res = ne.score_ask(run, gold)
+        assert res["checks"]["source"] is False and res["cls"] == "partial", res
+    assert ne.score_ask(v1, _gold(acceptable_sources=["built.example"]))["cls"] == "right"
+    page = {**_card(["1"]), "tapped": [tried], "from": {"kind": "web page", "host": "page.example", "title": ""}}
+    assert ne.score_ask(page, _gold(acceptable_sources=["page.example"]))["cls"] == "right"
+
+
+def test_every_row_failed_gets_the_same_label_in_v1_and_v2() -> None:
+    e2e = _load_e2e()
+    link = {"kind": "link", "host": "h.example", "title": "T", "url": "https://h.example/p"}
+    lib = {"kind": "library", "host": "l.example", "title": "L", "url": "https://l.example/d"}
+    assert e2e.stop_label([link])[0] == "links" and e2e.stop_label([link])[1][0]["host"] == "h.example"
+    assert e2e.stop_label([lib, link])[0] == "waiting-pick", "a buildable row is still untried"
+    assert e2e.stop_label([])[0] == "no-source"
 
 
 def test_nothing_checkable_is_partial_and_flagged_for_review() -> None:
@@ -220,7 +255,7 @@ def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
     assert all(r["cassette_drift"] == 0 for r in runs), "scripted cassette has no prompt hashes"
     scored, table = ne.score_all(gold, runs)
     got = {s["id"]: s["cls"] for s in scored}
-    assert got == {"CI1": "right", "CI2": "wrong", "CI3": "wrong", "CI4": "declined", "CI5": "links"}, got
+    assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "declined", "CI5": "links"}, got
     assert (table["ALL"]["n"], table["ALL"]["right"]) == (5, 1), table["ALL"]
 
 

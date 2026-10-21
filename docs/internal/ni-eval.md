@@ -28,13 +28,23 @@ wrong / null), `defect_class`, `baseline`, `harness`. Constraints are parsed fro
 
 `score_ask(run, gold)` is pure. Classes: right / partial / wrong / links (links, needs a
 key) / declined / waiting (parked at the source pick) / error. A card is wrong when the gold forbids a card or a checkable constraint fails
-(threshold not in the request, compare entities missing, units, source not acceptable); partial when
+(threshold not in the request, compare entities missing, units); partial when
 only some asked places show; right when checks ran and passed. With nothing checkable it is
 `partial` with `needs_review`. The same card a human already judged (same source and card text) takes
 the human verdict, so replaying the 2026-10-05 results reproduces 13 / 6 / 4 / 27. `aggregate` gives
-counts and R, P, W, L rates per kind and overall (L = links + declined). The table has a `waiting`
-column: runs parked at the source pick (outcome `waiting-pick` = state `source` with the
-`awaiting_pick` marker). They are not links; older results with outcome `source` still score as links.
+counts and R, P, W, L rates per kind and overall (L = links + declined).
+
+The source check reads only the source the card was built from (`built_source`: the last tapped row,
+which under v2 is the row the flow picked for itself, or the web page / dataset an open-path card says
+it came from), in v1 and v2 alike. A row v1 tapped but did not build from never counts. A built source
+that passes every other check but is not in the gold's `acceptable_sources` scores `partial` with
+`needs_review` (reason "built source not in the gold's acceptable sources"): a narrow gold list is not
+evidence the card is wrong. `wrong` stays for failed constraint checks, a forbidden outcome and a human verdict.
+
+The table has a `waiting` column: runs parked at the source pick with a buildable row still untried
+(outcome `waiting-pick`). When every row has failed, v1 and v2 report the same label (`stop_label` in
+`ni-live-e2e.py`): `links` when the flow offers link rows, else `no-source`. Older results with outcome
+`source` still score as links.
 
 ## Record a live baseline (T's machine, real model)
 

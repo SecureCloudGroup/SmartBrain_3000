@@ -118,6 +118,19 @@ def _tap_first(store, item_id: str, secrets, tapped: list, links: list) -> tuple
     return url, f"{first.get('kind')}: {first['title']} — {first.get('host')}"
 
 
+def stop_label(suggestions: list) -> tuple[str, list[dict]]:
+    """The one terminal label of a parked pick, the same under v1 and v2: ``waiting-pick`` only while a
+    buildable Library row is still untried, else ``links`` when the flow offers link rows, else
+    ``no-source``. Returns (label, link rows)."""
+    assert isinstance(suggestions, list), "suggestions required"
+    links = [{"host": x.get("host") or "", "title": x.get("title") or "", "url": x.get("url") or "",
+              "found": x.get("found") or ""} for x in suggestions if x.get("kind") == "link"]
+    untried = any(x.get("kind") == "library" for x in suggestions)
+    label = "waiting-pick" if untried else "links" if links else "no-source"
+    assert label in ("waiting-pick", "links", "no-source"), "a known label"
+    return label, links
+
+
 def _v2_stop(store, item_id: str, rec: dict, out: dict) -> dict:
     """Under v2 the flow parks only at an honest stop (links) or at a key it will not send before Keep."""
     assert isinstance(rec, dict) and isinstance(out, dict), "records required"
@@ -128,9 +141,7 @@ def _v2_stop(store, item_id: str, rec: dict, out: dict) -> dict:
         out["source"] = str(rec.get("source_url") or "")
         return out
     sugs = (ni_flow.board_flow_field(store, item_id) or {}).get("suggestions") or []
-    out["links"] = [{"host": s.get("host") or "", "title": s.get("title") or "", "url": s.get("url") or "",
-                     "found": s.get("found") or ""} for s in sugs if s.get("kind") == "link"]
-    out["outcome"] = "links" if out["links"] else "no-source"
+    out["outcome"], out["links"] = stop_label(sugs)
     return out
 
 
@@ -173,8 +184,10 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         out["notes"] = [str(n) for n in rec.get("notes") or []]  # the flow's own account: frame, verify
         if state != "ready":
             parked = state == "source" and rec.get("error") == ni_flow.AWAITING_SOURCE_PICK
-            out["outcome"] = ("failed" if state in ("failed", "unsupported")
-                              else "waiting-pick" if parked else state)
+            out["outcome"] = "failed" if state in ("failed", "unsupported") else state
+            if parked:  # taps spent with the record still parked: the label v2 would give
+                sugs = (ni_flow.board_flow_field(store, item_id) or {}).get("suggestions") or []
+                out["outcome"], out["links"] = stop_label(sugs)
             return out
         out["answers"] = next((str(n) for n in reversed(rec.get("notes") or [])
                                if "declared answers" in str(n)), "")

@@ -43,6 +43,7 @@ _OUTCOME = {
     "no-source": "links", "unsupported": "declined", "declined": "declined",
     "waiting-pick": "waiting",  # a run parked at the source pick (state source + awaiting_pick)
 }
+SOURCE_REVIEW = "built source not in the gold's acceptable sources"
 _SECRET_Q = re.compile(r"(?i)(key|token|secret|auth|sig|appid|password)")
 
 
@@ -70,14 +71,31 @@ def card_text(run: dict) -> str:
     return " ".join(parts).lower()
 
 
+def built_source(run: dict) -> str:
+    """Lower-cased words naming the ONE source the card was built from (its address, filled params, row
+    label), the same in v1 and v2: the last tapped row (a v1 tap that failed, or a row tried before it, is
+    not the source), or the web page / dataset an open-path card says it came from. With neither, the run's
+    own source string (the url-mode harness)."""
+    assert isinstance(run, dict), "run result required"
+    origin = run.get("from") or {}
+    taps = run.get("tapped") or []
+    if origin and origin.get("kind") != "library":
+        bits = [str(origin.get("host") or ""), str(origin.get("title") or "")]
+    elif taps:
+        tap = taps[-1]
+        bits = [str(tap.get("url") or ""), json.dumps(tap.get("params") or {}, sort_keys=True),
+                str(tap.get("label") or "")]
+    else:
+        bits = [str(run.get("source") or "")]
+    assert all(isinstance(b, str) for b in bits), "text parts"
+    return " ".join(bits).lower()
+
+
 def _evidence(run: dict) -> str:
-    """Request-side words: tapped urls, params, source string and the displayed card text (not the
+    """Request-side words: the built source's address and params, and the displayed card text (not the
     raw preview payload, whose many numbers would satisfy any threshold)."""
     assert isinstance(run, dict), "run result required"
-    bits = [str(run.get("source") or "")]
-    for tap in run.get("tapped") or []:
-        bits += [str(tap.get("url") or ""), json.dumps(tap.get("params") or {}, sort_keys=True)]
-    bits += [str(t) for t in run.get("scene_text") or []]
+    bits = [built_source(run), *(str(t) for t in run.get("scene_text") or [])]
     return " ".join(bits).lower()
 
 
@@ -91,7 +109,7 @@ def run_checks(run: dict, gold: dict) -> dict:
 
     ``places`` is a (found, asked) pair. ``threshold`` looks for the number in the request or the
     card; ``compare_n`` for that many asked entities on the card; ``source`` for an acceptable
-    host / Library id in the request.
+    host / Library id in the source the card was built from (``built_source``).
     """
     assert isinstance(run, dict) and isinstance(gold, dict), "run + gold required"
     cons = gold.get("constraints") or {}
@@ -110,7 +128,8 @@ def run_checks(run: dict, gold: dict) -> dict:
     if cons.get("units") and have:
         checks["units"] = str(cons["units"]).lower() in text
     if gold.get("acceptable_sources"):
-        checks["source"] = any(str(s).lower() in evid for s in gold["acceptable_sources"])
+        built = built_source(run)
+        checks["source"] = any(str(s).lower() in built for s in gold["acceptable_sources"])
     return checks
 
 
@@ -131,9 +150,11 @@ def _carried(run: dict, gold: dict) -> str | None:
 
 def _verdict_from_checks(checks: dict) -> tuple[str, str]:
     assert isinstance(checks, dict), "checks required"
-    failed = [k for k in ("threshold", "compare_n", "units", "source") if checks.get(k) is False]
+    failed = [k for k in ("threshold", "compare_n", "units") if checks.get(k) is False]
     if failed:
         return "wrong", "failed " + ",".join(failed)
+    if checks.get("source") is False:  # a narrow gold list is no evidence the card is wrong: a human looks
+        return "partial", SOURCE_REVIEW
     if checks["places"] is not None:
         got, total = checks["places"]
         if got == 0:  # a station / grid label may not name the place: not proof of a wrong card
@@ -149,7 +170,8 @@ def score_ask(run: dict, gold: dict) -> dict:
     """Class of one run: {id, kind, cls, reason, checks, needs_review}. Pure.
 
     Not a card: links (links, needs key), declined, waiting (parked at the source pick), or error. A card is wrong if the
-    gold forbids a card or a checkable constraint fails; partial if only some asked places show;
+    gold forbids a card or a checkable constraint fails; partial if only some asked places show, or the
+    built source is not in the gold's (possibly narrow) acceptable list (needs_review);
     right if checks ran and passed. With nothing checkable it is "partial / unchecked" (needs a
     human). The same card a human already judged (same source, same text) takes that verdict.
     """
@@ -166,7 +188,8 @@ def score_ask(run: dict, gold: dict) -> dict:
     carried = _carried(run, gold)
     if carried:  # a human read this very card: that verdict is authoritative over the heuristics
         cls, reason = carried, "human verdict carried (same card)"
-    return {**res, "cls": cls, "reason": reason, "checks": checks, "needs_review": reason == "unchecked"}
+    review = reason in ("unchecked", SOURCE_REVIEW)  # a carried human verdict has been reviewed already
+    return {**res, "cls": cls, "reason": reason, "checks": checks, "needs_review": review}
 
 
 def aggregate(scored: list[dict]) -> dict:
