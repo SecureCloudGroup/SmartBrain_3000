@@ -87,3 +87,12 @@ def _fresh_politeness():
     yield
     ni_polite.SHARED.reset()
     ni_polite.set_dedupe(False)
+
+
+@pytest.fixture(autouse=True)
+def _research_off_unless_asked(monkeypatch):
+    """The v2 researcher (S4c) calls a model before the honest stop. Tests that are not about it must never
+    reach a gateway, so research is off by default; test_ni_research_* set ``SMARTBRAIN_NI_RESEARCH`` themselves."""
+    monkeypatch.setenv("SMARTBRAIN_NI_RESEARCH", "off")
+    from smartbrain_3000 import ni_research_flow
+    ni_research_flow.set_research_chat(None)

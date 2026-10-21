@@ -3685,7 +3685,7 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         if record.get("_use_local") and local:
             resolved_model = local
         elif _model_consent_of(store, item_id, record) != resolved_model:
-            return _ask_model_consent(store, item_id, resolved_model, local)
+            return _ask_model_consent(store, item_id, resolved_model, local, research=_is_v2(store))
 
     def call_prompt(prompt: str) -> str:
         assert isinstance(prompt, str), "prompt required"
@@ -3753,16 +3753,27 @@ def _model_consent_of(store: ni.NIStore, item_id: str, record: dict) -> str | No
     return sealed if isinstance(sealed, str) and sealed else None
 
 
+_RESEARCH_DISCLOSURE = (" If no ready-made source fits, it may also research one with the same service. That "
+                        "sends your exact question, the titles and details of Library sources, digests of up to 8 "
+                        "data samples it reads, today's date and your time zone, and the research steps so far; "
+                        "never email, notes or other cards. The card only starts refreshing after you Keep it.")
+
+
 def _ask_model_consent(store: ni.NIStore, item_id: str, model: str,
-                       local: str | None) -> dict:
-    """Stop before any model call and ask the card's owner (ruling 2)."""
+                       local: str | None, research: bool = False) -> dict:
+    """Stop before any model call and ask the card's owner (ruling 2). ``research`` (v2): the question also
+    names what leaves the device when the researcher runs, in place of the plain build wording."""
+    prompt = (f"This card is set to build with {model}. Building sends your "
+              "request and samples from the source to that service; the "
+              "finished card still refreshes on this computer.")
+    if research:
+        prompt = (f"This card would use {model}, a service outside this computer. Building sends your request "
+                  "and samples from the source to it; the finished card still refreshes on this computer."
+                  + _RESEARCH_DISCLOSURE)
     return _terminate_unsupported(
         store, item_id,
         f"building this card would use {model}, which runs outside this computer",
-        question={"kind": "model_consent", "model": model, "local": local or "",
-                  "prompt": f"This card is set to build with {model}. Building sends your "
-                            "request and samples from the source to that service; the "
-                            "finished card still refreshes on this computer."})
+        question={"kind": "model_consent", "model": model, "local": local or "", "prompt": prompt})
 
 
 FLOW_MODES = ("v1", "v2")
@@ -3965,6 +3976,10 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     rows = _without_declined(store, item_id, _library_candidates(request, intent, limit=_AUTO_ROWS))
     buildable = _buildable(rows)
     if not buildable:
+        from . import ni_research_flow  # local: the researcher imports this module
+        found = ni_research_flow.fallback(store, item_id, request, intent)
+        if found is not None:
+            return found
         return _pause_source_pick(store, item_id, request, intent, call_model, rows=rows, web=False)
     ordered = [r for r in buildable if not _row_needs_access(r)] + [r for r in buildable if _row_needs_access(r)]
     assert len(ordered) == len(buildable), "a partition loses no row"
@@ -4003,7 +4018,16 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
         out = _sample_and_map(store, item_id, request, intent, url, call_model, do_fetch)
         if out.get("state") != "source":
             return out
-    rec = {**(_flow_read(store, item_id) or rec), "_auto_picked": None}  # an honest stop is not an auto build
+    rec = _flow_read(store, item_id) or rec
+    if rec.get("state") == "source" and not rec.get("_cancel") and not _buildable(rec.get("_ranked_library")):
+        from . import (
+            ni_research_flow,  # every row failed: research before the honest stop (v2 only)
+        )
+        found = ni_research_flow.fallback(store, item_id, request, intent)
+        if found is not None:
+            return found
+        rec = _flow_read(store, item_id) or rec
+    rec = {**rec, "_auto_picked": None}  # an honest stop is not an auto build
     _flow_write(store, item_id, rec)
     return rec
 
