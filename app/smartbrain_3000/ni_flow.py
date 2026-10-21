@@ -3180,16 +3180,6 @@ def _frame_of(request: str, intent: dict) -> dict:
 
 
 
-def _fit_says_move_on(store: ni.NIStore, live: dict, fit: object | None) -> bool:
-    """True only for an unattended (v2 auto-picked) build whose fit verdict is a clear "no".
-    A tapped row (v1) stays advisory by design; "partly" and a missing verdict never block."""
-    assert store is not None and isinstance(live, dict), "store + record required"
-    assert fit is None or hasattr(fit, "answers_ask"), "a fit verdict or None"
-    if fit is None or not live.get("_auto_picked") or not _is_v2(store):
-        return False
-    return str(getattr(fit, "answers_ask", "")).lower() == "no"
-
-
 def _fit_check(answered: dict, frame: dict, intent: dict, request: str,
                call_model: Callable[[str], str] | None) -> object | None:
     """FIT (Phase 3a, plan B3): one advisory FitVerdict call on a build that already passed
@@ -5605,15 +5595,9 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # _MAX_NOTE truncates from the end, and the frame-level disclosures above (wrong place,
         # wrong window) matter more than naming which cell led the card.
         # FIT (Phase 3a, plan B3): one advisory closed local verdict on a build that already
-        # passed every code check above — logged and shown as an advisory only; a tapped row
-        # (v1) is never refused on it, an unattended v2 pick moves on from a clear "no".
+        # passed every code check above — logged and shown as an advisory only, never a reason
+        # to move on or refuse.
         fit = _fit_check(answered, frame, intent, request, call_model)
-        if _fit_says_move_on(store, live, fit):
-            # unattended pick: no human chose this row, so a clear "no" is a reason to try the next one
-            why = "doesn't answer this (fit: no" + (f"; missing {', '.join(fit.missing)}" if fit.missing else "") + ")"
-            moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
-            return moved if moved is not None else _terminate_unsupported(
-                store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
         note += "; fit: " + (f"{fit.answers_ask} (model)" if fit is not None else "rules")
         _transition(store, item_id, "assembling", source_url=url, note=note, _verify_shadow=shadow)
         _try_journal(store, item_id, "updated", note)
