@@ -424,7 +424,7 @@ def test_the_board_holds_the_researched_card_for_keep_and_keep_is_audited(client
                                    cloud="anthropic/x", consented=True)
     assert out["state"] == "ready"
     row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == item_id)
-    assert row["awaiting_yes"]["from"] == "library" and row["payload_slot"] == "preview" and row["actions"] == ["keep", "dismiss"]
+    assert row["awaiting_yes"]["from"] == "library" and row["payload_slot"] == "preview" and row["actions"] == ["keep", "dismiss", "delete"]
     before = {r["tool"] for r in client.app.state.audit.list(500)}
     assert "ni_research" in before and "ni_keep" not in before, "the research run reached the real audit log"
     assert client.post(f"/api/ni/items/{item_id}/validate", json={"ok": True}).status_code == 200
