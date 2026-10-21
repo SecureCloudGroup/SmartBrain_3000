@@ -37,6 +37,17 @@ function barOf(props: {
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); flushSync(); };
 
 describe("BuildProgress", () => {
+  it("renders nothing when nothing is building (no progress from the backend)", () => {
+    for (const progress of [undefined, null]) {
+      const target = document.createElement("div");
+      document.body.appendChild(target);
+      mounted.push(mount(BuildProgress, { target, props: { itemId: "it1", progress, canCancel: true, cancel: () => Promise.resolve({}) } }));
+      flushSync();
+      expect(target.querySelector(".bp")).toBeNull();
+      expect(target.querySelector("button")).toBeNull();
+    }
+  });
+
   it("shows the label and a bar that says which step it is on", () => {
     const root = barOf({});
     expect(root.querySelector(".bp-label")?.textContent).toBe("Finding a source");

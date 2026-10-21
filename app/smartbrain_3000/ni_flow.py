@@ -134,7 +134,7 @@ FLOW_STATES: frozenset[str] = frozenset({
 # C2/H3 (audit 2026-09-13): host-free error MARKER the frontend labels
 # ("Waiting for you to pick a source"). Sealed alongside the paused ``source``
 # state, where a normal error string would be a lie.
-AWAITING_SOURCE_PICK = "awaiting_pick"
+AWAITING_SOURCE_PICK = ni_master.PARKED_MARKER
 # The retired built-in recipe catalog paused at ``confirm_source``; a record
 # still sitting there after an upgrade re-lands the pick pause (Library first).
 _RETIRED_CONFIRM_STATE = "confirm_source"
@@ -6922,21 +6922,20 @@ _PROGRESS_STAGES: dict[str, tuple[int, str]] = {
 
 def build_progress(record: dict) -> dict | None:
     """``{step, of, label}`` for a non-terminal flow record (+ ``gate`` when it waits on the user, + ``try``
-    ``{n, of, host}`` while the v2 auto-pick works through Library sources); None for ready / terminal.
+    ``{n, of, host}`` while the v2 auto-pick works through Library sources); None for ready / terminal /
+    parked on the pick (nothing builds).
     Monotone in the state order, so a progress bar never moves back."""
     assert isinstance(record, dict), "record required"
     state = str(record.get("state") or "")
     stage = _PROGRESS_STAGES.get(state)
-    if stage is None:
-        return None
+    if stage is None or (state == "source" and record.get("error") == AWAITING_SOURCE_PICK):
+        return None  # parked on the pick marker: nothing is building, so there is no bar
     out: dict = {"step": stage[0], "of": PROGRESS_OF, "label": stage[1]}
     if state.startswith("awaiting_"):
         out["gate"] = state.removeprefix("awaiting_")
-    elif state == "source" and record.get("error") == AWAITING_SOURCE_PICK:
-        out.update(label="Stopped: no source to build from", gate="links")
     tried = record.get("_try")
     if isinstance(tried, dict) and isinstance(tried.get("n"), int) and isinstance(tried.get("of"), int) \
-            and 2 <= stage[0] <= 4 and out.get("gate") != "links":
+            and 2 <= stage[0] <= 4:
         out["try"] = {"n": tried["n"], "of": tried["of"], "host": str(tried.get("host") or "")[:120]}
     assert 1 <= out["step"] <= PROGRESS_OF, "a step on the bar"
     return out

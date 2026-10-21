@@ -1446,7 +1446,7 @@
                 <!-- v2: no source-pick UI. While the engine looks (or tries rows) the progress line
                      above says so; when it stops for lack of a Library source the card lists the
                      links read-only and keeps paste-a-link. -->
-                {#if item.flow.error === AWAITING_SOURCE_PICK || item.flow.progress?.gate === "links"}
+                {#if item.flow.error === AWAITING_SOURCE_PICK}
                   <LinksStop
                     suggestions={item.flow.suggestions}
                     busy={busyId === item.id}
