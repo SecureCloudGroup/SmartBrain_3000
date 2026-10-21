@@ -116,6 +116,22 @@ def test_board_shape_and_slot_selection(client: TestClient) -> None:
     ]}
 
 
+def test_board_row_actions_only_in_v2(client: TestClient, monkeypatch) -> None:
+    from smartbrain_3000 import db as dbmod
+    from smartbrain_3000 import ni_master
+
+    _unlock(client)
+    iid = _create_via_tool(client)
+    monkeypatch.delenv("SMARTBRAIN_NI_FLOW", raising=False)
+    v1 = next(i for i in client.get("/api/ni/board").json()["items"] if i["id"] == iid)
+    assert "actions" not in v1 and set(v1) == _BOARD_ROW_KEYS
+    dbmod.meta_set(client.app.state.ni.conn, "ni_flow", "v2")
+    v2 = next(i for i in client.get("/api/ni/board").json()["items"] if i["id"] == iid)
+    assert set(v2) == _BOARD_ROW_KEYS | {"actions"}
+    assert v2["actions"][0] == "activate" and set(v2["actions"]) <= ni_master.ACTION_KINDS
+    assert {k: v for k, v in v2.items() if k != "actions"} == v1, "v2 only adds the key"
+
+
 def test_board_row_carries_the_interpretation_and_only_the_coverage(client: TestClient) -> None:
     """Round 20 (Q3b, §36): a declared card's code-made interpretation line and its per-clause coverage reach
     the board (the C2 panel / footer reader) — never the whole sealed query; absent on a card without them."""

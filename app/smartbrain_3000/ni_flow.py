@@ -6726,6 +6726,9 @@ def board_flow_field(store: ni.NIStore, item_id: str) -> dict | None:
                          "provider": str(access.get("provider") or ""),
                          "key": {"docs_url": str(key.get("docs_url") or "")} if key else None,
                          "contact": bool(access.get("contact"))}
+    if _is_v2(store):  # v1 output stays byte-identical
+        out["actions"] = ni_master.actions_for(
+            state, record, shell=shell, awaiting_yes=False, item_state="", has_payload=False)
     return out
 
 

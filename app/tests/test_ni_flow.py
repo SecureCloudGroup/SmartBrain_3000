@@ -3091,6 +3091,18 @@ def test_board_keeps_terminal_slot_that_carries_a_question() -> None:
     assert ni_flow._flow_read(store, item_id) is not None, "slot must survive the read"
 
 
+def test_board_flow_field_actions_only_in_v2(monkeypatch) -> None:
+    monkeypatch.delenv("SMARTBRAIN_NI_FLOW", raising=False)
+    store, conn = _store()
+    item_id = ni_flow.create_shell_item(store, "needs a pick")
+    ni_flow._transition(store, item_id, "sampling")
+    v1 = ni_flow.board_flow_field(store, item_id)
+    assert v1 == {"state": "sampling"}, "v1 payload is untouched"
+    dbmod.meta_set(conn, "ni_flow", "v2")
+    v2 = ni_flow.board_flow_field(store, item_id)
+    assert v2 == {"state": "sampling", "actions": ["cancel"]}
+
+
 def test_routes_never_write_flow_state():
     """P34: flow-slot writes live in ni_flow only (routes, chat tools and MCP call its public
     functions). ``clear_flow_slot`` is the allowed public helper."""

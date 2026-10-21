@@ -77,6 +77,64 @@ QUESTION_KINDS: frozenset[str] = frozenset({
 # the card chrome and is listed only when it is the honest primary way out.
 REOPEN_KINDS: frozenset[str] = frozenset({"retry", "pick_source", "delete"})
 
+# Closed vocabulary of card actions the backend declares on a v2 board row / flow
+# (a public contract with the web client: unknown kinds must be ignored there).
+ACTION_KINDS: frozenset[str] = frozenset({
+    "keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "pause", "resume",
+    "edit", "delete", "activate", "activate_sites", "give_access", "answer_date",
+    "allow_model", "use_local", "fill_param", "add_credential", "review_fix",
+})
+
+_GATE_ACTIONS: dict[str, tuple[str, ...]] = {
+    "awaiting_access": ("give_access",),
+    "awaiting_credential": ("add_credential",),
+    "awaiting_params": ("fill_param",),
+}
+_QUESTION_ACTIONS: dict[str, tuple[str, ...]] = {
+    "supply_date": ("answer_date",),
+    "model_consent": ("allow_model", "use_local"),
+    "give_access": ("give_access",),
+}
+_ITEM_ACTIONS: dict[str, tuple[str, ...]] = {
+    "draft": ("edit", "refine", "delete"),
+    "commissioning": ("run", "pause", "edit", "refine", "delete"),
+    "live": ("run", "pause", "edit", "refine", "delete"),
+    "degraded": ("run", "pause", "fix", "edit", "refine", "delete"),
+    "failing": ("run", "pause", "fix", "edit", "refine", "delete"),
+    "broken": ("fix", "edit", "delete"),
+    "paused": ("resume", "edit", "delete"),
+}
+
+
+def actions_for(state: str, record: dict, *, shell: bool, awaiting_yes: bool,
+                item_state: str, has_payload: bool) -> list[str]:
+    """The card actions the backend declares (pure, no store). ``state`` is the flow state
+    ('' when there is no live flow). Law: a non-terminal flow always offers ``cancel``; a
+    terminal one always offers at least one way out; every kind is in ``ACTION_KINDS``."""
+    assert isinstance(record, dict), "record required"
+    assert isinstance(state, str) and isinstance(item_state, str), "states are text"
+    out: list[str] = []
+    if state and state != "ready":
+        if state in ("failed", "unsupported"):
+            surface = terminal_surface(state, record, shell=shell)
+            out += _QUESTION_ACTIONS.get(str((surface.get("question") or {}).get("kind")), ())
+            if "retry" in surface.get("reopen", []):
+                out.append("retry")
+            out += ("delete",) if shell else ("fix", "refine", "delete")
+        else:
+            out += _GATE_ACTIONS.get(state, ())
+            out.append("cancel")
+    elif awaiting_yes:
+        out += ("keep", "dismiss")
+    else:
+        out += _ITEM_ACTIONS.get(item_state, ())
+        if item_state == "draft" and has_payload:
+            out.insert(0, "activate")
+    result = list(dict.fromkeys(out))
+    assert all(kind in ACTION_KINDS for kind in result), "closed vocabulary"
+    return result
+
+
 _MAX_LEDGER = 120
 _MAX_EVIDENCE = 200
 

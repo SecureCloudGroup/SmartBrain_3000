@@ -30,6 +30,7 @@ from . import (
     ni,
     ni_flow,
     ni_library,
+    ni_master,
     ni_mcp,
     ni_watch,
     tools,
@@ -215,6 +216,12 @@ def _board_row(store: ni.NIStore, item: dict, *,
         row["fit"] = fit
     if ni.spec_renders(item["spec"]):  # Round 20 (B3a): ride only on a page-browser card
         row.update(_render_fields(item))
+    if ni_flow.flow_mode(store.conn) == "v2":  # v1 rows omit the key
+        flow = row["flow"]  # a live flow declares its own actions (it holds the record)
+        row["actions"] = list(flow["actions"]) if flow and "actions" in flow else \
+            ni_master.actions_for(
+                "", {}, shell=row["shell"], awaiting_yes=row["awaiting_yes"] is not None,
+                item_state=item["state"], has_payload=snap is not None)
     return row
 
 
