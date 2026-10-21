@@ -6718,6 +6718,12 @@ def cancel_flow(store: ni.NIStore, item_id: str) -> bool:
     return True
 
 
+def _cancel_pending(store: ni.NIStore, item_id: str) -> bool:
+    """True while the record carries ``_cancel`` and its worker still runs: deleting it would lose the stop."""
+    assert store is not None and item_id, "args required"
+    return bool((_flow_read(store, item_id) or {}).get("_cancel")) and is_working(item_id)
+
+
 def is_working(item_id: str) -> bool:
     """True while a flow worker still holds ``item_id`` (a cancelled one finishes its current fetch)."""
     assert isinstance(item_id, str) and item_id, "id required"
@@ -6764,7 +6770,7 @@ def board_flow_field(store: ni.NIStore, item_id: str, *, read_only: bool = False
         # sample preview, and hiding the terminal record there erased the
         # honest reason AND the way out. Shells always tell the truth.
         try:
-            if not read_only:
+            if not read_only and not _cancel_pending(store, item_id):
                 store.delete_snapshot(item_id, "flow")
         except Exception as exc:  # bookkeeping only
             log.warning("ni_flow: terminal-slot clear failed for %s: %s",
@@ -6939,6 +6945,8 @@ def clear_flow_slot(store: ni.NIStore, item_id: str) -> None:
     slot is a no-op.
     """
     assert store is not None and item_id, "args required"
+    if _cancel_pending(store, item_id):
+        return  # a cancelled worker is still out: keep the record that stops it
     try:
         store.delete_snapshot(item_id, "flow")
     except Exception as exc:  # bookkeeping only

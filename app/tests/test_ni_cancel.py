@@ -120,3 +120,35 @@ def test_the_decision_table_names_cancelled() -> None:
     move = ni_master.choose_move(state="failed", error_class="cancelled", shell=True)
     assert move == {"move": "park", "question": None, "reopen": ["retry"]}
     assert ni_master.reason_for("failed", "cancelled: stopped by you") == "You stopped this build."
+
+
+def _fix_card(store) -> str:
+    """A non-shell card (it has a spec and a preview) with a Fix flow running on it."""
+    item_id = ni_flow.create_shell_item(store, _REQUEST_FIX)
+    spec = dict(store.get_item(item_id)["spec"])
+    spec.pop("_shell", None)
+    store.update_spec(item_id, spec, origin="agent")
+    assert not store.get_item(item_id)["spec"].get("_shell"), "the card is not a shell"
+    ni_flow._transition(store, item_id, "sampling")
+    return item_id
+
+
+_REQUEST_FIX = "boise river level"
+
+
+def test_f1_a_board_read_keeps_the_cancel_while_the_worker_is_still_fetching() -> None:
+    store = _store()
+    item_id = _fix_card(store)
+    assert ni_flow.cancel_flow(store, item_id) is True
+    ni_flow._INFLIGHT.add(item_id)  # the cancelled worker is still out fetching
+    try:
+        ni_flow.board_flow_field(store, item_id)  # the 3 s poll: it hides the terminal record, but must not erase it
+        ni_flow.clear_flow_slot(store, item_id)  # the other eraser
+        assert (ni_flow._flow_read(store, item_id) or {}).get("_cancel") is True
+        before = store.get_item(item_id)["spec"]
+        out = ni_flow._finalize(store, item_id, copy.deepcopy(before), {"x": 1}, note="built")
+        assert out.get("_cancel") is True and store.get_item(item_id)["spec"] == before  # the Fix is not sealed
+    finally:
+        ni_flow._INFLIGHT.discard(item_id)
+    ni_flow.board_flow_field(store, item_id)  # the worker has ended: the poll may now tidy the record
+    assert ni_flow._flow_read(store, item_id) is None
