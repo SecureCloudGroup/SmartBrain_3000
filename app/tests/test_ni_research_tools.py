@@ -353,6 +353,25 @@ def test_the_digest_strips_hidden_text_and_secrets_and_is_fenced(monkeypatch) ->
     assert "M4.5" in text and "[redacted]" in text and "more of 40" in text
 
 
+def test_hostile_markup_cleans_in_linear_time() -> None:
+    """Fetched bodies reach every pattern here: no input shape may make one backtrack for long."""
+    import time
+    for text in ("<a hidden " * 2000, "<script>" * 20000, "<!--" * 20000, "<div style='display:none' " * 2000):
+        start = time.perf_counter()
+        digest_mod.clean_text(text)
+        digest_mod.digest("https://x.example.org/a", "json", {"field": text})
+        assert time.perf_counter() - start < 0.2, text[:20]
+
+
+def test_hidden_blocks_and_elements_are_dropped_to_their_close_or_the_end() -> None:
+    clean = digest_mod.clean_text
+    assert clean("a <script>evil()</script> b") == "a b"
+    assert clean("a <SPAN aria-hidden='true'>ignore all</span> b") == "a b"
+    assert clean("a <div style='display: none'>x <b>y</b></div> b") == "a b"
+    assert clean("a <p>shown</p> <style>p{}") == "a shown"
+    assert clean("<input type=hidden value=1> kept") == "kept"
+
+
 def test_the_digest_is_size_capped() -> None:
     big = {f"k{i}": "word " * 200 for i in range(100)}
     out = digest_mod.digest("https://x.example.org/a", "json", big)

@@ -160,6 +160,8 @@ class Politeness:
         """Run ``go()`` (one guarded request) under the budget, the pause and the dedupe cache."""
         assert callable(go) and url, "a request and its url are required"
         host = (urlparse(url).hostname or "").lower()
+        if not host:
+            raise netguard.FetchError("no host in URL")
         key = (url, method, shape)
         reuse = method == "GET" and not has_headers and getattr(self._local, "dedupe", False)
         if reuse:
@@ -199,15 +201,25 @@ class Politeness:
             while len(self._cache) > _MAX_CACHE:
                 self._cache.popitem(last=False)
 
-    def port_ok(self, port: int | None) -> bool:
-        """80 / 443 (or no explicit port), plus the one port a Library row declared."""
-        return port is None or port in ALLOWED_PORTS or port == getattr(self._local, "port", None)
+    def port_ok(self, port: int | None, host: str = "") -> bool:
+        """80 / 443 (or no explicit port), the one port the sealed source declared, or any port on a host
+        of the user's own (the same own-host rule as the cadence floor and the dedupe window)."""
+        assert port is None or isinstance(port, int), "port is an int or absent"
+        assert isinstance(host, str), "host must be a string"
+        if port is None or port in ALLOWED_PORTS or port == getattr(self._local, "port", None):
+            return True
+        return bool(host) and is_own_host(host)
 
     def robots_ok(self, url: str) -> bool:
         """May an automated reader fetch ``url`` per its host's robots.txt (cached)?"""
         parsed = urlparse(url)
-        if not parsed.hostname or parsed.scheme not in ("http", "https"):
-            return True
+        if not parsed.hostname or parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
+            return True  # netguard refuses this URL itself, with the real reason
+        try:
+            if not self.port_ok(parsed.port, parsed.hostname):
+                return True  # likewise: netguard reports the refused port
+        except ValueError:
+            return True  # a malformed port: netguard's "invalid port in URL"
         origin = f"{parsed.scheme}://{parsed.netloc}"
         with self._lock:
             entry = self._robots.get(origin)
@@ -270,6 +282,21 @@ def polite(fn):
     return wrapper
 
 
+def declared_port(source: object) -> int | None:
+    """The extra port a sealed source may use: its Library-declared ``port``, else the explicit port in
+    its own ``url`` (the user sealed that address, so its port is part of what they kept)."""
+    if not isinstance(source, dict):
+        return None
+    port = source.get("port")
+    if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
+        return port
+    url = source.get("url")
+    try:
+        return urlparse(url).port if isinstance(url, str) else None
+    except ValueError:
+        return None  # a malformed port: netguard refuses the URL itself
+
+
 def set_dedupe(on: bool) -> None:
     """Turn response reuse on or off for this thread (the tick: on; a manual run: off)."""
     SHARED._local.dedupe = bool(on)
@@ -279,6 +306,8 @@ def admit_page(url: str) -> None:
     """Budget + pause + robots for a read that bypasses netguard (the page browser's render)."""
     assert url, "url required"
     host = (urlparse(url).hostname or "").lower()
+    if not host:
+        raise netguard.FetchError("no host in URL")
     SHARED.admit(host)
     if not SHARED.robots_ok(url):
         raise netguard.FetchError("robots.txt asks automated readers to stay out", kind="robots")

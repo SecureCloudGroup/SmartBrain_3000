@@ -203,6 +203,41 @@ def test_ni_fetches_refuse_odd_ports_unless_the_library_row_declared_one(wire) -
     assert netguard.active_politeness() is None, "netguard is untouched outside an NI fetch"
 
 
+def test_own_hosts_and_the_sealed_address_keep_their_port(monkeypatch) -> None:
+    pol = ni_polite.SHARED
+    monkeypatch.setenv("SB_NI_OWN_HOSTS", "home.example")
+    assert pol.port_ok(8123, "nas.home.example") and pol.port_ok(8123, "192.168.1.5")
+    assert not pol.port_ok(8123, "api.third-party.example")
+    assert ni_polite.declared_port({"url": "http://api.third-party.example:8123/x"}) == 8123
+    assert ni_polite.declared_port({"url": "https://a.example/x", "port": 8443}) == 8443
+    assert ni_polite.declared_port({"url": "https://a.example/x"}) is None
+    assert ni_polite.declared_port({"url": "https://a.example:99999/x"}) is None
+
+
+def test_a_kept_card_on_an_odd_port_is_not_refused_for_its_port(monkeypatch) -> None:
+    ni_polite.SHARED.reset()
+    monkeypatch.setattr(netguard, "_validated_ip", lambda host: "93.184.216.34")
+
+    def no_dial(*a, **k):
+        raise OSError("no network in tests")
+
+    monkeypatch.setattr(netguard, "_send_pinned", no_dial)
+    with pytest.raises(ni.NIError) as got:
+        ni._fetch_http_json({"type": "http_json", "url": "https://api.third-party.example:8443/x"}, "item", None)
+    assert "port" not in str(got.value), "the port the user kept is part of the card"
+    with ni_polite.engaged(), pytest.raises(netguard.FetchError) as other:
+        netguard._guarded_get_once("https://api.third-party.example:8443/x", ("text/",), 1000)
+    assert other.value.kind == "port_refused", "an undeclared odd port is still refused"
+
+
+def test_a_url_netguard_refuses_reports_netguard_s_reason(wire) -> None:
+    with ni_polite.engaged(), pytest.raises(netguard.FetchError) as bad:
+        ni_polite.admit_page("http:///x")
+    assert "no host" in str(bad.value)
+    assert ni_polite.SHARED.robots_ok("https://user:pw@a.example/x"), "userinfo is netguard's refusal, not robots"
+    assert not any(u.endswith("/robots.txt") for u in wire.calls)
+
+
 def test_port_policy_runs_inside_the_real_guard(monkeypatch) -> None:
     ni_polite.SHARED.reset()
     monkeypatch.setattr(netguard, "_validated_ip", lambda host: "93.184.216.34")

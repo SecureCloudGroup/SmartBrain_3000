@@ -454,7 +454,7 @@ def _guarded_get_once(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
             except ValueError:  # (":abc", ":99999") must be a refusal like any other, not a 500
                 raise FetchError("invalid port in URL") from None
             polite = active_politeness()
-            if polite is not None and not polite.port_ok(parsed.port):  # type: ignore[attr-defined]
+            if polite is not None and not polite.port_ok(parsed.port, host):  # type: ignore[attr-defined]
                 raise FetchError("port not allowed", kind="port_refused")
             ip = _validated_ip(host)  # re-validated on every hop
             # httpx.Response (from send(stream=True)) is NOT a context manager — close

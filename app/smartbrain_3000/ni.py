@@ -7947,7 +7947,8 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
     # E: refuse any redirect hop while a header or a key rides the request
     has_headers = bool(resolved_headers) or bool(source.get("secret_query"))
     fmt = source.get("format") or "json"
-    port = source.get("port")  # S5a: the one non-80/443 port a Library row declared (default: refused)
+    from . import ni_polite  # lazy, like the imports above
+    port = ni_polite.declared_port(source)  # S5a: the Library row's port, or the sealed URL's own
     if fmt == "json":
         try:
             return ni_fetch.fetch_parsed(
@@ -8038,7 +8039,7 @@ def _fetch_http_page(source: dict, item_id: str, secrets_store, *,
     """S5a: ``_fetch_http_page_polite`` inside the shared politeness (budget, robots.txt, ports)."""
     from . import ni_polite  # lazy: keep the fetch layer off ni's import graph edges
 
-    with ni_polite.engaged():
+    with ni_polite.engaged(port=ni_polite.declared_port(source)):
         return _fetch_http_page_polite(source, item_id, secrets_store, full=full)
 
 
@@ -8178,7 +8179,7 @@ def _fetch_http_image(source: dict, item_id: str, secrets_store) -> tuple[dict, 
     """S5a: ``_fetch_http_image_polite`` inside the shared politeness (budget, pause, ports)."""
     from . import ni_polite  # lazy: keep the fetch layer off ni's import graph edges
 
-    with ni_polite.engaged():
+    with ni_polite.engaged(port=ni_polite.declared_port(source)):
         return _fetch_http_image_polite(source, item_id, secrets_store)
 
 

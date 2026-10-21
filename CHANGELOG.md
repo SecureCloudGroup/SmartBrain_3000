@@ -31,7 +31,8 @@ to know when a release changes behavior.
   Cards that read someone else's site refresh at most every 15 minutes, even if they were
   set to refresh faster; cards on your own network are not limited. Page readers now
   follow a site's robots.txt, and a site that asks automated readers to stay out is not
-  read. Cards read only ports 80 and 443, unless a Library source names its own port.
+  read. Cards read only ports 80 and 443, unless a Library source or the
+  address you kept names its own port; cards on your own network may use any port.
 
 ### Fixed
 

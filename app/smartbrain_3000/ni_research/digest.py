@@ -17,11 +17,13 @@ MAX_DEPTH = 6
 FENCE_OPEN = "<<<SAMPLE"
 FENCE_CLOSE = "<<<END SAMPLE>>>"
 
-_HIDDEN_BLOCK_RE = re.compile(r"<\s*(script|style|template|noscript|iframe)\b.*?<\s*/\s*\1\s*>", re.IGNORECASE | re.DOTALL)
-_HIDDEN_ELEMENT_RE = re.compile(
-    r"<\s*([a-z0-9]+)\b[^>]*(?:display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|\bhidden\b|aria-hidden)"
-    r"[^>]*>.*?<\s*/\s*\1\s*>", re.IGNORECASE | re.DOTALL)
-_COMMENT_RE = re.compile(r"<!--.*?-->|<!\[CDATA\[|\]\]>", re.DOTALL)
+_HIDDEN_TAGS = frozenset({"script", "style", "template", "noscript", "iframe"})
+_HIDDEN_MARK_RE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|\bhidden\b|aria-hidden",
+                             re.IGNORECASE)
+_TAG_NAME_RE = re.compile(r"([a-z0-9]+)", re.IGNORECASE)
+# Every pattern here runs on fetched bytes, so clean_text cuts its input to a few KiB first: the output is at
+# most ``n`` characters, and a bounded input keeps any pattern's worst case small (no backtracking hangs).
+_MIN_SCAN = 4096
 _TAG_RE = re.compile(r"<[^>]{0,400}>")
 # invisible code points: soft hyphen, joiners and fillers, zero-width and bidi controls, word joiner family,
 # BOM, the tag characters block
@@ -45,9 +47,8 @@ def clean_text(value: str, n: int = MAX_STRING) -> str:
     characters gone, secrets redacted, fence markers defused, whitespace collapsed, at most ``n`` characters."""
     assert isinstance(value, str), "text required"
     assert n > 0, "a positive bound"
-    text = _COMMENT_RE.sub(" ", value)
-    for pattern in (_HIDDEN_BLOCK_RE, _HIDDEN_ELEMENT_RE):  # bounded: two patterns
-        text = pattern.sub(" ", text)
+    text = _drop_comments(value[:max(8 * n, _MIN_SCAN)]).replace("<![CDATA[", " ").replace("]]>", " ")
+    text = _drop_hidden(text)
     text = _TAG_RE.sub(" ", text)
     text = _INVISIBLE_RE.sub("", text)
     text = "".join(c if c.isprintable() else " " for c in text)
@@ -55,6 +56,59 @@ def clean_text(value: str, n: int = MAX_STRING) -> str:
         text = pattern.sub("[redacted]", text)
     text = text.replace("<<<", "< <").replace(">>>", "> >")
     return " ".join(text.split())[:n]
+
+
+def _drop_comments(text: str) -> str:
+    """Remove ``<!-- ... -->`` spans (an unclosed one runs to the end) with plain finds, one pass."""
+    assert isinstance(text, str), "text required"
+    out: list[str] = []
+    pos = 0
+    for _ in range(len(text) + 1):  # bounded: every pass moves pos forward or stops
+        start = text.find("<!--", pos)
+        if start < 0:
+            break
+        out.append(text[pos:start] + " ")
+        end = text.find("-->", start + 4)
+        pos = len(text) if end < 0 else end + 3
+    out.append(text[pos:])
+    assert pos <= len(text), "the scan stays inside the text"
+    return "".join(out)
+
+
+def _drop_hidden(text: str) -> str:
+    """Remove script/style/template/noscript/iframe blocks and elements marked hidden, open tag to matching
+    close (a never-closed script-like block runs to the end), in one left-to-right scan with no backreferences."""
+    assert isinstance(text, str), "text required"
+    assert len(text) <= 1 << 20, "callers bound the input first"
+    out: list[str] = []
+    unclosed: set[str] = set()
+    pos = 0
+    for _ in range(len(text) + 1):  # bounded: every pass moves pos forward or stops
+        gt = text.find(">", pos)
+        lt = text.rfind("<", pos, gt) if gt >= 0 else -1
+        if lt < 0:
+            if gt < 0 or text.find("<", gt) < 0:
+                break
+            out.append(text[pos:gt + 1])
+            pos = gt + 1
+            continue
+        inner = text[lt + 1:gt]
+        name_m = _TAG_NAME_RE.match(text, lt + 1 + len(inner) - len(inner.lstrip()), gt)
+        name = name_m.group(1).lower() if name_m else ""
+        if not name or (name not in _HIDDEN_TAGS and not _HIDDEN_MARK_RE.search(text, name_m.end(), gt)):
+            out.append(text[pos:gt + 1])
+            pos = gt + 1
+            continue
+        out.append(text[pos:lt] + " ")
+        close = None if name in unclosed else \
+            re.compile(r"<\s*/\s*" + re.escape(name) + r"\s*>", re.IGNORECASE).search(text, gt + 1)
+        if close is not None:
+            pos = close.end()
+        else:  # an unclosed script-like block hides the rest; an unclosed hidden tag (often void) only itself
+            unclosed.add(name)  # no close after here means none after any later point: never search again
+            pos = len(text) if name in _HIDDEN_TAGS else gt + 1
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _shrink(node: object, depth: int) -> object:
