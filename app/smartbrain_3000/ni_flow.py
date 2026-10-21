@@ -24,6 +24,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -37,10 +38,10 @@ from zoneinfo import ZoneInfo
 
 from . import browsers as _browsers_mod
 from . import claudecli as _claudecli_mod
+from . import db, ni, ni_master, ni_query, page_verify, pagegraph
 from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
-from . import ni, ni_master, ni_query, page_verify, pagegraph
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import resolve_lookup
@@ -3737,6 +3738,28 @@ def _ask_model_consent(store: ni.NIStore, item_id: str, model: str,
                   "prompt": f"This card is set to build with {model}. Building sends your "
                             "request and samples from the source to that service; the "
                             "finished card still refreshes on this computer."})
+
+
+FLOW_MODES = ("v1", "v2")
+
+
+def flow_mode(conn) -> str:
+    """The ``ni_flow`` flag, the single reader: env ``SMARTBRAIN_NI_FLOW`` wins, then the
+    ``ni_flow`` meta key (same store as the gateway routes), default ``v1``. Closed set:
+    anything else reads as ``v1``."""
+    assert conn is not None, "conn required"
+    raw = os.environ.get("SMARTBRAIN_NI_FLOW")
+    if raw is None or not raw.strip():
+        raw = db.meta_get(conn, "ni_flow")
+    mode = str(raw or "").strip().lower()
+    assert isinstance(mode, str), "mode is text"
+    return mode if mode in FLOW_MODES else "v1"
+
+
+def _is_v2(store: ni.NIStore) -> bool:
+    """True when the store's flow runs the v2 (auto-pick) posture."""
+    assert store is not None, "store required"
+    return flow_mode(store.conn) == "v2"
 
 
 def _resolve_flow_model(store: ni.NIStore) -> str | None:
