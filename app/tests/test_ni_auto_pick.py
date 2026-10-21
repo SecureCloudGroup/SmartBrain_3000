@@ -130,13 +130,14 @@ def test_the_first_row_that_does_not_fit_falls_through_to_the_second(lib, monkey
     assert store.get_item(item_id)["spec"]["_built_from"]["path"] == "auto"
 
 
-def test_exhausting_every_row_searches_the_web_once_and_stops_honestly(lib, monkeypatch) -> None:  # noqa: F811
+def test_exhausting_every_row_never_searches_the_web_and_stops_honestly(lib, monkeypatch) -> None:  # noqa: F811
     store, fetched = _store(), []
     wrap = _Wrap(lib, [_row("usgs-quakes", _QUAKE_URL), _row("open-meteo-forecast", WEATHER_URL)])
     search = _Search()
     item_id, out = _run(store, wrap, monkeypatch,
                         _fetcher(fetched, {_QUAKE_URL: {"x": 1}, WEATHER_URL: {"y": 2}}), search=search)
-    assert fetched == [_QUAKE_URL, WEATHER_URL] and len(search.queries) == 1
+    assert fetched == [_QUAKE_URL, WEATHER_URL]  # only Library rows were fetched: no search result page
+    assert search.queries == []  # v2 never searches the web before Keep
     assert out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
     assert store.get_item(item_id)["spec"].get("_shell") is True  # nothing was built
     assert not out.get("_auto_picked")
@@ -145,9 +146,11 @@ def test_exhausting_every_row_searches_the_web_once_and_stops_honestly(lib, monk
 def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) -> None:  # noqa: F811
     store, fetched = _store(), []
     wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is a link
-    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}))
+    search = _Search()
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), search=search)
     assert fetched == [] and out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
     assert store.get_item(item_id)["spec"].get("_shell") is True
+    assert search.queries == [] and not out.get("_ranked_search")  # no web search, no web pages
 
 
 def test_a_keyless_row_is_tried_before_a_row_that_needs_a_key(lib, monkeypatch) -> None:  # noqa: F811

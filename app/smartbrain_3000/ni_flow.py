@@ -3959,7 +3959,7 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     rows = _without_declined(store, item_id, _library_candidates(request, intent, limit=_AUTO_ROWS))
     buildable = _buildable(rows)
     if not buildable:
-        return _pause_source_pick(store, item_id, request, intent, call_model, rows=rows)
+        return _pause_source_pick(store, item_id, request, intent, call_model, rows=rows, web=False)
     ordered = [r for r in buildable if not _row_needs_access(r)] + [r for r in buildable if _row_needs_access(r)]
     assert len(ordered) == len(buildable), "a partition loses no row"
     ordered += [r for r in rows if r not in buildable]  # the link rows ride behind, for the honest stop
@@ -5136,7 +5136,7 @@ def _page_wrong_outlet(url: str, request: str, intent: dict) -> str:
 
 def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
                        intent: dict, call_model: Callable[[str], str],
-                       rows: list[dict] | None = None) -> dict:
+                       rows: list[dict] | None = None, web: bool = True) -> dict:
     """The ONE source-pick pause. Layer 1 is the SmartBrain Library: sources
     whose parameters all fill from the user's words seal on the record. Ruling
     2026-10-05 ("Library cards; web as links"): only a source that declares its
@@ -5145,7 +5145,8 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
     own words, E-lite scores what the result pages contain, the model ranks the
     corpus, and ≤3 web pages seal — as links, next to the Library's. Nothing
     found, providers unwired, or total failure → the plain pause (paste a URL),
-    never a failed flow.
+    never a failed flow. ``web=False`` (v2 auto-pick): the user's consent was for a Library source, so no
+    search runs and no result page is read: the honest stop lists the Library's links only.
     """
     library = _without_declined(store, item_id,
                                 _library_candidates(request, intent) if rows is None else rows)
@@ -5155,9 +5156,9 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
                     note="paused: sources from the SmartBrain Library are on the card",
                     _ranked_library=library, _ranked_search=None)
         return _flow_read(store, item_id) or {}
-    web = _pause_with_web(store, item_id, request, intent, call_model, links=library)
-    if web is not None:
-        return web
+    found = _pause_with_web(store, item_id, request, intent, call_model, links=library) if web else None
+    if found is not None:
+        return found
     _transition(store, item_id, "source",
                 error=AWAITING_SOURCE_PICK,
                 note=_NO_ANSWERING_SOURCE + (" — pages that may help are on the card" if library else
@@ -7150,6 +7151,8 @@ def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, request: str, 
     moved = _repick_without(store, item_id, url, why=why, host_wide=host_wide)
     if moved is None or not research or _buildable(moved.get("_ranked_library")) or moved.get("_ranked_search"):
         return moved
+    if moved.get("_auto_picked") and _is_v2(store):
+        return moved  # v2 auto-pick exhausted the Library: stop on its links; no search, no page read before Keep
     web = _pause_with_web(store, item_id, request, intent, call_model, drop_why=why,
                           links=moved.get("_ranked_library"))
     return web if web is not None else moved
