@@ -22,6 +22,16 @@ to know when a release changes behavior.
   and only after you type the key. If no Library source answers, the card lists the
   Library's links and nothing else is fetched. Turn it on with `SMARTBRAIN_NI_FLOW=v2`.
 
+- **The new flow's researcher can search the web (cloud model, with your consent).** When no
+  Library source fits, it can run up to 3 web searches and read a published JSON, RSS, CSV or
+  XML file, and a card built that way is a preview you must Keep before it refreshes. It only
+  fetches the exact https addresses a search returned, never a link a page supplied or an
+  address of its own, and follows each site's robots.txt. A consent given before web research
+  (or with it switched off) covers the Library only; the card asks again. The consent now lists what leaves your computer, including that search
+  words reach your search provider and sites see your IP address. Set
+  `SMARTBRAIN_NI_RESEARCH_WEB=off` to keep research to the Library; a local model never uses
+  the web.
+
 ### Changed
 
 - **Neural Interface cards are politer to the sites they read.** Cards

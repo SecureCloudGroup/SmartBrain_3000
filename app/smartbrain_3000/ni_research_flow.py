@@ -1,11 +1,13 @@
-"""v2 glue: run the researcher before the flow's honest stop and land its proposal as a held card (S4c).
+"""v2 glue: run the researcher before the flow's honest stop and land its proposal as a held card (S4c, S5b).
 
 ``fallback`` is called by ``ni_flow`` when the auto-pick finds no buildable Library row, or every row failed.
 It picks the model tier (``ni_research.policy``), runs the bounded loop with Library-only provenance and, on a
 proposal, lands the card exactly like an auto-pick: ``_built_from.path`` is the closed value ``research`` (kept
 apart from ``auto`` so the board and the eval can tell a researched recipe from a declared-answers build; both
-are open paths, so a preview shows and nothing recurs until Keep). The interval is stamped by code from
-``recipe.question.cadence``. Every fetch is a Library-origin ``fetch_sample``: no keys, no web, no redirects.
+are open paths, so a preview shows and nothing recurs until Keep, whatever the source). The interval is stamped
+by code from ``recipe.question.cadence``. Fetches are Library rows only, unless the plan carries the open web
+(cloud tier, kill switch not off): then also exact search results and plain addresses on a found site (S5b,
+``ResearchCtx.origin``). No keys, no redirects either way; the local closed-world tier never has the web.
 """
 from __future__ import annotations
 
@@ -25,8 +27,12 @@ log = logging.getLogger(__name__)
 # the model seam: (model, messages, tools or None) -> an OpenAI-shaped response. None = the real gateway.
 _CHAT: Callable[[str, list, list | None], dict] | None = None
 _SEAM: dict = {"cloud": None, "local": None, "consented": False}
+# the web-search seam: (query, limit) -> {"results": [...]}. None = the app's own service (``ni_flow``'s provider).
+_SEARCH: Callable[[str, int], dict] | None = None
 RESEARCH_TIMEOUT_S = 120.0
 RESEARCH_MAX_TOKENS = 4096
+ORIGINS_LIBRARY = frozenset({"library"})
+ORIGINS_WEB = frozenset({"library", "search", "preview"})
 
 
 def set_research_chat(chat: Callable | None, *, cloud: str | None = None, local: str | None = None,
@@ -38,6 +44,23 @@ def set_research_chat(chat: Callable | None, *, cloud: str | None = None, local:
     assert chat is None or callable(chat), "chat must be callable"
     _CHAT = chat
     _SEAM.update(cloud=cloud, local=local, consented=bool(consented and chat is not None))
+
+
+def set_research_search(search: Callable[[str, int], dict] | None) -> None:
+    """Install a web-search seam (the eval's cassettes, tests); None goes back to the app's search service."""
+    global _SEARCH
+    assert search is None or callable(search), "search must be callable"
+    _SEARCH = search
+
+
+def _searcher() -> Callable[[str, int], dict] | None:
+    """The search function a web run uses: the installed seam, else the app's search service (``None`` when the
+    app wired none, which makes ``web_search`` answer a typed error)."""
+    assert _SEARCH is None or callable(_SEARCH), "a callable seam"
+    if _SEARCH is not None:
+        return _SEARCH
+    service = ni_flow._resolve_search_service()
+    return (lambda query, limit: service.search(query, limit=limit)) if service is not None else None  # type: ignore[attr-defined]
 
 
 def question_from_intent(request: str, intent: dict) -> dict:
@@ -121,8 +144,8 @@ def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, propo
     preview = _preview_of(ctx, spec)
     url = str(spec["source"]["url"])
     title = (ctx.urls.get(normal_url(url)) or {}).get("title") or ""
-    note = (f"researched ({out.mode}): {out.usage['calls']} model calls, {ctx.fetches} fetches, "
-            f"tier {proposal['tier']}; held for your Keep")
+    seen = f"{ctx.fetches} fetches" + (f", {ctx.searches} searches" if ctx.searches else "")
+    note = f"researched ({out.mode}): {out.usage['calls']} model calls, {seen}, tier {proposal['tier']}; held for your Keep"
     ni_flow._transition(store, item_id, "assembling", source_url=url, note=note)
     ni_flow._try_journal(store, item_id, "updated", note)
     return ni_flow._finalize(store, item_id, spec, preview, note=note, born="flow", fetched_at=ctx.now,
@@ -148,12 +171,14 @@ def _audit(item_id: str, plan: policy.Plan) -> bool:
     auto-pick record: a locked or unwired log never stops the build. True when a row was written."""
     assert isinstance(plan, policy.Plan), "a plan"
     assert item_id and plan.mode in ("cloud", "local"), "a researching plan"
+    assert plan.mode == "cloud" or not plan.web, "only the cloud tier has the web"
     try:
         log_ = ni_flow._AUDIT_PROVIDER() if ni_flow._AUDIT_PROVIDER is not None else None
         if log_ is None:
             return False
         log_.append("assistant", "ni_research", "reviewed", "auto", True,
-                    args_summary=json.dumps({"item_id": item_id, "mode": plan.mode, "model": plan.model}))
+                    args_summary=json.dumps({"item_id": item_id, "mode": plan.mode, "model": plan.model,
+                                                 "web": plan.web}))
         return True
     except Exception as exc:  # the audit row is a record, never a gate
         log.warning("ni_research: audit failed: %s", type(exc).__name__)
@@ -166,8 +191,11 @@ def plan_for(store: ni.NIStore, item_id: str, record: dict) -> policy.Plan:
     assert store is not None and item_id, "args required"
     cloud = _SEAM["cloud"] if _CHAT is not None else policy.cloud_route(store.conn)
     local = _SEAM["local"] if _CHAT is not None else ni_flow._local_flow_model(store)
-    consent = cloud if _SEAM["consented"] and cloud else ni_flow._model_consent_of(store, item_id, record)
-    return policy.choose(policy.setting(store.conn), cloud, local, consent, bool(record.get("_use_local")))
+    seam = bool(_SEAM["consented"] and cloud)
+    consent = cloud if seam else ni_flow._model_consent_of(store, item_id, record)
+    consent_web = seam or ni_flow._model_consent_web_of(store, item_id, record)
+    return policy.choose(policy.setting(store.conn), cloud, local, consent, bool(record.get("_use_local")),
+                         web=policy.web_enabled(store.conn), consent_web=consent_web)
 
 
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict | None:
@@ -186,11 +214,14 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
     if plan.mode == "ask":
         return ni_flow._ask_model_consent(store, item_id, plan.model or "", plan.local, research=True)
     now = ni._clock().astimezone(UTC)
+    web = plan.mode == "cloud" and plan.web  # the closed-world local tier never has the web
     ctx = ResearchCtx(request=request, question=question_from_intent(request, intent), now=now,
-                      zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=frozenset({"library"}),
+                      zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=ORIGINS_WEB if web else ORIGINS_LIBRARY,
+                      searcher=_searcher() if web else None,
                       library=_Library(lib, ni_flow._library_hint(intent), set(record.get("_declined") or [])))
     ni_flow._transition(store, item_id, record.get("state") or "source", error=record.get("error"),
-                        note=f"researching ({plan.mode}) for a Library source")
+                        note=f"researching ({plan.mode}) for a Library source" if not web
+                        else "researching (cloud) in the Library and on the web")
     _audit(item_id, plan)
     chat = _chat_for(store, plan.model or "", plan.mode == "local")
     accept = lambda proposal: _can_land(ctx, item_id, request, proposal)

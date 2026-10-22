@@ -125,7 +125,9 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     """The board's ``awaiting_yes`` block for one item (None unless it waits for the user's YES / Keep)."""
     assert isinstance(item, dict), "item required"
     built_from = item["spec"].get("_built_from") or {}
-    block = ({"from": {"page": "page", "auto": "library", "research": "library"}.get(built_from.get("path"), "dataset"),
+    web = (item["spec"].get("recipe") or {}).get("tier") not in (None, "curated")  # a researched card from the open web
+    block = ({"from": {"page": "page", "auto": "library", "research": "dataset" if web else "library"}.get(
+                  built_from.get("path"), "dataset"),
               "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
              if ni.awaits_yes(item) else None)
     if block is not None and _used_access(item["spec"].get("source")):
@@ -2083,7 +2085,7 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 # so a template ships with none and the install path forces the safe default.
 _EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_template", "repair_policy",
-                      "_born", "_model_consent", "_built_from", "query", "interpretation",
+                      "_born", "_model_consent", "_model_consent_web", "_built_from", "query", "interpretation",
                       "_render_ok", "_feed_candidates", "recipe")
 # B3a: the page-browser seal lives INSIDE the source — an exported template is a plain page card
 _EXPORT_STRIP_SOURCE_KEYS = ("render", "sites")

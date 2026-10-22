@@ -64,6 +64,10 @@ ENTRY_POINTS = {
     "formats.sniff_format": lambda text: formats.sniff_format("text/plain", text),
     "digest.clean_text": digest.clean_text,
     "digest.digest": lambda text: digest.digest("https://x.example.org/a", "json", {"field": text, "list": [text]}),
+    "digest.clean_search_rows": lambda text: digest.clean_search_rows(
+        [{"url": "https://x.example.org/" + text[:200], "title": text, "snippet": text}] * 8),
+    "digest.search_digest": lambda text: digest.search_digest(text, [{"title": text, "url": "https://x.example.org/",
+                                                                      "snippet": text}]),
 }
 BODY_CHARS = 100_000
 ENTRY_BUDGET_S = 2.0

@@ -285,6 +285,60 @@ def test_robots_disallow_stops_a_page_read_but_not_a_json_api(wire) -> None:
     assert [u for u in wire.calls if u.endswith("/robots.txt")] == robots_calls, "robots.txt is cached"
 
 
+def _robots_host(wire) -> None:
+    wire.answers["https://robots-host.example/robots.txt"] = {
+        "final_url": "x", "status": 200, "content_type": "text/plain",
+        "content": b"User-agent: *\nDisallow: /private/\n"}
+
+
+def test_a_source_from_outside_the_library_obeys_robots_whichever_fetcher_reads_it(wire) -> None:
+    """M2 (review #535): robots.txt is keyed on where the source came from, not on which fetcher ran."""
+    _robots_host(wire)
+    with ni_polite.engaged(robots=True):
+        for read in (lambda u: netguard.safe_fetch_json(u), lambda u: netguard.safe_fetch_text(u, "csv"),
+                     lambda u: netguard.safe_fetch_page(u)):
+            with pytest.raises(netguard.FetchError) as no:
+                read("https://robots-host.example/private/data")
+            assert no.value.kind == "robots"
+        assert netguard.safe_fetch_json("https://robots-host.example/public/data") == {"text": "hello"}
+        with ni_polite.engaged(), pytest.raises(netguard.FetchError):  # an inner engage keeps the enclosing answer
+            netguard.safe_fetch_json("https://robots-host.example/private/data")
+        wire.answers["http://10.0.0.5/robots.txt"] = {"final_url": "x", "status": 200, "content_type": "text/plain",
+                                                      "content": b"User-agent: *\nDisallow: /\n"}
+        assert netguard.safe_fetch_json("http://10.0.0.5/private/x") == {"text": "hello"}, "own hosts are exempt"
+    assert _fetch("https://robots-host.example/private/data") == {"text": "hello"}, "the flag ends with its block"
+    assert not any("//robots-host.example/private" in u for u in wire.calls[:3]), "the refused reads never left"
+
+
+def test_a_kept_card_from_the_web_refreshes_under_robots_and_a_library_card_does_not(monkeypatch) -> None:
+    seen = []
+    monkeypatch.setattr(ni, "_dispatch_source", lambda *a: seen.append(getattr(ni_polite.SHARED._local, "robots", False)))
+    web = {"recipe": {"sources": [{"kind": "search", "ref": "https://x.example/a.json", "host": "x.example", "why": "w"}]}}
+    lib = {"recipe": {"sources": [{"kind": "library", "ref": "https://x.example/a.json", "host": "x.example", "why": "w"}]}}
+    for spec in (web, lib, {}):
+        ni._fetch_source(spec, "i1", None, None, None, object(), None)
+    assert seen == [True, False, False]
+    assert ni_polite.robots_for(web) and not ni_polite.robots_for(lib) and not ni_polite.robots_for({"recipe": 3})
+
+
+def test_research_reads_a_search_result_only_where_robots_allows_and_a_library_row_as_before(wire) -> None:
+    from test_ni_research_tools import _ctx
+
+    from smartbrain_3000 import ni_research_flow
+    from smartbrain_3000.ni_research import tools
+    _robots_host(wire)
+    blocked, open_ = "https://robots-host.example/private/q.json", "https://robots-host.example/public/q.json"
+    ctx = _ctx(None, allowed_origins=ni_research_flow.ORIGINS_WEB)
+    ctx.record(blocked, "search")
+    ctx.record(open_, "search")
+    assert tools.fetch_sample(ctx, blocked)["error"] == "robots"
+    assert tools.fetch_sample(ctx, open_)["ok"]
+    lib = _ctx(None, allowed_origins=ni_research_flow.ORIGINS_LIBRARY)
+    lib.record(blocked, "library")
+    assert tools.fetch_sample(lib, blocked)["ok"], "a Library row is a vetted API, read as before"
+    assert blocked not in wire.calls[: wire.calls.index(open_)], "the refused read never reached the host"
+
+
 def test_robots_missing_allows_and_unavailable_disallows_for_a_while(wire) -> None:
     assert _page("https://no-robots.example/a")["status"] == 200, "a 404 robots.txt means no rules"
     wire.answers["https://down-robots.example/robots.txt"] = netguard.FetchError(
@@ -338,7 +392,7 @@ def test_every_ni_fetch_path_is_engaged_once_at_the_shared_chokepoint(wire, monk
         ctx = ResearchCtx(request="synthetic", question={}, library=None,
                           now=datetime(2026, 10, 21, tzinfo=UTC))
         research_tools._fetch_and_digest(ctx, url, "csv")
-    assert wire.calls == [url], "one request, through the shared path"
+    assert [u for u in wire.calls if not u.endswith("/robots.txt")] == [url], "one request, through the shared path"
     assert seen and all(p is ni_polite.SHARED for p in seen), "the request ran politeness-engaged"
     monkeypatch.undo()
     assert netguard.active_politeness() is None, "engagement does not leak past the fetch"

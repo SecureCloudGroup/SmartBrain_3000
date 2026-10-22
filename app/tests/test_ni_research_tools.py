@@ -117,15 +117,15 @@ def test_redirects_are_never_followed(monkeypatch) -> None:
     assert net.calls[-1]["allow_redirects"] is False and net.calls[-1]["headers"] is None
 
 
-def test_a_url_a_page_supplied_is_refused_unless_it_is_a_site_already_found(monkeypatch) -> None:
+def test_a_url_a_page_supplied_is_refused_even_on_a_site_already_found(monkeypatch) -> None:
     url = "https://data.example.org/q.json"
     body = {"next": "https://evil.test/steal?x=1", "same": "https://api.example.org/more.json"}
     ctx, net = _listed(monkeypatch, url, body)
     net.bodies["https://api.example.org/more.json"] = {"ok": 1}
     assert tools.fetch_sample(ctx, url)["ok"]
     assert tools.fetch_sample(ctx, body["next"])["error"] == "provenance"
-    assert tools.fetch_sample(ctx, body["same"])["ok"]  # the registrable domain of an earlier result
-    assert [c["url"] for c in net.calls] == [url, body["same"]]
+    assert tools.fetch_sample(ctx, body["same"])["error"] == "provenance"  # only handed-over addresses, exactly
+    assert [c["url"] for c in net.calls] == [url]
 
 
 @pytest.mark.parametrize("bad", [
@@ -163,6 +163,8 @@ def test_fetch_budget_is_eight(monkeypatch) -> None:
     net = Net(monkeypatch, {u: {"i": i} for i, u in enumerate(urls)})
     ctx = _ctx(FakeLibrary([_row(urls[0])]), max_turns=20)
     tools.library_search(ctx, "q")
+    for u in urls[1:]:  # more Library rows than one search returns
+        ctx.record(u, "library")
     results = [tools.fetch_sample(ctx, u) for u in urls[:9]]
     assert [r["ok"] for r in results] == [True] * 8 + [False]
     assert results[-1]["error"] == "budget_exhausted" and "fetches" in results[-1]["detail"]
@@ -290,7 +292,7 @@ def test_propose_card_seals_recipe_tier_and_a_capped_trace(monkeypatch) -> None:
 def test_the_tier_follows_how_the_source_was_found() -> None:
     assert tools._tier("library", "json") == "curated"
     assert tools._tier("search", "feed") == "verified_endpoint"
-    assert tools._tier("same_domain", "text") == "page_reading"
+    assert tools._tier("search", "text") == "page_reading"
 
 
 def test_a_long_trace_is_squeezed_under_the_cap() -> None:
@@ -309,7 +311,7 @@ def test_library_search_records_origins_and_survives_a_broken_library() -> None:
     ctx = _ctx(lib)
     got = tools.library_search(ctx, "  rain in Kansas City ")
     assert [c["format"] for c in got["candidates"]] == ["json", "csv"] and lib.asked == ["rain in Kansas City"]
-    assert ctx.origin("https://a.example.org/other")[0] == "same_domain" and ctx.origin("https://evil.test/")[0] is None
+    assert ctx.origin("https://a.example.org/other")[0] is None and ctx.origin("https://evil.test/")[0] is None
 
     class Broken:
         def candidates(self, *a, **k):
@@ -392,7 +394,7 @@ def test_html_and_non_data_pages_are_not_samples(monkeypatch) -> None:
 
 # --- schemas -----------------------------------------------------------------------------------------------------
 
-PINNED_SCHEMA_SHA256 = "79a06f4a040eed4f0ad3040a8d89128fe145a3949022ded11de1eafb3dacee38"
+PINNED_SCHEMA_SHA256 = "5cff55dcfcbbeb00661483ce1de23c9877564663fc052513b3bc8ebdae46a4bf"  # S5b: + web_search; exact addresses only
 
 
 def test_tool_schemas_are_byte_stable_and_anthropic_shaped() -> None:
@@ -400,7 +402,8 @@ def test_tool_schemas_are_byte_stable_and_anthropic_shaped() -> None:
     assert first == second == json.dumps(json.loads(schemas.TOOLS_JSON), sort_keys=True)
     assert schemas.TOOLS_JSON == json.dumps(json.loads(schemas.TOOLS_JSON), sort_keys=True, separators=(",", ":"))
     names = [t["name"] for t in schemas.tool_schemas()]
-    assert names == sorted(names) == ["fetch_sample", "library_search", "propose_card", "resolve_entity", "try_recipe"]
+    assert names == sorted(names) == ["fetch_sample", "library_search", "propose_card", "resolve_entity", "try_recipe",
+                                                    "web_search"]
     assert set(names) <= ni_recipe.TOOLS
     for t in schemas.tool_schemas():
         assert set(t) == {"name", "description", "input_schema"} and t["input_schema"]["type"] == "object"
@@ -413,7 +416,7 @@ def test_run_tool_dispatches_and_refuses_unknown_tools_and_extra_arguments(monke
     ctx, _ = _listed(monkeypatch, url, QUAKES)
     assert schemas.run_tool(ctx, "fetch_sample", {"url": url})["ok"]
     assert schemas.run_tool(ctx, "fetch_sample", {"url": url, "headers": {"X": "y"}})["error"] == "invalid_args"
-    assert schemas.run_tool(ctx, "web_search", {"query": "x"})["error"] == "unknown_tool"
+    assert schemas.run_tool(ctx, "browse_anywhere", {"query": "x"})["error"] == "unknown_tool"
     assert schemas.run_tool(ctx, "fetch_sample", "x")["error"] == "invalid_args"
 
 

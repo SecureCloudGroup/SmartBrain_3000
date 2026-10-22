@@ -12,7 +12,9 @@ One shared object sits behind ``netguard``'s guarded request while an NI fetch r
   hosts: the cadence floor) so 50 cards on one URL make one request per interval.
 * the 15 minute cadence floor for third-party hosts (``cadence_floor_minutes``).
 * the NI port policy (80 / 443, or the one port a Library row declared in ``source.port``).
-* robots.txt for page reads (``safe_fetch_page``), fetched through netguard and cached.
+* robots.txt for page reads (``safe_fetch_page``), and for EVERY read of a source that is not a Library row
+  (``engaged(robots=True)``: research on the open web, and a kept card ``robots_for`` names), whichever
+  fetcher runs; fetched through netguard and cached.
 
 "Own" hosts are exempt from the cadence floor and use a short dedupe window: loopback / private /
 link-local address literals, single-label names, ``localhost``, ``.local`` ``.lan`` ``.home.arpa``
@@ -162,6 +164,8 @@ class Politeness:
         host = (urlparse(url).hostname or "").lower()
         if not host:
             raise netguard.FetchError("no host in URL")
+        if getattr(self._local, "robots", False) and not is_own_host(host) and not self.robots_ok(url):
+            raise netguard.FetchError("robots.txt asks automated readers to stay out", kind="robots")
         key = (url, method, shape)
         reuse = method == "GET" and not has_headers and getattr(self._local, "dedupe", False)
         if reuse:
@@ -260,17 +264,31 @@ SHARED = Politeness()
 
 
 @contextlib.contextmanager
-def engaged(port: int | None = None):
+def engaged(port: int | None = None, robots: bool | None = None):
     """Run the body with the shared politeness installed on this thread (re-entrant). ``port`` is
-    the one extra port a Library row declared for this source."""
+    the one extra port a Library row declared for this source. ``robots``: every request in the body
+    obeys robots.txt (a source that is not a Library row); None keeps the enclosing answer."""
     previous = netguard.set_politeness(SHARED)
     saved_port = getattr(SHARED._local, "port", None)
+    saved_robots = getattr(SHARED._local, "robots", False)
     SHARED._local.port = port if isinstance(port, int) and 0 < port < 65536 else saved_port
+    SHARED._local.robots = bool(robots) if robots is not None else saved_robots
     try:
         yield SHARED
     finally:
         SHARED._local.port = saved_port
+        SHARED._local.robots = saved_robots
         netguard.set_politeness(previous)
+
+
+def robots_for(spec: object) -> bool:
+    """True when a card's source came from outside the Library (a researcher recipe naming any source kind
+    but ``library``): its refreshes obey robots.txt like the research that found it."""
+    recipe = spec.get("recipe") if isinstance(spec, dict) else None
+    sources = recipe.get("sources") if isinstance(recipe, dict) else None
+    if not isinstance(sources, list):
+        return False
+    return any(isinstance(s, dict) and s.get("kind") != "library" for s in sources[:8])
 
 
 def polite(fn):

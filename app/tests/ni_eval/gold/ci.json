@@ -168,5 +168,46 @@
     }
    ]
   }
+ },
+ {
+  "id": "CI7",
+  "set": "CI",
+  "ask": "latest earthquakes worldwide",
+  "kind": "latest_items",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "feeds.example.net"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "research",
+   "research": "cloud",
+   "library_rows": [
+    {
+     "source_id": "wx-1",
+     "title": "Daily weather",
+     "host": "data.example.org",
+     "url": "https://data.example.org/weather.json",
+     "provider": "Example",
+     "authority": "official",
+     "format": "json",
+     "scope": "global",
+     "label": "",
+     "choice": false
+    }
+   ]
+  }
  }
 ]

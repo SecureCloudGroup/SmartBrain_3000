@@ -1,8 +1,9 @@
-"""The bounded research loop (plan 6.1), Library only. The model only chooses tools; code runs every one.
+"""The bounded research loop (plan 6.1): the Library, plus the open web on the cloud tier (S5b).
+The model only chooses tools; code runs every one.
 
 Two shapes share one ``Outcome``: ``run_research`` (the cloud tool loop) and ``run_closed_world`` (the local
-model picks a ranked Library row and fills a recipe from its sample; no loop, no web). Both end at a
-``propose_card`` success (``proposed``) or in an honest ``declined`` with reasons and up to three Library links:
+model picks a ranked Library row and fills a recipe from its sample; no loop, never the web). Both end at a
+``propose_card`` success (``proposed``) or in an honest ``declined`` with reasons and up to three links:
 budget exhaustion, a model that stopped calling tools, or ``propose_card`` failing its checks twice.
 """
 from __future__ import annotations
@@ -45,10 +46,11 @@ class Outcome:
 
 
 def _links(ctx: ResearchCtx) -> list[dict]:
-    """Up to three Library sources the run saw (title and address), for the honest decline."""
+    """Up to three sources the run saw (title and address; Library rows first, then search results), for the honest decline."""
     assert MAX_LINKS > 0, "a link cap"
     assert isinstance(ctx, ResearchCtx), "a research ctx"
-    rows = [{"title": str(v.get("title") or "")[:120], "url": k} for k, v in ctx.urls.items() if v.get("kind") == "library"]
+    rows = [{"title": str(v.get("title") or "")[:120], "url": k} for kind in ("library", "search")
+            for k, v in ctx.urls.items() if v.get("kind") == kind]
     return rows[:MAX_LINKS]
 
 
@@ -201,7 +203,7 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
         if stop:
             return _decline(ctx, out, [stop, *why])
         try:
-            response = chat(prompt.build_messages(base, turns), prompt.openai_tools())
+            response = chat(prompt.build_messages(base, turns), prompt.openai_tools("search" in ctx.allowed_origins))
         except Exception as exc:  # the model route failed: an honest decline, never a crash
             log.warning("ni_research: model call failed: %s", type(exc).__name__)
             return _decline(ctx, out, [f"the research model was unavailable ({type(exc).__name__})", *why])
