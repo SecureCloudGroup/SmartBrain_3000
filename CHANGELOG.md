@@ -43,8 +43,11 @@ to know when a release changes behavior.
   trial and automatic undo as any repair. This is the same research that built the card, so it
   sends the same things to the same cloud model and only for a card you already allowed that
   model for; with research off, or no consent, the card just stays failing. At most one
-  re-research a day per card, and one proposal per failure streak (Dismiss is final until it
-  recovers). A card from a curated Library source waits until its refreshes are failing; a
+  re-research a day per card and 10 a day across all cards (`SMARTBRAIN_NI_RERESEARCH_DAILY`
+  or the `ni_reresearch_daily` setting; `0` turns it off), a wait of 1, then 2, then 4 days
+  (never more than 7) after each "no safe replacement" in the same failure streak, and one
+  proposal per streak (Dismiss is final until it recovers). The limits are kept with the
+  card and in a daily counter, not in the run history, so many refreshes do not reset them. A card from a curated Library source waits until its refreshes are failing; a
   web data file or page reading may ask after the first drift.
 
 ### Changed

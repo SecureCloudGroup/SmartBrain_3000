@@ -144,6 +144,20 @@ def _proposal(store, iid) -> dict | None:
     return store.get_item(iid)["spec"].get("_l2_proposal")
 
 
+def _age_marker(store, iid, hours: float) -> None:
+    """Move the sealed attempt marker ``hours`` into the past (the clock for the day wait and the backoff)."""
+    marker = dict(store.get_item(iid)["spec"]["_research_last_attempt"])
+    marker["at"] = (datetime.fromisoformat(marker["at"]) - timedelta(hours=hours)).isoformat()
+    assert store.set_research_attempt(iid, marker)
+
+
+def _flood_runs(store, iid, n: int = 60) -> None:
+    """Enough telemetry rows to evict the whole 50-row ring."""
+    for _ in range(n):
+        store.record_run(iid, "ok", duration_ms=1, error=None, contract_ok=None)
+    assert ni_refresh.RUN_STARTED not in _statuses(store, iid)
+
+
 def _statuses(store, iid) -> list[str]:
     return [r["status"] for r in store.list_runs(iid)]
 
@@ -342,7 +356,7 @@ def test_a_decline_is_honest_and_the_day_limit_holds(monkeypatch) -> None:
     assert seen >= 1
     assert not _work(store, conn, key, iid), "at most one re-research per card per day"
     assert len(script.seen) == seen
-    conn.execute("UPDATE ni_runs SET ts = ts - INTERVAL '25 HOURS' WHERE item_id = ?;", [iid])
+    _age_marker(store, iid, 25)
     _researcher()
     assert _work(store, conn, key, iid), "a day later it may try again"
     assert _proposal(store, iid)["spec"]["source"]["url"] == ALT
@@ -363,8 +377,7 @@ def test_one_proposal_per_streak_even_after_it_is_dismissed(monkeypatch) -> None
     _researcher()
     assert _work(store, conn, key, iid)
     store.clear_l2_proposal(iid)  # Dismiss
-    conn.execute("UPDATE ni_runs SET ts = ts - INTERVAL '25 HOURS' WHERE item_id = ?;", [iid])
-    conn.execute("UPDATE ni_items SET first_failure_at = first_failure_at - INTERVAL '48 HOURS' WHERE id = ?;", [iid])
+    _age_marker(store, iid, 48)
     _researcher()
     assert not _work(store, conn, key, iid), "the user said no to this streak"
     _fail_run(store, conn, key, iid, ni.CONSTRAINT_DRIFT)
@@ -450,6 +463,162 @@ def test_constraint_drift_is_a_status_beside_the_other_failures() -> None:
     assert ni.RESEARCH_REASONS == {"constraint_drift", "source_dead"}
     assert {ni_refresh.RUN_STARTED, ni_refresh.RUN_PROPOSED, ni_refresh.RUN_DECLINED} <= {
         "repair_research_started", "repair_research_proposed", "repair_research_declined"}
-    assert ni_refresh.may_research([], None, datetime.now(UTC)) is True
-    old = {"status": ni_refresh.RUN_STARTED, "ts": str(datetime.now(UTC) - timedelta(hours=23))}
-    assert ni_refresh.may_research([old], None, datetime.now(UTC)) is False
+    now = datetime.now(UTC)
+    assert ni_refresh.may_research(None, None, now) is True
+    old = {"at": (now - timedelta(hours=23)).isoformat(), "streak": None, "outcome": "started", "declines": 0}
+    assert ni_refresh.may_research(old, None, now) is False
+    assert ni_refresh.may_research({**old, "at": (now - timedelta(hours=25)).isoformat()}, None, now) is True
+
+
+# --- 6. review fixes: the durable marker, the daily budget, the decline backoff ---------------------------------
+
+def test_the_attempt_bounds_survive_the_telemetry_ring_being_pruned(monkeypatch) -> None:
+    """M1: 60 later run rows evict the started row from ni_runs; the sealed marker still refuses a second run."""
+    store, conn, key, iid = _seed(monkeypatch, tier="verified_endpoint")
+    _drift(monkeypatch, store, conn, key, iid)
+    script = _researcher(text_only=True)
+    assert _work(store, conn, key, iid)
+    seen = len(script.seen)
+    _flood_runs(store, iid)
+    assert not _work(store, conn, key, iid) and len(script.seen) == seen, "still inside the day"
+    assert store.get_item(iid)["spec"]["_research_last_attempt"]["outcome"] == "declined"
+
+
+def test_a_dismissed_proposal_is_not_asked_again_after_the_ring_is_pruned(monkeypatch) -> None:
+    store, conn, key, iid = _seed(monkeypatch, tier="verified_endpoint")
+    _drift(monkeypatch, store, conn, key, iid)
+    _researcher()
+    assert _work(store, conn, key, iid)
+    assert store.get_item(iid)["spec"]["_research_last_attempt"]["outcome"] == "proposed"
+    store.clear_l2_proposal(iid)  # Dismiss
+    _flood_runs(store, iid)
+    _age_marker(store, iid, 72)
+    script = _researcher()
+    assert not _work(store, conn, key, iid) and script.seen == [], "the user said no to this streak"
+
+
+def test_the_marker_is_carried_by_revert_apply_and_update_and_never_exported(monkeypatch) -> None:
+    store, conn, key, iid = _seed(monkeypatch, tier="verified_endpoint")
+    _drift(monkeypatch, store, conn, key, iid)
+    _researcher()
+    assert _work(store, conn, key, iid)
+    marker = store.get_item(iid)["spec"]["_research_last_attempt"]
+    proposal = _proposal(store, iid)
+    store.clear_l2_proposal(iid)
+    rev = store.get_item(iid)["spec_rev"]
+    assert store.apply_repair(iid, proposal["spec"], origin="repair_l2", expected_rev=rev, replace_spec=True)
+    assert store.get_item(iid)["spec"]["_research_last_attempt"] == marker, "apply_repair"
+    ni._revert_l1_trial_if_active(store, iid)
+    reverted = store.get_item(iid)["spec"]
+    assert reverted["source"]["url"] == URL and reverted["_research_last_attempt"] == marker, "revert"
+    edited = dict(reverted)
+    edited.pop("_research_last_attempt")
+    store.update_spec(iid, edited)
+    assert store.get_item(iid)["spec"]["_research_last_attempt"] == marker, "update_spec"
+    from smartbrain_3000 import ni_library, ni_routes
+    assert "_research_last_attempt" in ni_routes._EXPORT_STRIP_KEYS
+    assert "_research_last_attempt" in ni_library._TEMPLATE_STRIP_KEYS
+    template = {"spec_template": {**reverted}}
+    with pytest.raises(ni_library.LibraryError, match="_research_last_attempt"):
+        ni_library._validate_template_spec_and_preview(template, "t")
+
+
+def test_the_marker_shape_is_closed(monkeypatch) -> None:
+    spec = _recipe_spec(monkeypatch)
+    good = {"at": datetime.now(UTC).isoformat(), "streak": None, "outcome": "started", "declines": 0}
+    ni.validate_spec({**spec, "_research_last_attempt": good})
+    for bad in ({**good, "extra": 1}, {**good, "outcome": "x"}, {**good, "at": "yesterday"}, {**good, "declines": -1},
+                {**good, "declines": True}, "now"):
+        with pytest.raises(ValueError, match="_research_last_attempt"):
+            ni.validate_spec({**spec, "_research_last_attempt": bad})
+
+
+def test_the_daily_budget_caps_background_re_research_across_cards(monkeypatch) -> None:
+    """M2: a durable per-UTC-day count over all cards, checked before anything is sent; 0 turns it off."""
+    monkeypatch.setenv("SMARTBRAIN_NI_RERESEARCH_DAILY", "2")
+    store, conn, key = _new_store()
+    ids = []
+    for _ in range(3):
+        iid = _card(store, _recipe_spec(monkeypatch, tier="verified_endpoint"))
+        ids.append(iid)
+        _drift(monkeypatch, store, conn, key, iid)
+    script = _researcher(text_only=True)
+    assert [_work(store, conn, key, iid) for iid in ids] == [True, True, False]
+    seen = len(script.seen)
+    assert not _work(store, conn, key, ids[2]) and len(script.seen) == seen, "nothing sent past the ceiling"
+    # the count is durable and per UTC day: it resets when the day turns
+    conn.execute("UPDATE meta SET value = '2000-01-01:2' WHERE key = ?;", [ni_refresh.META_COUNT])
+    assert _work(store, conn, key, ids[2])
+    monkeypatch.setenv("SMARTBRAIN_NI_RERESEARCH_DAILY", "0")
+    assert ni_refresh.budget_left(conn, datetime.now(UTC)) is False
+    monkeypatch.delenv("SMARTBRAIN_NI_RERESEARCH_DAILY")
+    dbmod.meta_set(conn, ni_refresh.META_DAILY, "junk")
+    assert ni_refresh.daily_limit(conn) == ni_refresh.DEFAULT_DAILY == 10
+    dbmod.meta_set(conn, ni_refresh.META_DAILY, "3")
+    assert ni_refresh.daily_limit(conn) == 3
+
+
+def test_a_decline_backs_off_one_two_four_then_seven_days_within_a_streak(monkeypatch) -> None:
+    store, conn, key, iid = _seed(monkeypatch, tier="verified_endpoint")
+    _drift(monkeypatch, store, conn, key, iid)
+    monkeypatch.setenv("SMARTBRAIN_NI_RERESEARCH_DAILY", "100")
+    assert [ni_refresh.decline_wait(n).days for n in (1, 2, 3, 4, 5, 9)] == [1, 2, 4, 7, 7, 7]
+    for n, wait_days in ((1, 1), (2, 2), (3, 4), (4, 7)):
+        script = _researcher(text_only=True)
+        assert _work(store, conn, key, iid), f"attempt {n}"
+        assert store.get_item(iid)["spec"]["_research_last_attempt"]["declines"] == n
+        seen = len(script.seen)
+        _age_marker(store, iid, wait_days * 24 - 1)
+        assert not _work(store, conn, key, iid) and len(script.seen) == seen, f"still waiting after decline {n}"
+        _age_marker(store, iid, 2)
+    seen_before = len(_researcher(text_only=True).seen)
+    assert _work(store, conn, key, iid), "after the cap's wait it may try again"
+    assert seen_before == 0
+
+
+def test_a_new_streak_resets_the_decline_count_but_not_the_day(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    first = now - timedelta(hours=1)
+    marker = ni_refresh.next_marker(None, first, now - timedelta(days=3), "started")
+    marker = ni_refresh.next_marker(marker, first, now - timedelta(days=3), "declined")
+    assert marker["declines"] == 1
+    later = ni_refresh.next_marker(marker, now, now, "started")
+    assert later["declines"] == 0 and later["streak"] != marker["streak"]
+    assert ni_refresh.may_research(later, now, now) is False, "a new streak still waits out the day"
+    assert ni_refresh.may_research(later, now, now + timedelta(hours=25)) is True
+
+
+def test_a_replacement_re_check_uses_the_scope_recorded_at_keep(monkeypatch) -> None:
+    """L2: the Library scope the place check had at Keep rides on the recipe's source and is passed back."""
+    seen: list[dict] = []
+    real = tools.checks_for
+
+    def spy(ctx, outputs, url, info):
+        seen.append(info)
+        return real(ctx, outputs, url, info)
+
+    monkeypatch.setattr(tools, "checks_for", spy)
+    spec = _recipe_spec(monkeypatch)
+    assert spec["recipe"]["sources"][0].get("scope") == "global", "recorded at Keep for a new card"
+    ni_refresh.drift_reasons(spec, GOOD, datetime.now(UTC))
+    assert seen[-1] == {"scope": "global"}
+    old = copy.deepcopy(spec)
+    old["recipe"]["sources"][0].pop("scope")
+    ni.validate_spec(old)
+    ni_refresh.drift_reasons(old, GOOD, datetime.now(UTC))
+    assert seen[-1] == {}, "a card kept before the scope was recorded reads as before"
+    bad = copy.deepcopy(spec)
+    bad["recipe"]["sources"][0]["scope"] = "x" * 21
+    with pytest.raises(ValueError, match="scope"):
+        ni.validate_spec(bad)
+
+
+def test_a_stated_constraint_with_no_passing_record_is_not_rechecked(monkeypatch) -> None:
+    """L4: only checks with a passing verification record re-run."""
+    spec = _recipe_spec(monkeypatch)
+    spec["recipe"]["constraints"].append({"check": "compare", "value": None})
+    spec["recipe"]["verification"]["checks"] = [c for c in spec["recipe"]["verification"]["checks"]
+                                                if c["check"] != "compare"]
+    assert "compare" not in ni_refresh._rechecked(spec["recipe"])
+    assert ni_refresh._rechecked(spec["recipe"]) <= {c["check"] for c in spec["recipe"]["verification"]["checks"]
+                                                     if c["ok"]}

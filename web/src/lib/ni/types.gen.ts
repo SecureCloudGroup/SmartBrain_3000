@@ -194,6 +194,7 @@ export interface RecipeSource {
   ref: string;
   host: string;
   why: string;
+  scope?: string;
 }
 
 export interface Suggestion {

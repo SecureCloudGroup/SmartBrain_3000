@@ -1097,11 +1097,19 @@ A card with a sealed `recipe` (the researcher's, plan 6.1) adds two things to th
   `failing` (the backoff has walked; no local repair applies to these statuses);
   `verified_endpoint` and `page_reading` ask on the first `constraint_drift`
   (`degraded` or `failing`) and, for a dead source (`fetch_failed`), once `failing`.
-- **Bounds.** Attempts are `ni_runs` rows (`repair_research_started` is written first, so a
-  crash still burns the attempt; then `repair_research_proposed` or `repair_research_declined`).
-  No second attempt within 24 hours of a start, and no further attempt in a streak that already
-  parked a proposal (a Dismiss is final until the streak resets). Research off, ask or local
-  never records a row and sends nothing.
+- **Bounds.** The durable record is the rev-preserving sealed marker `_research_last_attempt =
+  {at, streak, outcome: started|proposed|declined, declines}` (modelled on `_l2_last_attempt`:
+  written by `reresearch` before the model call, carried through `_revert_l1_trial_if_active`,
+  `apply_repair` and `update_spec`, stripped on export and install, refused in template packs).
+  `ni_refresh.may_research` reads it, never the pruned `ni_runs` ring (`repair_research_*` rows
+  stay as telemetry). No second attempt within 24 hours of a start; no further attempt in a
+  streak (`streak` = `first_failure_at`) that already parked a proposal (a Dismiss is final until
+  the streak resets); after each decline in a streak the wait is 1, 2, 4 days, capped at 7.
+  Process-wide, `take_budget` spends one of `SMARTBRAIN_NI_RERESEARCH_DAILY` / meta
+  `ni_reresearch_daily` (default 10, `0` = off) per UTC day from the meta counter
+  `ni_reresearch_count` (`day:n`); `_research_eligible` reads it before the card is marked.
+  Research off, ask or local never sends anything. `recipe.sources[].scope` (optional) records the
+  Library scope the place check had at Keep; the refresh re-check passes it back.
 
 ## 24. `http_image` source + `image` scene node (v4c — the pixel channel)
 

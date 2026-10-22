@@ -1969,8 +1969,10 @@
           {#if proposalResearch.tier}<li>Tier: {proposalResearch.tier}</li>{/if}
         </ul>
         <p class="modal-body">
-          Apply switches this card to the new source, as a trial — kept only if the next
-          refresh passes this card’s validated contract, automatically reverted otherwise.
+          Apply switches this card to the new source, as a trial. The old source’s contract
+          is not carried over, because it described the old data. The trial is kept if the
+          next refresh runs cleanly on the new source and is reverted automatically if it
+          fails; the new contract is captured after that.
         </p>
       {:else}
       <p class="modal-body">

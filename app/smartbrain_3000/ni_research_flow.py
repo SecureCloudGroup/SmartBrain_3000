@@ -301,6 +301,13 @@ def reresearch(store: ni.NIStore, item: dict, reason: str) -> dict | None:
     question = copy.deepcopy(spec["recipe"]["question"])
     place = question["places"][0] if question.get("places") else ""
     started = time.monotonic()
+    now = datetime.now(UTC)
+    if not ni_refresh.take_budget(store.conn, now):  # the process-wide daily ceiling: nothing is sent past it
+        return None
+    first = item.get("first_failure_at")
+    # the durable bound (M1): stamped on the sealed spec BEFORE the model call, so a crash still counts and the
+    # pruned ni_runs ring is not what holds it
+    store.set_research_attempt(item["id"], ni_refresh.next_marker(spec.get("_research_last_attempt"), first, now, "started"))
     store.record_run(item["id"], ni_refresh.RUN_STARTED, duration_ms=0, error=reason, contract_ok=None)
     hint = {"subject": question.get("subject"), "wants": [], "place": place or None, "frame_kind": question.get("kind")}
     ctx = ResearchCtx(request=request, question=question, now=ni._clock().astimezone(UTC),
@@ -313,6 +320,10 @@ def reresearch(store: ni.NIStore, item: dict, reason: str) -> dict | None:
     note = ("re-researched: a replacement source is parked for your approval" if parked
             else one_line("re-researched, no safe replacement: " + "; ".join(out.reasons or ["could not be parked"]), 240))
     ni_flow._try_journal(store, item["id"], "updated", note)
+    fresh = store.get_item(item["id"])
+    store.set_research_attempt(item["id"], ni_refresh.next_marker(
+        ((fresh or item)["spec"]).get("_research_last_attempt"), first, datetime.now(UTC),
+        "proposed" if parked else "declined"))
     store.record_run(item["id"], ni_refresh.RUN_PROPOSED if parked else ni_refresh.RUN_DECLINED,
                      duration_ms=int((time.monotonic() - started) * 1000), error=None if parked else "declined",
                      contract_ok=None)

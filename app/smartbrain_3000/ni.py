@@ -594,7 +594,7 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False, researcher:
                "display", "contract", "repair_policy", "model", "_c2_ok",
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
-               "_l2_last_attempt", "_l2_proposal", "_born", "_shell",
+               "_l2_last_attempt", "_l2_proposal", "_research_last_attempt", "_born", "_shell",
                "_model_consent", "_model_consent_web", "_built_from", "_present_ok", "_fit", "query",
                "interpretation", "_render_ok", "_feed_candidates", "recipe"}
     _closed_keys(body, allowed, "spec")
@@ -968,6 +968,47 @@ def _validate_l2_system_keys(body: dict) -> None:
             raise ValueError(f"spec._l2_last_attempt not ISO-8601: {exc}") from None
     if "_l2_proposal" in body and body["_l2_proposal"] is not None:
         _validate_l2_proposal(body["_l2_proposal"])
+    if body.get("_research_last_attempt") is not None:
+        _validate_research_attempt(body["_research_last_attempt"])
+
+
+RESEARCH_OUTCOMES = ("started", "proposed", "declined")
+
+
+def _validate_research_attempt(marker: object) -> None:
+    """S9 review M1: shape of ``_research_last_attempt`` (system-only, rev-preserving, like ``_l2_last_attempt``):
+    when the last background re-research started, the streak (``first_failure_at``) it ran in, how it ended and how
+    many times it declined in that streak. A closed shape, so an agent-authored spec cannot smuggle another."""
+    assert RESEARCH_OUTCOMES, "a closed outcome set"
+    if not isinstance(marker, dict) or set(marker) != {"at", "streak", "outcome", "declines"}:
+        raise ValueError("spec._research_last_attempt keys are closed to ['at', 'declines', 'outcome', 'streak']")
+    for key in ("at", "streak"):
+        raw = marker[key]
+        if raw is None and key == "streak":
+            continue
+        if not isinstance(raw, str) or not raw or len(raw) > 40:
+            raise ValueError(f"spec._research_last_attempt.{key} must be an ISO-8601 string")
+        try:
+            datetime.fromisoformat(raw)
+        except ValueError as exc:
+            raise ValueError(f"spec._research_last_attempt.{key} not ISO-8601: {exc}") from None
+    if marker["outcome"] not in RESEARCH_OUTCOMES:
+        raise ValueError("spec._research_last_attempt.outcome must be started, proposed or declined")
+    declines = marker["declines"]
+    if not isinstance(declines, int) or isinstance(declines, bool) or not 0 <= declines <= 1000:
+        raise ValueError("spec._research_last_attempt.declines must be an integer 0..1000")
+
+
+def _carry_research_marker(source_spec: dict, target: dict) -> None:
+    """Copy ``_research_last_attempt`` from ``source_spec`` onto ``target`` (or drop it from ``target`` when the
+    source has none). The marker is rev-preserving system state: it never lives in a revision snapshot or in a
+    caller's spec, so every path that rebuilds a spec carries it forward explicitly."""
+    assert isinstance(source_spec, dict) and isinstance(target, dict), "specs required"
+    marker = source_spec.get("_research_last_attempt")
+    if marker is not None:
+        target["_research_last_attempt"] = marker
+    else:
+        target.pop("_research_last_attempt", None)
 
 
 def _validate_l2_proposal(proposal: object) -> None:
@@ -4774,6 +4815,7 @@ class NIStore:
             validated = validate_spec(new_spec)
             validated.pop("_l1_trial", None)
             validated.pop("_l2_proposal", None)
+            _carry_research_marker(current["spec"], validated)  # S9 M1: a system marker, never the caller's
             if preserve_attestations:
                 # L2: carry forward the sealed attestations + streak. Callers use
                 # this ONLY when the edit does not alter data shape.
@@ -5312,6 +5354,7 @@ class NIStore:
             else:
                 preserved.pop("_render_ok", None)
             preserved["_l1_last_attempt"] = datetime.now(UTC).isoformat()
+            _carry_research_marker(current["spec"], preserved)  # S9 M1: the re-research bound survives an apply
             # Phase 4b cosmetic (audit 2026-09-11): stamp the trial with its own
             # ``origin`` so a later revert records the honest revision origin —
             # ``repair_l2`` when this apply came from the L2 proposal route,
@@ -5383,6 +5426,26 @@ class NIStore:
                     return False  # L5: streak marker moved (different streak)
             spec = dict(current["spec"])
             spec["_l2_proposal"] = proposal
+            nonce, ciphertext = self._seal_item(item_id, spec)
+            self._conn.execute(
+                "UPDATE ni_items SET nonce = ?, ciphertext = ?, "
+                "updated_at = now() WHERE id = ?;",
+                [nonce, ciphertext, item_id],
+            )
+            return True
+
+    def set_research_attempt(self, item_id: str, marker: dict) -> bool:
+        """S9 review M1: seal ``_research_last_attempt`` onto the spec (rev-preserving, no revision). The durable
+        bound on background re-research (one start per day, one proposal per streak, backoff after a decline);
+        the ``ni_runs`` ring is pruned and cannot hold it. False when the item is gone."""
+        assert item_id and isinstance(marker, dict), "id + marker required"
+        _validate_research_attempt(marker)
+        with _SPEC_LOCK:
+            current = self.get_item(item_id)
+            if current is None:
+                return False
+            spec = dict(current["spec"])
+            spec["_research_last_attempt"] = marker
             nonce, ciphertext = self._seal_item(item_id, spec)
             self._conn.execute(
                 "UPDATE ni_items SET nonce = ?, ciphertext = ?, "
@@ -7577,6 +7640,7 @@ def _revert_l1_trial_if_active(store: NIStore, item_id: str,
                     restored["_l2_last_attempt"] = l2_stamp
                 else:
                     restored.pop("_l2_last_attempt", None)
+                _carry_research_marker(current["spec"], restored)  # S9 M1: same carry as _l2_last_attempt
                 restored.pop("_l2_proposal", None)  # stale after a failed trial
                 restored.pop("_l1_trial", None)
                 new_rev = int(current["spec_rev"]) + 1
@@ -7665,8 +7729,11 @@ def _research_eligible(store: NIStore, item: dict) -> bool:
     )
     if ni_refresh.reason_of(item) is None or not ni_refresh.trigger_met(item, spec):
         return False
-    if not ni_refresh.may_research(store.list_runs(item["id"]), item.get("first_failure_at"), datetime.now(UTC)):
-        return False
+    now = datetime.now(UTC)
+    if not ni_refresh.may_research(spec.get("_research_last_attempt"), item.get("first_failure_at"), now):
+        return False  # the sealed marker, not the pruned ni_runs ring
+    if not ni_refresh.budget_left(store.conn, now):
+        return False  # the process-wide daily ceiling, before anything is sent
     from . import ni_research_flow  # lazy: it imports ni and ni_flow
     return ni_research_flow.research_plan(store, item) is not None  # off, unconsented or unavailable: no
 

@@ -155,7 +155,8 @@ def _recipe_defs() -> dict[str, dict]:
         "units": nullable(text(20)), "cadence": nullable(ref("Cadence")),
     })
     _same(ni_recipe._QUESTION_KEYS, question, "recipe.question")
-    source = obj({"kind": ref("SourceKind"), "ref": text(300), "host": text(253), "why": text(200)})
+    source = obj({"kind": ref("SourceKind"), "ref": text(300), "host": text(253), "why": text(200), "scope": text(20)},
+                 opt=("scope",))
     check = obj({"check": ref("RecipeCheckName"), "ok": BOOL, "reason": text(120)})
     verification = obj({"verdict": ref("Verdict"), "checks": arr(ref("RecipeCheck"), maxItems=ni_recipe.MAX_CONSTRAINTS),
                         "verified_at": {"type": "string", "minLength": 1, "maxLength": 40},

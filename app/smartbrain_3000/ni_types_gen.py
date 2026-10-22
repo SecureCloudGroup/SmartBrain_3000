@@ -199,6 +199,7 @@ class RecipeSource(TypedDict):
     ref: str
     host: str
     why: str
+    scope: NotRequired[str]
 
 class Suggestion(TypedDict):
     title: str
