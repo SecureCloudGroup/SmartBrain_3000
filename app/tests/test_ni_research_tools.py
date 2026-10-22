@@ -215,6 +215,7 @@ def test_try_recipe_on_a_csv_sample(monkeypatch) -> None:
 def test_try_recipe_on_a_feed_sample(monkeypatch) -> None:
     url = "https://news.example.org/feed.xml"
     ctx, _ = _listed(monkeypatch, url, FEED, "feed")
+    ctx.question["kind"] = "current_value"  # a headline question is laid out by code (S8); this is the generic path
     assert tools.fetch_sample(ctx, url)["format"] == "feed"
     got = tools.try_recipe(ctx, _draft(url, {"title": "title", "items": "items"}, "feed"))
     assert got["ok"] and got["preview"]["title"] == "Daily News" and len(got["preview"]["items"]) == 2
@@ -446,3 +447,30 @@ def test_the_engine_and_the_flow_share_one_parse_and_one_error_shape(monkeypatch
     assert fetch_fail.value.detail == "FetchError"
     with pytest.raises(netguard.FetchError):
         ni_fetch.fetch_parsed("https://a.example.org/c", "csv")  # the flow's callers still see FetchError
+
+
+# --- S8: a headline question over a feed is laid out by code ----------------------------------------------------
+
+def test_a_headline_question_over_a_feed_is_laid_out_by_code_not_by_the_draft(monkeypatch) -> None:
+    url = "https://news.example.org/feed.xml"
+    ctx, _ = _listed(monkeypatch, url, FEED, "feed")
+    tools.fetch_sample(ctx, url)
+    draft = _draft(url, {"first": "items[0].title"}, "feed")  # the model's own mapping: one string, no list
+    got = tools.try_recipe(ctx, draft)
+    assert got["ok"], got
+    proposed = tools.propose_card(ctx, draft)
+    assert proposed["ok"], proposed
+    spec = proposed["proposal"]["spec"]
+    assert spec["brief"] == {"summary": False}
+    assert not any(s.get("op") == "llm" for s in spec["pipeline"])
+    assert spec["scene"]["type"] == "form" and spec["source"]["url"] == url
+    ni.validate_spec(copy.deepcopy(spec), researcher=True)
+
+
+def test_other_questions_keep_the_draft_as_written(monkeypatch) -> None:
+    url = "https://news.example.org/feed.xml"
+    ctx, _ = _listed(monkeypatch, url, FEED, "feed")
+    ctx.question["kind"] = "current_value"
+    tools.fetch_sample(ctx, url)
+    draft = _draft(url, {"title": "items[0].title"}, "feed")
+    assert "brief" not in tools.propose_card(ctx, draft)["proposal"]["spec"]

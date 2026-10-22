@@ -24,6 +24,17 @@ AwaitingYes = TypedDict("AwaitingYes", {
     "used_key": NotRequired[bool],
 })
 
+BriefSummaryState = Literal[
+    "off", "pending", "ready", "unavailable"
+]
+
+class BriefState(TypedDict):
+    summary: bool
+    local: bool
+    state: BriefSummaryState
+    label: str
+    text: str
+
 Cadence = Literal[
     "daily", "hourly", "realtime", "weekly"
 ]
@@ -257,6 +268,7 @@ class BoardRow(TypedDict):
     render: NotRequired[RowRender | None]
     draft: NotRequired[RowDraft | None]
     preview: NotRequired[RowPreview | None]
+    brief: NotRequired[BriefState]
 
 class FlowPoll(TypedDict):
     id: str

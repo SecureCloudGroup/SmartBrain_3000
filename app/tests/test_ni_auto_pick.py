@@ -486,3 +486,38 @@ def test_v1_tap_of_a_non_json_row_is_unchanged(monkeypatch) -> None:
     ni_flow.seal_library_pick(store, item_id, _SYN_URL, _row("syn", _SYN_URL, format="json"))
     assert ni_flow._flow_read(store, item_id)["_library_format"] == "json"
 
+
+
+# --- S8: a headline ask over a feed lands as a brief card ----------------------------------------------
+
+_FEED_SAMPLE = {"title": "Feed", "items": [
+    {"guid": f"g{i}", "title": f"Headline {i}", "link": f"https://h{i}.example/p/{i}",
+     "published": f"2026-10-{20 - i:02d}T08:00:00Z"} for i in range(5)]}
+
+
+def _run_brief(store, wrap, monkeypatch, fetch, kind: str | None) -> tuple[str, dict]:
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: wrap)
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
+    item_id = ni_flow.create_shell_item(store, "latest news")
+    ni_flow._flow_write(store, item_id, ni_flow._make_record("latest news", "intent"))
+    intent = {**_INTENT, "subject": "news", "wants": [], **({"frame_kind": kind} if kind else {})}
+    return item_id, ni_flow._run_external_flow(store, item_id, "latest news", intent, None, _model, fetch)
+
+
+def test_a_headline_ask_over_a_feed_lands_as_a_held_brief_with_no_model_text(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("usgs-quakes", _QUAKE_URL)])
+    item_id, out = _run_brief(store, wrap, monkeypatch, _fetcher(fetched, {_QUAKE_URL: _FEED_SAMPLE}), "latest_items")
+    assert out["state"] == "ready"
+    item = store.get_item(item_id)
+    spec = item["spec"]
+    assert spec["brief"] == {"summary": False} and spec["_built_from"]["path"] == "auto"
+    assert nimod.awaits_yes(item) and not any(s.get("op") == "llm" for s in spec["pipeline"])
+    assert spec["scene"]["type"] == "form"
+
+
+def test_the_same_feed_for_a_non_headline_ask_is_not_a_brief(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("usgs-quakes", _QUAKE_URL)])
+    item_id, _out = _run_brief(store, wrap, monkeypatch, _fetcher(fetched, {_QUAKE_URL: _FEED_SAMPLE}), None)
+    assert "brief" not in store.get_item(item_id)["spec"]

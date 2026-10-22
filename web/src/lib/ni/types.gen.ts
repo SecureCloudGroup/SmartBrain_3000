@@ -14,6 +14,18 @@ export interface AwaitingYes {
   used_key?: boolean;
 }
 
+export const BRIEF_SUMMARY_STATES = ["off", "pending", "ready", "unavailable"] as const;
+export type BriefSummaryState = (typeof BRIEF_SUMMARY_STATES)[number];
+
+/** A headline card's summary block: on or off, whether a local model exists to write it, the label that says who wrote it, and the text (empty unless the summary is ready). */
+export interface BriefState {
+  summary: boolean;
+  local: boolean;
+  state: BriefSummaryState;
+  label: string;
+  text: string;
+}
+
 export const CADENCES = ["daily", "hourly", "realtime", "weekly"] as const;
 export type Cadence = (typeof CADENCES)[number];
 
@@ -257,6 +269,7 @@ export interface BoardRow {
   render?: RowRender | null;
   draft?: RowDraft | null;
   preview?: RowPreview | null;
+  brief?: BriefState;
 }
 
 /** GET /api/ni/items/{id}/flow (v2): one item's flow fields. */

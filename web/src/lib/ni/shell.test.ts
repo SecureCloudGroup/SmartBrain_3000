@@ -205,6 +205,11 @@ describe("bodyShowsPanel", () => {
 });
 
 describe("formBoxChrome", () => {
+  it("is false for a roomy card (a brief's summary block sits in its body)", () => {
+    expect(formBoxChrome("fresh", true, "", true)).toBe(false);
+    expect(formBoxChrome("fresh", true, "", false)).toBe(true);
+  });
+
   it("is true for a healthy form card: fresh, stale or paused", () => {
     expect(formBoxChrome("fresh", true)).toBe(true);
     expect(formBoxChrome("stale", true)).toBe(true);

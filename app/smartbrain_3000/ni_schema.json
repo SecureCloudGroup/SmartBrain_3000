@@ -236,6 +236,9 @@
               "type": "null"
             }
           ]
+        },
+        "brief": {
+          "$ref": "#/$defs/BriefState"
         }
       },
       "additionalProperties": false,
@@ -267,6 +270,45 @@
         "payload"
       ],
       "description": "One row of GET /api/ni/board. `actions` is present only under the v2 flow; `payload` is the bound scene."
+    },
+    "BriefState": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "boolean"
+        },
+        "local": {
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/BriefSummaryState"
+        },
+        "label": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 600
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "local",
+        "state",
+        "label",
+        "text"
+      ],
+      "description": "A headline card's summary block: on or off, whether a local model exists to write it, the label that says who wrote it, and the text (empty unless the summary is ready)."
+    },
+    "BriefSummaryState": {
+      "enum": [
+        "off",
+        "pending",
+        "ready",
+        "unavailable"
+      ]
     },
     "Cadence": {
       "enum": [

@@ -138,9 +138,10 @@ export function bodyShowsPanel(item: NiBoardItem, hasForm: boolean): boolean {
  *  carrying a state `notice` (Round 20, B3b: the page browser is unavailable on this
  *  machine) keeps the legacy chrome for the same reason — the line sits under the body. Both
  *  CardShell (the CSS gate) and the page (the actions-overlay shape) call this so they
- *  never disagree about which chrome a given card gets. */
-export function formBoxChrome(state: CardState, hasForm: boolean, notice = ""): boolean {
+ *  never disagree about which chrome a given card gets. `roomy` (S8: a headline brief carries its
+ *  summary switch under the painted card) keeps the legacy chrome too, like a notice does. */
+export function formBoxChrome(state: CardState, hasForm: boolean, notice = "", roomy = false): boolean {
   console.assert(typeof hasForm === "boolean", "formBoxChrome: hasForm is boolean");
   console.assert(typeof state === "string", "formBoxChrome: state is string");
-  return hasForm && notice === "" && (state === "fresh" || state === "stale" || state === "paused");
+  return hasForm && notice === "" && !roomy && (state === "fresh" || state === "stale" || state === "paused");
 }

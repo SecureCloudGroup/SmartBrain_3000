@@ -1921,6 +1921,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // Headline brief (plan S8, D4): turn the card's local-model summary on or off. Desktop-only
+  // (server-checked). A 409 `detail` is the plain reason it was refused (no local model on this
+  // computer, the card is not kept yet): shown as written. It never reaches a cloud model.
+  niBriefSummary: (id: string, on: boolean) =>
+    req<{ ok: boolean; brief: G.BriefState }>(`/api/ni/items/${encodeURIComponent(id)}/brief-summary`, {
+      method: "POST",
+      body: JSON.stringify({ on }),
+    }),
+
   // SmartBrain Library (R8/R9/R12) — the registry of US data sources the /ni/library
   // page renders. `libraryStatus` says whether the pinned pack is downloaded; `libraryInstall`
   // fetches + verifies + unpacks it (~8 MB; several seconds; 502 with a plain-words `detail`

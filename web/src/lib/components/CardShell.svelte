@@ -22,6 +22,7 @@
     reason = "",
     rendered = false,
     notice = "",
+    roomy = false,
     fit = null,
     chips,
     children,
@@ -52,6 +53,9 @@
     // browser is unavailable on this machine). When set it takes the reason line's place, in any
     // state, and keeps the legacy chrome (formBoxChrome).
     notice?: string;
+    // S8: a headline brief carries its summary switch (BriefSummary) under the painted card, so it
+    // keeps the legacy chrome like a notice does (the tight box has no room for a block below).
+    roomy?: boolean;
     // The fit advisory (ruling 2026-10-12; $lib/ni/fit fitText; fix round 2026-10-13 after a
     // rendered check found it covering painted content on tight-chrome cards): a warn chip, its
     // title carrying the detail ("<chip>. Missing: a, b"). Legacy chrome: in the head's chip row,
@@ -70,7 +74,7 @@
   // the plane filling the box) vs the legacy 24px chrome with a normal head/foot flow.
   // The page calls the SAME function to shape what it passes as `actions`, so the two
   // never disagree about which chrome a given card gets.
-  const box = $derived(formBoxChrome(state, hasForm, notice));
+  const box = $derived(formBoxChrome(state, hasForm, notice, roomy));
   // The fit chip's title is the whole advisory, so a chip cut short by a narrow card still reads in full.
   const fitTitle = $derived(fit ? (fit.detail ? `${fit.chip}. ${fit.detail}` : fit.chip) : "");
   // The foot strip's one phone-width line (form chrome only): the chip words, the detail folded

@@ -72,7 +72,9 @@ _GRAMMAR = """Card spec grammar (closed; anything else is refused)
 
 _KINDS = ("Card kinds (what the question asks for): " + ", ".join(sorted(ni_recipe.QUESTION_KINDS)) +
           ". Pick the scene that shows exactly what was asked: one number for a value, a repeat of rows for a list,"
-          " a table of rows for a ranking.")
+          " a table of rows for a ranking. For text_brief and latest_items asks over a feed or a list of items the"
+          " program lays out the headlines itself (title, link, time) from the sample, so you only pick the source"
+          " and propose any valid draft for it.")
 
 
 def _prefix() -> str:

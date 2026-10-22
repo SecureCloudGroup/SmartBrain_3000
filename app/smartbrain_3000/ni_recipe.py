@@ -246,11 +246,13 @@ def cadence_minutes(spec: dict) -> int | None:
 
 
 def check_researcher_draft(spec: dict) -> None:
-    """Plan 6.4: a researcher draft may not carry an ``llm`` stage, a ``$secret`` (or secret param), a model
+    """Plan 6.4: a researcher draft may not carry an ``llm`` stage (so no brief summary either), a ``$secret`` (or secret param), a model
     or MCP source, or a model-chosen interval (the cadence comes from the question, stamped by code)."""
     assert isinstance(spec, dict), "spec must be a dict"
     if any(isinstance(s, dict) and s.get("op") == "llm" for s in (spec.get("pipeline") or [])):
         raise ValueError("researcher draft: llm stages are refused")
+    if isinstance(spec.get("brief"), dict) and spec["brief"].get("summary") is not False:
+        raise ValueError("researcher draft: a brief summary is the user's own opt-in on a kept card")
     if (spec.get("source") or {}).get("type") in ("mcp_tool", "model"):
         raise ValueError("researcher draft: mcp_tool and model sources are refused")
     if _has_secret(spec.get("source")) or _has_secret(spec.get("params")) or _has_secret(spec.get("pipeline")):

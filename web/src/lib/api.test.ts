@@ -479,6 +479,20 @@ describe("page browser calls", () => {
     expect(out).toEqual({ ok: true, started: true });
   });
 
+  it("niBriefSummary posts {on} to the brief-summary route", async () => {
+    const spy = captureFetch(200, { ok: true });
+    await api.niBriefSummary("c1", true);
+    const [path, init] = spy.mock.calls[0];
+    expect(String(path)).toBe("/api/ni/items/c1/brief-summary");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(String(init!.body))).toEqual({ on: true });
+  });
+
+  it("niBriefSummary's refusal comes back as the server's sentence", async () => {
+    captureFetch(409, { detail: "no local model" });
+    await expect(api.niBriefSummary("c1", true)).rejects.toMatchObject({ status: 409, message: "no local model" });
+  });
+
   // The server's capacity codes ride beside `detail` (a refusal) or in the reply body; the board
   // reads them with errorCapacity / replyCapacity, so they must survive req() untouched.
   it("a busy or unavailable 409 from niRun keeps the server's code on the ApiError", async () => {
