@@ -3757,6 +3757,19 @@ def _model_consent_of(store: ni.NIStore, item_id: str, record: dict) -> str | No
     return sealed if isinstance(sealed, str) and sealed else None
 
 
+def _model_consent_web_of(store: ni.NIStore, item_id: str, record: dict) -> bool:
+    """Whether the consent ``_model_consent_of`` returns was given under the open-web wording. The scope
+    is read from the same place as the consent itself, so a scope never outlives the answer it came with."""
+    assert store is not None and item_id, "args required"
+    assert isinstance(record, dict), "a record"
+    consent = record.get("_model_consent")
+    if isinstance(consent, str) and consent:
+        return record.get("_model_consent_web") is True
+    item = store.get_item(item_id)
+    spec = (item or {}).get("spec", {}) if item else {}
+    return isinstance(spec.get("_model_consent"), str) and spec.get("_model_consent_web") is True
+
+
 _RESEARCH_DISCLOSURE = (" If no ready-made source fits, it may also research one with the same service. That "
                         "sends your exact question, the titles and details of Library sources, digests of up to 8 "
                         "data samples it reads, today's date and your time zone, and the research steps so far; "
@@ -3790,14 +3803,16 @@ def _ask_model_consent(store: ni.NIStore, item_id: str, model: str,
     prompt = (f"This card is set to build with {model}. Building sends your "
               "request and samples from the source to that service; the "
               "finished card still refreshes on this computer.")
+    web = bool(research) and _research_web(store)
     if research:
         prompt = (f"This card would use {model}, a service outside this computer. Building sends your request "
                   "and samples from the source to it; the finished card still refreshes on this computer."
-                  + (_RESEARCH_DISCLOSURE_WEB if _research_web(store) else _RESEARCH_DISCLOSURE))
+                  + (_RESEARCH_DISCLOSURE_WEB if web else _RESEARCH_DISCLOSURE))
+    # ``web`` stamps the scope the wording showed; the answer seals exactly that scope (never the switch's later state)
     return _terminate_unsupported(
         store, item_id,
         f"building this card would use {model}, which runs outside this computer",
-        question={"kind": "model_consent", "model": model, "local": local or "", "prompt": prompt})
+        question={"kind": "model_consent", "model": model, "local": local or "", "prompt": prompt, "web": web})
 
 
 FLOW_MODES = ("v1", "v2")
@@ -6477,10 +6492,12 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     if prior is not None and ni._render_consent_kept(prior["spec"], spec):
         spec["_render_ok"] = True  # B3a: a Fix that loads the same page and sites keeps the consent
     record = _flow_read(store, item_id) or {}
-    consent = record.get("_model_consent") or (prior["spec"].get("_model_consent")
-                                                if prior is not None else None)
+    holder = record if record.get("_model_consent") else (prior["spec"] if prior is not None else {})
+    consent = holder.get("_model_consent")
     if isinstance(consent, str) and consent:
         spec["_model_consent"] = consent  # ruling 2: consent lives with the card
+        if holder.get("_model_consent_web") is True:  # with the scope it was given under
+            spec["_model_consent_web"] = True
     # needs_params wave (2026-09-14): bind ``ni:self:<name>`` refs to the shell's
     # concrete item id — the retired create_ni_item_from_recipe tool did this via
     # ``_add_item_with_rewrite``; the flow's handoff never inherited it, so a
@@ -7050,7 +7067,7 @@ def reseed_for_retry(store: ni.NIStore, item_id: str, record: dict,
         request_text, "intent",
         source_url=source_url if keep_url else None,
         notes=["retrying the build with the same request"])
-    for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
+    for key in ("_declined", "_model_consent", "_model_consent_web", "_use_local"):  # the card's own answers ride along
         if record.get(key) is not None:
             fresh[key] = record[key]
     _flow_write(store, item_id, fresh, revive=True)
@@ -7078,7 +7095,8 @@ def answer_model_consent(store: ni.NIStore, item_id: str, stamped: dict,
     model = str(stamped.get("model") or "")
     local = str(stamped.get("local") or "")
     if value == "allow" and model:
-        fields: dict = {"_model_consent": model}
+        # the scope is the wording the owner saw: only a question that showed the web items grants the web
+        fields: dict = {"_model_consent": model, "_model_consent_web": stamped.get("web") is True}
     elif value == "local" and local:
         fields = {"_use_local": True}
     else:
@@ -7222,7 +7240,7 @@ def decline_reading(store: ni.NIStore, item_id: str) -> dict:
         return {"kind": "repick"}
     request = str(record.get("request") or item["spec"].get("goal") or "")
     fresh = _make_record(request, "intent", notes=["you said no to that reading — finding another source"])
-    for key in ("_declined", "_model_consent", "_use_local"):  # the card's own answers ride along
+    for key in ("_declined", "_model_consent", "_model_consent_web", "_use_local"):  # the card's own answers ride along
         current = (_flow_read(store, item_id) or {}).get(key)
         if current is not None:
             fresh[key] = current

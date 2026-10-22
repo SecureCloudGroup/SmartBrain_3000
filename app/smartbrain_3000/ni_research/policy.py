@@ -70,9 +70,11 @@ def cloud_route(conn) -> str | None:
 
 
 def choose(setting_: str, cloud: str | None, local: str | None, consent: str | None, use_local: bool,
-           web: bool = True) -> Plan:
+           web: bool = True, consent_web: bool = False) -> Plan:
     """The plan from the setting, the routes, this card's consent (the model id it allowed) and its local choice.
-    ``web`` is the kill switch's answer; it rides only on the cloud and ask plans."""
+    ``web`` is the kill switch's answer; it rides only on the cloud and ask plans. ``consent_web``: the consent
+    was given under the open-web wording. A web run needs both; a Library-only consent with the switch on asks
+    again (with the web wording) rather than widening what the owner agreed to."""
     assert setting_ in SETTINGS, "a known setting"
     assert consent is None or isinstance(consent, str), "consent is a model id or None"
     if setting_ == "off" or (setting_ == "local" and not local) or (setting_ == "cloud" and not cloud):
@@ -81,6 +83,6 @@ def choose(setting_: str, cloud: str | None, local: str | None, consent: str | N
         return Plan("local", local, local) if local else Plan("off")
     if use_local and local:  # the card's own local choice wins, as in ``run_flow``
         return Plan("local", local, local)
-    if consent == cloud:
+    if consent == cloud and (consent_web or not web):
         return Plan("cloud", cloud, local, web=bool(web))
     return Plan("ask", cloud, local, web=bool(web))

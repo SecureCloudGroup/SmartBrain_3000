@@ -203,7 +203,7 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
         if stop:
             return _decline(ctx, out, [stop, *why])
         try:
-            response = chat(prompt.build_messages(base, turns), prompt.openai_tools())
+            response = chat(prompt.build_messages(base, turns), prompt.openai_tools("search" in ctx.allowed_origins))
         except Exception as exc:  # the model route failed: an honest decline, never a crash
             log.warning("ni_research: model call failed: %s", type(exc).__name__)
             return _decline(ctx, out, [f"the research model was unavailable ({type(exc).__name__})", *why])

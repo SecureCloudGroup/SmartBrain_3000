@@ -26,8 +26,7 @@ def _tool(name: str, description: str, prop: str, schema: dict) -> dict:
 
 _TOOLS = [
     _tool("fetch_sample", "Fetch one data sample (JSON, CSV, feed or XML) with a plain GET and read a fenced digest. "
-          "Only a URL from library_search, a web_search result, or another plain address (no query string) on the "
-          "same site as one. At most 8 per run.",
+          "Only a URL library_search or web_search returned, exactly as returned. At most 8 per run.",
           "url", {"type": "string", "maxLength": 2000}),
     _tool("library_search", "Find vetted Library sources for a question. Highest trust: use first; "
           "their URLs may then be fetched.", "query", {"type": "string", "maxLength": tools.MAX_QUERY}),

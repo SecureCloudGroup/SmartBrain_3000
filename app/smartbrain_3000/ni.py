@@ -589,13 +589,14 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False, researcher:
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
                "_l2_last_attempt", "_l2_proposal", "_born", "_shell",
-               "_model_consent", "_built_from", "_present_ok", "_fit", "query", "interpretation",
-               "_render_ok", "_feed_candidates", "recipe"}
+               "_model_consent", "_model_consent_web", "_built_from", "_present_ok", "_fit", "query",
+               "interpretation", "_render_ok", "_feed_candidates", "recipe"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
     _validate_built_from(body.get("_built_from"))
     _validate_present_ok(body.get("_present_ok"))
     _validate_model_consent(body.get("_model_consent"))
+    _validate_model_consent_web(body)
     _validate_fit(body.get("_fit"))
     _validate_query(body.get("query"))
     _validate_interpretation(body.get("interpretation"))
@@ -878,6 +879,15 @@ def _validate_model_consent(value: object) -> None:
     if not (isinstance(value, str) and 3 <= len(value) <= 200 and "/" in value
             and not any(c.isspace() for c in value)):
         raise ValueError("spec._model_consent must be a 'provider/model' id or absent")
+
+
+def _validate_model_consent_web(body: dict) -> None:
+    """S5b: the consent above was given under the open-web wording. ``true`` beside a ``_model_consent``
+    or absent; carried, stripped and refused exactly like the consent it qualifies."""
+    if "_model_consent_web" not in body:
+        return
+    if body["_model_consent_web"] is not True or not body.get("_model_consent"):
+        raise ValueError("spec._model_consent_web must be true beside a _model_consent, or absent")
 
 
 def _validate_template_provenance(value: object) -> None:
@@ -7889,6 +7899,19 @@ def _fetch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
     """
     assert isinstance(spec, dict) and item_id, "spec + id required"
     assert store is not None, "store required (model routes need its cursor)"
+    from . import ni_polite  # lazy: keep the fetch layer off ni's import graph edges
+
+    if ni_polite.robots_for(spec):  # S5b: a source found outside the Library obeys robots.txt on every read
+        with ni_polite.engaged(robots=True):
+            return _dispatch_source(spec, item_id, gateway_mod, secrets_store, schedules_store, store, kb)
+    return _dispatch_source(spec, item_id, gateway_mod, secrets_store, schedules_store, store, kb)
+
+
+def _dispatch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
+                     schedules_store, store: NIStore,
+                     kb: object | None) -> tuple[dict, dict | None]:
+    """``_fetch_source``'s dispatch by source type."""
+    assert isinstance(spec, dict) and item_id, "spec + id required"
     source = spec.get("source") or {}
     stype = source.get("type")
     if stype == "http_json":

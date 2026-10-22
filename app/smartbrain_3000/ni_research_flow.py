@@ -32,7 +32,7 @@ _SEARCH: Callable[[str, int], dict] | None = None
 RESEARCH_TIMEOUT_S = 120.0
 RESEARCH_MAX_TOKENS = 4096
 ORIGINS_LIBRARY = frozenset({"library"})
-ORIGINS_WEB = frozenset({"library", "search", "preview", "same_domain"})
+ORIGINS_WEB = frozenset({"library", "search", "preview"})
 
 
 def set_research_chat(chat: Callable | None, *, cloud: str | None = None, local: str | None = None,
@@ -191,9 +191,11 @@ def plan_for(store: ni.NIStore, item_id: str, record: dict) -> policy.Plan:
     assert store is not None and item_id, "args required"
     cloud = _SEAM["cloud"] if _CHAT is not None else policy.cloud_route(store.conn)
     local = _SEAM["local"] if _CHAT is not None else ni_flow._local_flow_model(store)
-    consent = cloud if _SEAM["consented"] and cloud else ni_flow._model_consent_of(store, item_id, record)
+    seam = bool(_SEAM["consented"] and cloud)
+    consent = cloud if seam else ni_flow._model_consent_of(store, item_id, record)
+    consent_web = seam or ni_flow._model_consent_web_of(store, item_id, record)
     return policy.choose(policy.setting(store.conn), cloud, local, consent, bool(record.get("_use_local")),
-                         web=policy.web_enabled(store.conn))
+                         web=policy.web_enabled(store.conn), consent_web=consent_web)
 
 
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict | None:

@@ -14,7 +14,6 @@ from datetime import UTC, datetime, tzinfo
 from urllib.parse import urlsplit
 
 from .. import ni_recipe
-from ..pagegraph import registrable_domain
 
 MAX_FETCHES = 8
 MAX_SEARCHES = 3
@@ -23,12 +22,7 @@ TOKEN_CAP = 60_000
 MAX_SAMPLES = 8
 _MAX_URLS = 200
 _BAD_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".lan", ".home", ".corp")
-# Hosting platforms where one registrable domain is thousands of unrelated sites: a result on one of these
-# makes only its own host a "same site", never the whole platform (the eTLD+1 heuristic has no suffix list).
-_SHARED_SUFFIXES = ("github.io", "gitlab.io", "blogspot.com", "herokuapp.com", "vercel.app", "netlify.app",
-                    "pages.dev", "workers.dev", "web.app", "firebaseapp.com", "appspot.com", "azurewebsites.net",
-                    "amazonaws.com", "cloudfront.net", "wordpress.com", "wixsite.com", "weebly.com", "ngrok.io",
-                    "repl.co", "glitch.me", "onrender.com", "fly.dev", "surge.sh")
+ORIGINS = ("library", "search", "preview")
 
 
 def one_line(text: object, n: int) -> str:
@@ -77,16 +71,6 @@ def host_refusal(url: str) -> str | None:
     return None if ip.is_global else "loopback and private addresses are off limits"
 
 
-def site_of(host: str) -> str:
-    """The "same site" key of ``host``: its registrable domain, or the whole host on a shared hosting platform."""
-    assert isinstance(host, str), "host must be text"
-    h = host.lower().rstrip(".")
-    assert "/" not in h, "a host, not a URL"
-    if any(h == s or h.endswith("." + s) for s in _SHARED_SUFFIXES):
-        return h
-    return registrable_domain(h)
-
-
 @dataclass
 class ResearchCtx:
     """One research run: the ask, the library, the clock, the budgets, what may be fetched and what happened."""
@@ -103,7 +87,7 @@ class ResearchCtx:
     max_seconds: float = MAX_SECONDS
     token_cap: int = TOKEN_CAP
     clock: Callable[[], float] = time.monotonic
-    allowed_origins: frozenset = frozenset({"library", "search", "preview", "same_domain"})  # {"library"}: no web
+    allowed_origins: frozenset = frozenset(ORIGINS)  # {"library"}: no web
     resolver: Callable[[str, str], dict] | None = None
     searcher: Callable[[str, int], dict] | None = None   # (query, limit) -> {"results": [{title,url,snippet}]}
     turns: int = 0
@@ -111,7 +95,6 @@ class ResearchCtx:
     searches: int = 0
     tokens: int = 0
     urls: dict = field(default_factory=dict)      # normal url -> {kind, format, scope, title, blocked}
-    domains: set = field(default_factory=set)      # registrable domains of recorded results
     samples: dict = field(default_factory=dict)    # normal url -> {format, parsed}
     entities: list = field(default_factory=list)
     trace: list = field(default_factory=list)
@@ -164,14 +147,15 @@ class ResearchCtx:
             self.trace.append({"tool": tool, "arg": one_line(arg, 200), "outcome": one_line(outcome, 200)})
 
     def record(self, url: str, kind: str, **info: object) -> None:
-        """Remember a result URL (and its registrable domain) as a fetch origin: ``library`` | ``search`` | ``preview``."""
+        """Remember a result URL, exactly, as a fetch origin: ``library`` | ``search`` | ``preview``. A search
+        result counts only over https: an address from the open web is never read in the clear."""
         assert isinstance(url, str), "url must be text"
-        assert kind in ("library", "search", "preview"), "a known origin"
+        assert kind in ORIGINS, "a known origin"
         if host_refusal(url) is not None or len(self.urls) >= _MAX_URLS:
             return
-        key = normal_url(url)
-        self.urls.setdefault(key, {"kind": kind, **info})
-        self.domains.add(site_of(urlsplit(key).hostname or ""))
+        if kind == "search" and urlsplit(url.strip()).scheme.lower() != "https":
+            return
+        self.urls.setdefault(normal_url(url), {"kind": kind, **info})
 
     def record_search_results(self, rows: list) -> None:
         """Web search results the loop got (S5b): each ``{url, title}`` becomes a legal fetch origin."""
@@ -182,9 +166,10 @@ class ResearchCtx:
                 self.record(r["url"], "search", title=one_line(r.get("title") or "", 120))
 
     def origin(self, url: str) -> tuple[str | None, str]:
-        """``(origin, reason)``: how ``url`` may be fetched (``library`` | ``search`` | ``preview`` | ``same_domain``)
-        or ``(None, why not)``. Only recorded results, the previewed endpoint and their registrable domains."""
-        assert isinstance(self.domains, set), "a domain set"
+        """``(origin, reason)``: how ``url`` may be fetched (``library`` | ``search`` | ``preview``) or ``(None, why
+        not)``. Only an address a trusted channel handed over, exactly: the model never composes one, so no path,
+        query or host of its own choosing can carry data out."""
+        assert isinstance(self.urls, dict), "a url table"
         assert isinstance(url, str), "url must be text"
         bad = host_refusal(url)
         if bad:
@@ -192,13 +177,9 @@ class ResearchCtx:
         key = normal_url(url)
         found = self._origin_of(key)
         if found is None:
-            return None, "not a Library row, a search result, the previewed endpoint or a site already found"
+            return None, "not exactly a Library row, a search result or the previewed endpoint"
         if found not in self.allowed_origins:
             return None, "this run reads SmartBrain Library sources only"
-        if found == "same_domain":  # a composed address: no query to carry data out, no fragment
-            parts = urlsplit(url.strip())
-            if parts.query or parts.fragment or "?" in url or "#" in url:
-                return None, "another address on a found site must be plain: no query string and no fragment"
         return found, ""
 
     def _origin_of(self, key: str) -> str | None:
@@ -209,8 +190,6 @@ class ResearchCtx:
             return self.urls[key]["kind"]
         if self.preview_url and key == normal_url(self.preview_url):
             return "preview"
-        if site_of(urlsplit(key).hostname or "") in self.domains:
-            return "same_domain"
         return None
 
     def budget_used(self) -> dict:

@@ -10,7 +10,7 @@ import copy
 import json
 from urllib.parse import urlsplit
 
-from .. import ni, ni_fetch, ni_recipe, pagegraph
+from .. import ni, ni_fetch, ni_polite, ni_recipe, pagegraph
 from ..netguard import FetchError
 from ..ni_verify.classes import shadow_reasons
 from ..ni_verify.rows import SourceInfo, read_result
@@ -31,8 +31,7 @@ MAX_CANDIDATES = 5
 MAX_SAMPLES = 8
 _STRUCTURED = frozenset({"json", "csv", "feed", "xml"})
 _VERIFY_CLASSES = {"window": "window", "threshold": "threshold", "compare": "compare", "scope": "place"}
-_ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint",
-               "same_domain": "the same site as an earlier result"}
+_ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint"}
 
 
 def _done(ctx: ResearchCtx, tool: str, arg: object, result: dict) -> dict:
@@ -61,22 +60,27 @@ def fetch_sample(ctx: ResearchCtx, url: str) -> dict:
     out = ctx.spend_fetch()
     if out is not None:
         return _done(ctx, "fetch_sample", url, out)
-    return _done(ctx, "fetch_sample", url, _fetch_and_digest(ctx, normal_url(url), info.get("format")))
+    return _done(ctx, "fetch_sample", url, _fetch_and_digest(ctx, normal_url(url), info.get("format"),
+                                                              robots=origin != "library"))
 
 
-def _fetch_and_digest(ctx: ResearchCtx, url: str, fmt: str | None) -> dict:
-    """Fetch ``url`` (a sealed ``fmt`` from the Library, else sniffed), keep the sample, digest it."""
+def _fetch_and_digest(ctx: ResearchCtx, url: str, fmt: str | None, robots: bool = True) -> dict:
+    """Fetch ``url`` (a sealed ``fmt`` from the Library, else sniffed), keep the sample, digest it. ``robots``:
+    a source that is not a Library row obeys its host's robots.txt, whichever fetcher reads it."""
     assert isinstance(url, str) and url, "url required"
     assert fmt is None or isinstance(fmt, str), "format is text"
     if fmt == "html":
         return error("not_data", "an HTML page; research reads JSON, CSV, feeds and XML")
     try:
-        if fmt in _STRUCTURED or fmt == "text":
-            parsed, seen = ni_fetch.fetch_parsed(url, fmt, allow_redirects=False), fmt
-        else:
-            parsed, seen = ni_fetch.sniff_fetch(url, allow_redirects=False)
+        with ni_polite.engaged(robots=robots):
+            if fmt in _STRUCTURED or fmt == "text":
+                parsed, seen = ni_fetch.fetch_parsed(url, fmt, allow_redirects=False), fmt
+            else:
+                parsed, seen = ni_fetch.sniff_fetch(url, allow_redirects=False)
     except FetchError as exc:
         text = str(exc).lower()
+        if exc.kind == "robots":
+            return error("robots", "the site's robots.txt asks automated readers to stay out")
         if "redirect" in text:
             return error("redirect", "the source redirected; redirects are not followed")
         if exc.kind in ("not_json", "not_text", "not_csv", "not_feed", "not_xml"):
@@ -96,11 +100,11 @@ def web_search(ctx: ResearchCtx, query: str) -> dict:
     assert ctx.max_searches >= 0, "a search cap"
     if not isinstance(query, str) or not query.strip() or len(query) > MAX_QUERY:
         return error("invalid_args", f"query must be 1..{MAX_QUERY} characters")
+    if "search" not in ctx.allowed_origins:  # before any spend: a Library-only run is not charged for the refusal
+        return error("web_off", "this run reads SmartBrain Library sources only")
     out = ctx.spend("web_search", "search")
     if out is not None:
         return out
-    if "search" not in ctx.allowed_origins:
-        return _done(ctx, "web_search", query, error("web_off", "this run reads SmartBrain Library sources only"))
     if not callable(ctx.searcher):
         return _done(ctx, "web_search", query, error("search_unavailable", "no search service is set up"))
     asked = clean_text(query.strip(), MAX_QUERY)
@@ -306,13 +310,15 @@ def propose_card(ctx: ResearchCtx, draft_spec: object) -> dict:
     if not got["ok"]:
         return _done(ctx, "propose_card", "draft", got)
     spec, key = got["spec"], got["key"]
-    origin, _ = ctx.origin(key)
+    origin, why = ctx.origin(key)
+    if origin is None:
+        return _done(ctx, "propose_card", "draft", error("provenance", why))
     url = spec["source"]["url"]
     ctx.note("propose_card", "draft", "ok")
     recipe = {"question": ctx.question,
               "sources": [{"kind": {"library": "library", "search": "search"}.get(origin or "", "endpoint"),
-                           "ref": url[:300], "host": (key.split("/")[2])[:253], "why": _ORIGIN_WHY[origin or "same_domain"]}],
-              "constraints": _constraints(ctx.question), "tier": _tier(origin or "same_domain", got["format"]),
+                           "ref": url[:300], "host": (key.split("/")[2])[:253], "why": _ORIGIN_WHY[origin]}],
+              "constraints": _constraints(ctx.question), "tier": _tier(origin, got["format"]),
               "verification": {"verdict": "pass", "checks": got["checks"], "verified_at": ctx.now.isoformat()[:40],
                                "fetches": min(ctx.fetches, 8)},
               "provenance": {"author": "researcher", "built_at": ctx.now.isoformat()[:40]},

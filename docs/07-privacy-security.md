@@ -87,11 +87,14 @@ not. Being precise about the line matters more than claiming everything:
   your time zone and the place you named, and the research steps so far. Never your email,
   notes, knowledge-base text or other cards, and no keys. Research may search the web (at
   most 3 searches), so your search words reach your search provider, and the sites it reads
-  see this computer's IP address. It fetches only addresses a search or the Library
-  returned, or a plain address (no query string) on a site it already found, so a page
-  cannot send it somewhere else or carry your data in a link. A card built from the web
-  is always a preview, marked as coming from the web, and starts refreshing only after you
-  Keep it. To limit research to the Library, set `SMARTBRAIN_NI_RESEARCH_WEB=off` (or the
+  see this computer's IP address. It fetches only addresses a search (over https) or the
+  Library returned, exactly as returned; the model never writes an address of its own, so
+  neither a page nor the model can send it somewhere else or carry your data in a link.
+  Sites found on the web are read only where their robots.txt allows it, and a kept web
+  card keeps following it. A card built from the web is always a preview, marked as coming
+  from the web, and starts refreshing only after you Keep it. Allowing a model before web
+  research existed, or while it was switched off, covers the Library only: if research
+  could then use the web, the card asks again with the web wording. To limit research to the Library, set `SMARTBRAIN_NI_RESEARCH_WEB=off` (or the
   `ni_research_web` setting to `off`). With a local model, research runs on this computer,
   reads the Library only, and sends nothing.
 - **Claude Code models.** The `claudecode/*` models send the conversation to Anthropic
