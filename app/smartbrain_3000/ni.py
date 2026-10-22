@@ -1704,6 +1704,8 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
         for flag in ("utc", "clock", "lenient"):
             if node.get(flag) is not None and not isinstance(node[flag], bool):
                 raise ValueError(f"{where}.{flag} must be true or false")
+        if "lenient" in node and not isinstance(node["lenient"], bool):
+            raise ValueError(f"{where}.lenient must be true or false")
         if node.get("lenient") and (node.get("key") is None or node.get("unless") is not None):
             raise ValueError(f"{where}.lenient needs a key and no unless")
         unless = node.get("unless")
@@ -6130,7 +6132,11 @@ def _source_hash(payload: object) -> str:
 
     Canonical JSON (sorted keys) so dict ordering never fakes a change; the
     hash lives in the sealed ``llm_state`` slot and is compared before any
-    model runs — an unchanged source costs zero llm tokens on that tick.
+    model runs — an unchanged source costs zero llm tokens on that tick. The
+    slot also records the ``spec_rev`` it was written at and the skip needs it
+    to match, so any revision (an llm stage added, removed or edited, by any
+    writer) runs the model once even on identical bytes; a row from before
+    that field has no ``spec_rev`` and so runs once, then records it.
     """
     try:
         blob = json.dumps(payload, sort_keys=True, ensure_ascii=False,
@@ -6369,6 +6375,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
             if (item["state"] == "live" and prev_state is not None
                     and prev_state.get("ok")
                     and prev_state["payload"].get("src_hash") == src_hash
+                    and prev_state["payload"].get("spec_rev") == started_rev
                     and isinstance(prev_values, dict)):
                 duration_ms = int((time.monotonic() - started) * 1000)
                 store.record_run(item_id, "unchanged", duration_ms=duration_ms,
@@ -6408,6 +6415,7 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
             wrote = llm_call is not None and any(outputs.get(name) not in (None, "") for name in llm_fields)
             store.write_snapshot(item_id, "llm_state", {
                 "src_hash": src_hash,
+                "spec_rev": started_rev,
                 "values": {name: outputs.get(name) for name in llm_fields},
             }, ok=wrote or not _llm_stages_optional(spec))
     except NIError as exc:
@@ -8732,6 +8740,19 @@ def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore, item_id:
     return {"text": text}
 
 
+_OPTIONAL_LLM_ACQUIRE_S = 1.0   # how long an optional llm stage waits for the local slot before giving way
+
+
+def _first_local_route(routes: dict, gateway_mod) -> str | None:
+    """The first LOCAL model on the ni / chat / agent routes, or None (a cloud route is never returned)."""
+    assert isinstance(routes, dict), "routes required"
+    for capability in ("ni", "chat", "agent"):  # bounded to 3
+        model = gateway_mod.resolve_model(capability, routes)
+        if model and gateway_mod.is_local(model):
+            return model
+    return None
+
+
 def _make_llm_call(store: NIStore, spec: dict, gateway_mod) -> object | None:
     """Build the ``(prompt) -> reply`` closure for the pipeline's llm stage (§13).
 
@@ -8746,19 +8767,35 @@ def _make_llm_call(store: NIStore, spec: dict, gateway_mod) -> object | None:
     if hasattr(gateway_mod, "load_routes"):
         routes = gateway_mod.load_routes(store.conn)
     override = spec.get("model")
-    model = override or gateway_mod.resolve_model("ni", routes)
+    if override == ni_brief.LOCAL_MODEL:
+        # S8: the sentinel a brief's summary seals; the local model is resolved NOW, from the routes as they are
+        # at this run, so a switched local server keeps working. Only a local id is ever returned.
+        model = _first_local_route(routes, gateway_mod)
+        if not model:
+            raise NIError("llm_unrouted", "no local model routed")
+    else:
+        model = override or gateway_mod.resolve_model("ni", routes)
     if not model:
         raise NIError("llm_unrouted", "no ni model route configured")
     if not gateway_mod.is_local(model):
         raise NIError("llm_requires_local", model)
+    # a card whose every llm stage is optional (a brief's summary) never waits on the local slot: a busy model is
+    # a soft ``llm_error`` and the headlines refresh without it
+    wait = _OPTIONAL_LLM_ACQUIRE_S if _llm_stages_optional(spec) else None
+    busy = getattr(gateway_mod, "LocalBusy", None)
 
     def _call(prompt: str) -> str:
         """One local model turn — no tools, no streaming; return the completion text."""
         assert isinstance(prompt, str) and prompt, "prompt required"
+        extra = {} if wait is None else {"acquire_timeout": wait}
         try:
-            data = gateway_mod.chat([{"role": "user", "content": prompt}], model)
+            data = gateway_mod.chat([{"role": "user", "content": prompt}], model, **extra)
         except gateway_mod.GatewayError as exc:
             raise NIError("llm_error", str(exc.status_code)) from None
+        except Exception as exc:
+            if busy is not None and isinstance(exc, busy):
+                raise NIError("llm_error", "local model busy") from None
+            raise
         return gateway_mod.completion_text(data) or ""
 
     return _call

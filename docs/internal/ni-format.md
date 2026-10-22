@@ -3881,16 +3881,23 @@ install strip `brief` (`ni_routes._EXPORT_STRIP_KEYS`, `ni_library`); an export 
 drops the summary (`ni_brief.without_summary`).
 
 **Grammar additions.** `llm` stage: `optional` (only `true`; string outputs only; any soft failure of the stage,
-meaning no local model, a busy slot, an error or a bad reply, yields empty outputs and the run continues) and
-`max_chars` (int 1..2000; the string outputs are clipped). `time` transform: `lenient` (bool, needs `key`).
+meaning no local model, a busy slot, an error or a bad reply, yields empty outputs and the run continues; an optional
+stage waits at most `_OPTIONAL_LLM_ACQUIRE_S` (1 s) for the local-model slot, `gateway.chat(acquire_timeout=)` raises
+`LocalBusy`, and `_make_llm_call` maps it to a soft `llm_error`, so the headlines never queue behind a chat) and
+`max_chars` (int 1..2000; the string outputs are clipped). `time` transform: `lenient` (bool, needs `key`, refused with `unless`).
 `run_item` tolerates the `llm_requires_local` / `llm_unrouted` refusal of `_make_llm_call` when every llm stage is
 optional, leaving the call unset, so a non-local model is never constructed or called (§13 is unchanged).
 
 **The opt-in.** `POST /api/ni/items/{id}/brief-summary {on}` (Desktop-local): 404 missing; 409 not a brief; 409 not
 kept (state not live / degraded / failing / paused, or held for Keep); 409 with a plain reason when no local model
-exists (`BRIEF_NO_LOCAL`); on pins the card to the first local model on the ni / chat / agent routes and adds the
-stage, off removes both (`store.update_spec(origin="user")`, journal line, audit `ni_brief_summary_set`). The summary
-is written by the next refresh (the web triggers one run). Headlines refresh every time, with the summary on or off.
+exists (`BRIEF_NO_LOCAL`); on requires a local model on the ni / chat / agent routes, seals the sentinel `local/auto` in `spec.model` and
+adds the stage (`_make_llm_call` resolves the first local model on those routes each time the card runs, so
+switching local servers keeps the summary working, and never resolves a non-local one), off removes both (`store.update_spec(origin="user")`, journal line, audit `ni_brief_summary_set`). The summary
+is written by the next refresh (the web triggers one run). The §13 monitor hash in `llm_state` records the `spec_rev`
+it was written at and the skip needs it to match, so turning the summary on, off and on again runs the model each
+time it is on even over unchanged bytes (an `llm_state` row without `spec_rev` runs once, then records it). Applying
+a re-research proposal to a card with the summary on carries the summary stage and `brief.summary` to the
+replacement only when the replacement is also a brief (`ni_brief.carry_summary`). Headlines refresh every time, with the summary on or off.
 
 **Board row.** A brief card's row carries `brief: {summary, local, state, label, text}` (`state` is `off`, `pending`,
 `ready` or `unavailable`; `label` is "Summary written by your local model"; `text` is at most 600 characters and only

@@ -703,8 +703,12 @@ def chat(
     timeout: float = 60.0,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    acquire_timeout: float | None = None,
 ) -> dict:
     """Send a chat completion through Bifrost; return the parsed JSON response.
+
+    ``acquire_timeout`` (opt-in, like ``embed``'s): a local model whose serializer is not free within that many
+    seconds raises ``LocalBusy`` instead of waiting. None (every existing caller) waits as before.
 
     ``max_tokens`` is opt-in like ``temperature``: when None the payload is unchanged
     (the provider's own default applies).
@@ -731,7 +735,7 @@ def chat(
     _set_max_tokens(payload, max_tokens)
     client, owns_client = _resolve_client(client, timeout)
     try:
-        with _serialized(model):  # serialize local-provider calls (no-op for cloud)
+        with _serialized(model, acquire_timeout=acquire_timeout):  # serialize local calls (no-op for cloud)
             resp = _post_json(client, "/v1/chat/completions", payload, timeout)
         try:
             data = resp.json()

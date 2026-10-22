@@ -29,6 +29,7 @@ BRIEF_KINDS = frozenset({"text_brief", "latest_items"})   # the question kinds a
 SUMMARY_STATES = frozenset({"off", "pending", "ready", "unavailable"})
 SUMMARY_OUTPUT = "brief_summary"
 SUMMARY_MAX_CHARS = 600
+LOCAL_MODEL = "local/auto"   # sealed in spec.model: "whichever local model is routed when the card runs" (never a cloud id)
 SUMMARY_LABEL = "Summary written by your local model"
 SUMMARY_INSTRUCTION = (
     "These are the current headlines from one source, newest first. Write a brief of two or three plain "
@@ -271,15 +272,27 @@ def summary_on(spec: object) -> bool:
     return is_brief(spec) and spec["brief"].get("summary") is True  # type: ignore[index]
 
 
-def with_summary(spec: dict, model: str) -> dict:
-    """A copy of a brief spec with the summary on: the llm stage appended and the card pinned to ``model`` (a
-    local model: the stage itself refuses any other at run time)."""
+def with_summary(spec: dict, model: str = LOCAL_MODEL) -> dict:
+    """A copy of a brief spec with the summary on: the llm stage appended and ``spec.model`` set to ``model``.
+    The default is the ``LOCAL_MODEL`` sentinel, resolved to a local model each time the card runs (so switching
+    local servers keeps the summary working); a concrete id still runs only if it is local."""
     assert is_brief(spec) and isinstance(model, str) and model, "a brief spec and a model id"
     out = copy.deepcopy(spec)
     out["pipeline"] = [s for s in out.get("pipeline") or [] if not is_summary_stage(s)] + [summary_stage()]
     out["model"] = model
     out["brief"] = {"summary": True}
     return out
+
+
+def carry_summary(old: object, new: dict) -> dict:
+    """``new`` (the card that replaces ``old``, e.g. an applied re-research proposal) with ``old``'s summary kept:
+    when ``old`` is a brief with the summary on and ``new`` is also a brief, the summary stage and the model
+    setting ride over and ``brief.summary`` stays true. Otherwise ``new`` is returned unchanged (a replacement
+    that is no brief has no summary to carry, and a summary that was off stays off)."""
+    assert isinstance(new, dict), "a spec"
+    if not summary_on(old) or not is_brief(new):
+        return new
+    return with_summary(new, str(old.get("model") or LOCAL_MODEL))  # type: ignore[union-attr]
 
 
 def without_summary(spec: dict) -> dict:

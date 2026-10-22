@@ -270,9 +270,11 @@ def test_off_card_has_no_text_and_no_model_call(monkeypatch) -> None:
 
 # ---- the toggle route -------------------------------------------------------------------------------------
 
-def _brief_item(client, state="live") -> str:
+def _brief_item(client, state="live", *, kept_preview: bool = False) -> str:
     built = _build({"items": _items(4)})
-    iid = client.app.state.ni.add_item(_spec(built), built["preview_payload"])
+    # a card kept through the flow stores its preview with the instants as text (ni_flow does the same)
+    preview = nimod.json_instants(built["preview_payload"]) if kept_preview else built["preview_payload"]
+    iid = client.app.state.ni.add_item(_spec(built), preview)
     client.app.state.ni.set_state(iid, state)
     return iid
 
@@ -301,7 +303,7 @@ def test_toggle_on_then_off(client, monkeypatch) -> None:
     assert got.status_code == 200 and got.json()["brief"]["summary"] is True
     row = _row(client, iid)
     assert row["brief"]["state"] == "pending" and row["brief"]["label"] == ni_brief.SUMMARY_LABEL
-    assert client.app.state.ni.get_item(iid)["spec"]["model"] == "ollama/x"
+    assert client.app.state.ni.get_item(iid)["spec"]["model"] == ni_brief.LOCAL_MODEL
     off = client.post(f"/api/ni/items/{iid}/brief-summary", json={"on": False})
     assert off.status_code == 200 and off.json()["brief"]["state"] == "off"
     assert client.app.state.ni.get_item(iid)["spec"]["model"] is None
@@ -320,13 +322,17 @@ def test_toggle_refusals_for_non_brief_and_unkept(client, monkeypatch) -> None:
 
 def test_export_strips_the_summary(client, monkeypatch) -> None:
     _unlock(client)
-    iid = _brief_item(client)
+    iid = _brief_item(client, kept_preview=True)
     monkeypatch.setattr(ni_flow, "_local_flow_model", lambda store: "ollama/x")
-    client.post(f"/api/ni/items/{iid}/brief-summary", json={"on": True})
-    spec = client.app.state.ni.get_item(iid)["spec"]
-    from smartbrain_3000 import ni_routes
-    assert "brief" in ni_routes._EXPORT_STRIP_KEYS
-    assert ni_brief.summary_on(spec)
+    assert client.post(f"/api/ni/items/{iid}/brief-summary", json={"on": True}).status_code == 200
+    assert ni_brief.summary_on(client.app.state.ni.get_item(iid)["spec"]), "the summary is on before the export"
+    got = client.get(f"/api/ni/items/{iid}/export-template")
+    assert got.status_code == 200, got.text
+    template = got.json()["spec_template"]
+    assert "brief" not in template
+    assert not any(s.get("op") == "llm" for s in template["pipeline"])
+    assert template["model"] is None
+    assert ni_brief.summary_on(client.app.state.ni.get_item(iid)["spec"]), "the export leaves the kept card alone"
 
 
 # ---- researcher and flow integration ---------------------------------------------------------------------
@@ -334,3 +340,192 @@ def test_export_strips_the_summary(client, monkeypatch) -> None:
 def test_sample_payload_wraps_a_bare_list() -> None:
     assert rtools.sample_payload([{"title": "a"}]) == {"items": [{"title": "a"}]}
     assert rtools.sample_payload({"x": 1}) == {"x": 1}
+
+
+# ---- review fixes: the monitor hash follows the revision, the local model is resolved at run ----------------
+
+class _RoutedGateway(_FakeGateway):
+    """A fake gateway with its own route table; records the model each chat asked for."""
+
+    def __init__(self, routes: dict, text: str = '{"brief_summary": "Stories."}') -> None:
+        super().__init__(text=text)
+        self._routes = routes
+        self.models: list[str] = []
+        self.kwargs: list[dict] = []
+
+    def load_routes(self, _conn) -> dict:
+        return dict(self._routes)
+
+    def chat(self, messages, model, **kwargs) -> dict:
+        self.models.append(model)
+        self.kwargs.append(kwargs)
+        return super().chat(messages, model, **kwargs)
+
+
+def _live_brief(gw, *, summary: bool = True, model: str = ni_brief.LOCAL_MODEL, monkeypatch=None):
+    store, conn, key = _store()
+    built = _build({"items": _items(4)})
+    spec = ni_brief.with_summary(_spec(built), model) if summary else _spec(built)
+    iid = store.add_item(spec, built["preview_payload"])
+    store.set_state(iid, "live")
+    monkeypatch.setattr(nimod, "_fetch_http_json", lambda *a, **k: copy.deepcopy({"items": _items(4)}))
+    refresh = lambda: nimod.run_item(store, iid, gateway_mod=gw, secrets_store=SecretStore(conn, key),
+                                     schedules_store=ScheduleStore(conn, key))
+    return store, iid, refresh
+
+
+def test_monitor_hash_is_bound_to_the_spec_revision(monkeypatch) -> None:
+    gw = _RoutedGateway({"ni": "ollama/x"})
+    store, iid, refresh = _live_brief(gw, monkeypatch=monkeypatch)
+    assert refresh()["status"] == "ok" and gw.calls == 1
+    assert refresh()["status"] == "unchanged" and gw.calls == 1, "same payload at the same revision skips the model"
+    store.update_spec(iid, ni_brief.without_summary(store.get_item(iid)["spec"]), origin="user")
+    assert refresh()["status"] == "ok" and gw.calls == 1, "off: no model"
+    store.update_spec(iid, ni_brief.with_summary(store.get_item(iid)["spec"]), origin="user")
+    assert refresh()["status"] == "ok" and gw.calls == 2, "on again over the same bytes runs the model"
+    assert refresh()["status"] == "unchanged" and gw.calls == 2
+    state = store.read_snapshot(iid, "llm_state")["payload"]
+    assert state["spec_rev"] == store.get_item(iid)["spec_rev"]
+
+
+def test_a_revert_or_repair_revision_runs_the_model_too(monkeypatch) -> None:
+    gw = _RoutedGateway({"ni": "ollama/x"})
+    store, iid, refresh = _live_brief(gw, monkeypatch=monkeypatch)
+    refresh()
+    rev = store.get_item(iid)["spec_rev"]
+    store.apply_repair(iid, copy.deepcopy(store.get_item(iid)["spec"]), origin="repair_l1", expected_rev=rev)
+    assert store.get_item(iid)["spec_rev"] == rev + 1
+    refresh()
+    assert gw.calls == 2, "any revision writer, not only update_spec, re-arms the model"
+
+
+def test_an_llm_state_row_without_a_revision_runs_once_then_records_it(monkeypatch) -> None:
+    gw = _RoutedGateway({"ni": "ollama/x"})
+    store, iid, refresh = _live_brief(gw, monkeypatch=monkeypatch)
+    refresh()
+    old = store.read_snapshot(iid, "llm_state")["payload"]
+    store.write_snapshot(iid, "llm_state", {k: v for k, v in old.items() if k != "spec_rev"}, ok=True)
+    assert refresh()["status"] == "ok" and gw.calls == 2
+    assert store.read_snapshot(iid, "llm_state")["payload"]["spec_rev"] == store.get_item(iid)["spec_rev"]
+    assert refresh()["status"] == "unchanged" and gw.calls == 2
+
+
+def test_the_local_model_is_resolved_when_the_card_runs(monkeypatch) -> None:
+    gw = _RoutedGateway({"ni": "ollama/a"})
+    _store_, _iid, refresh = _live_brief(gw, monkeypatch=monkeypatch)
+    refresh()
+    gw._routes = {"ni": "openai/gpt-4o", "chat": "mlx/b"}   # the user switched local servers
+    _store_.update_spec(_iid, _store_.get_item(_iid)["spec"], origin="user")
+    refresh()
+    assert gw.models == ["ollama/a", "mlx/b"], "the sentinel follows the routes, never a stale id"
+    assert _store_.get_item(_iid)["spec"]["model"] == ni_brief.LOCAL_MODEL
+
+
+def test_no_cloud_model_is_ever_chosen_for_the_summary(monkeypatch) -> None:
+    gw = _RoutedGateway({"ni": "openai/gpt-4o", "chat": "anthropic/claude", "agent": "google/gemini"})
+    store, iid, refresh = _live_brief(gw, monkeypatch=monkeypatch)
+    assert refresh()["status"] == "ok"
+    assert gw.calls == 0 and gw.models == []
+    assert "Headline 0" in json.dumps(store.read_snapshot(iid, "latest")["payload"])
+    with pytest.raises(nimod.NIError) as err:
+        nimod._make_llm_call(store, store.get_item(iid)["spec"], gw)
+    assert err.value.kind == "llm_unrouted"
+    # a concrete cloud pin is still refused by the same gate
+    with pytest.raises(nimod.NIError) as err2:
+        nimod._make_llm_call(store, {**store.get_item(iid)["spec"], "model": "openai/gpt-4o"}, gw)
+    assert err2.value.kind == "llm_requires_local"
+
+
+def test_a_busy_local_model_leaves_headlines_and_does_not_wait(monkeypatch) -> None:
+    class _Busy(_RoutedGateway):
+        class LocalBusy(Exception):
+            pass
+
+        def chat(self, messages, model, **kwargs):
+            self.kwargs.append(kwargs)
+            self.calls += 1
+            raise self.LocalBusy("busy")
+
+    gw = _Busy({"ni": "ollama/x"})
+    store, iid, refresh = _live_brief(gw, monkeypatch=monkeypatch)
+    assert refresh()["status"] == "ok"
+    assert gw.kwargs and gw.kwargs[0].get("acquire_timeout") == nimod._OPTIONAL_LLM_ACQUIRE_S
+    assert gw.calls == 1, "busy is a soft failure: no retry"
+    assert "Headline 0" in json.dumps(store.read_snapshot(iid, "latest")["payload"])
+    field = ni_brief.board_field(store.get_item(iid)["spec"], store.read_snapshot(iid, "outputs"), local=True)
+    assert field["text"] == "" and field["state"] == "unavailable"
+
+
+def test_gateway_chat_gives_up_on_a_held_slot() -> None:
+    from smartbrain_3000 import gateway
+    with gateway.serialized_local(), pytest.raises(gateway.LocalBusy):
+        gateway.chat([{"role": "user", "content": "hi"}], "ollama/x", acquire_timeout=0.05)
+
+
+# ---- grammar: the time transform's lenient flag ------------------------------------------------------------
+
+def _time_stage(spec: dict) -> dict:
+    return next(a for s in spec["pipeline"] if s.get("op") == "transform" for a in s["apply"] if a["fn"] == "time")
+
+
+def test_time_lenient_grammar() -> None:
+    spec = ni_brief.without_summary(_on_spec())
+    nimod.validate_spec(copy.deepcopy(spec))
+    assert _time_stage(spec)["lenient"] is True
+    no_key = copy.deepcopy(spec)
+    del _time_stage(no_key)["key"]
+    with_unless = copy.deepcopy(spec)
+    _time_stage(with_unless)["unless"] = {"key": "published", "op": "eq", "value": ""}
+    for bad in (no_key, with_unless):
+        with pytest.raises(ValueError, match="lenient"):
+            nimod.validate_spec(bad)
+    for bad_value in ("yes", 1, None, [True]):
+        broken = copy.deepcopy(spec)
+        _time_stage(broken)["lenient"] = bad_value
+        with pytest.raises(ValueError):
+            nimod.validate_spec(broken)
+
+
+# ---- a re-research proposal applied to a brief with the summary on --------------------------------------
+
+def _proposal_card(client, *, replacement_is_brief: bool):
+    store = client.app.state.ni
+    built = _build({"items": _items(4)})
+    iid = store.add_item(ni_brief.with_summary(_spec(built)), built["preview_payload"])
+    new = _spec(_build({"items": _items(5)}))
+    new["source"] = {"type": "http_json", "url": "https://other.example.org/headlines", "format": "json"}
+    if not replacement_is_brief:
+        new.pop("brief")
+    store.conn.execute("UPDATE ni_items SET state='degraded', consecutive_failures = 1, first_failure_at = now() "
+                       "WHERE id = ?;", [iid])
+    proposal = {"spec": new, "origin": "research", "reason": "source_dead",
+                "created_at": datetime.now(UTC).isoformat(), "model": "research"}
+    assert store.set_l2_proposal(iid, proposal, expected_rev=store.get_item(iid)["spec_rev"],
+                                 states=("degraded", "failing"))
+    return store, iid
+
+
+def test_applied_reresearch_carries_the_summary_to_a_brief(client) -> None:
+    _unlock(client)
+    store, iid = _proposal_card(client, replacement_is_brief=True)
+    assert client.post(f"/api/ni/items/{iid}/l2-proposal/apply").status_code == 200
+    spec = store.get_item(iid)["spec"]
+    assert spec["source"]["url"].startswith("https://other.example.org")
+    assert spec["brief"] == {"summary": True} and ni_brief.summary_on(spec)
+    assert sum(1 for s in spec["pipeline"] if s.get("op") == "llm") == 1
+    assert spec["model"] == ni_brief.LOCAL_MODEL
+
+
+def test_applied_reresearch_does_not_carry_a_summary_to_a_non_brief(client) -> None:
+    _unlock(client)
+    store, iid = _proposal_card(client, replacement_is_brief=False)
+    assert client.post(f"/api/ni/items/{iid}/l2-proposal/apply").status_code == 200
+    spec = store.get_item(iid)["spec"]
+    assert "brief" not in spec and not any(s.get("op") == "llm" for s in spec["pipeline"])
+    assert not spec.get("model")
+
+
+def test_carry_summary_leaves_an_off_summary_off() -> None:
+    off = ni_brief.without_summary(_on_spec())
+    new = copy.deepcopy(off)
+    assert ni_brief.carry_summary(off, new) == new

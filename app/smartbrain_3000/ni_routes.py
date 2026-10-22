@@ -1610,7 +1610,7 @@ def set_brief_summary(request: Request, item_id: str, body: BriefSummaryIn) -> d
         model = ni_flow._local_flow_model(store)
         if model is None:
             raise HTTPException(status_code=409, detail=BRIEF_NO_LOCAL)
-        new_spec = ni_brief.with_summary(spec, model)
+        new_spec = ni_brief.with_summary(spec)   # the sentinel: the local model is resolved when the card runs
     else:
         new_spec = ni_brief.without_summary(spec)
     try:
@@ -1663,6 +1663,8 @@ def apply_l2_proposal(request: Request, item_id: str) -> dict:
                     else ni._spec_with_repaired_stages(item["spec"], proposal["stages"]))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    if replace:  # S8: a brief's summary rides over to a replacement that is also a brief (else it ends with the card)
+        new_spec = ni_brief.carry_summary(item["spec"], new_spec)
     # ``_spec_with_repaired_stages`` pops ``_l2_proposal`` alongside the _l1_*
     # markers, so apply_repair's seal-write REPLACES the sealed spec with a
     # proposal-free body atomically. On a spec_changed abort the sealed state
