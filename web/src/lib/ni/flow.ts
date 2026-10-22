@@ -55,8 +55,9 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
   return "";
 }
 
-/** The action kinds this client knows how to render. The backend vocabulary is closed
- *  (ni_master.ACTION_KINDS); a kind outside this set (a newer server) is ignored, never shown. */
+/** The action kinds this client knows how to render: ni_master.ACTION_KINDS as generated when this
+ *  bundle was built. It matches the backend today; the filter only matters when a newer server
+ *  sends a kind this bundle predates, which is ignored, never shown. */
 export const KNOWN_ACTIONS: ReadonlySet<string> = new Set<string>(ACTION_KINDS);
 
 /** The backend-declared actions of a board row, unknown kinds dropped; `null` for a v1 row (no

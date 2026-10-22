@@ -102,6 +102,9 @@ export type Op = (typeof OPS)[number];
 export const QUALITY_TIERS = ["curated", "page_reading", "verified_endpoint"] as const;
 export type QualityTier = (typeof QUALITY_TIERS)[number];
 
+export const QUERY_COVERAGES = ["approximated", "bound", "recognizer", "rules", "unbound"] as const;
+export type QueryCoverage = (typeof QUERY_COVERAGES)[number];
+
 export interface RecipeBudget {
   fetches: number;
   searches: number;
@@ -149,7 +152,7 @@ export interface RowPreview {
 }
 
 export interface RowQuery {
-  coverage?: Record<string, string>;
+  coverage?: Record<string, QueryCoverage>;
 }
 
 export interface RowRender {

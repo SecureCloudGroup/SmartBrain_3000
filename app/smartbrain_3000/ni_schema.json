@@ -662,6 +662,15 @@
         "verified_endpoint"
       ]
     },
+    "QueryCoverage": {
+      "enum": [
+        "approximated",
+        "bound",
+        "recognizer",
+        "rules",
+        "unbound"
+      ]
+    },
     "Recipe": {
       "type": "object",
       "properties": {
@@ -1168,7 +1177,7 @@
         "coverage": {
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "$ref": "#/$defs/QueryCoverage"
           }
         }
       },

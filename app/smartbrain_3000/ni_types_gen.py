@@ -112,6 +112,10 @@ QualityTier = Literal[
     "curated", "page_reading", "verified_endpoint"
 ]
 
+QueryCoverage = Literal[
+    "approximated", "bound", "recognizer", "rules", "unbound"
+]
+
 class RecipeBudget(TypedDict):
     fetches: int
     searches: int
@@ -157,7 +161,7 @@ class RowPreview(TypedDict):
     feed_candidates: list[FeedCandidate]
 
 class RowQuery(TypedDict):
-    coverage: NotRequired[dict[str, str]]
+    coverage: NotRequired[dict[str, QueryCoverage]]
 
 class RowRender(TypedDict):
     sites: list[str]

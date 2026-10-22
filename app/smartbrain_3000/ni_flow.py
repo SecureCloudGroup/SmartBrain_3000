@@ -136,6 +136,10 @@ FLOW_STATES: frozenset[str] = frozenset({
 # ("Waiting for you to pick a source"). Sealed alongside the paused ``source``
 # state, where a normal error string would be a lie.
 AWAITING_SOURCE_PICK = ni_master.PARKED_MARKER
+# The flow field's suggestion vocabulary (tools/gen-ni-schema.py reads these; the emitter checks against them)
+SUGGESTION_KINDS = frozenset({"library", "link"})
+SUGGESTION_FOUND = frozenset({"dataset", "page"})
+SUGGESTION_NEEDS = frozenset({"key", "contact"})
 # The retired built-in recipe catalog paused at ``confirm_source``; a record
 # still sitting there after an upgrade re-lands the pick pause (Library first).
 _RETIRED_CONFIRM_STATE = "confirm_source"
@@ -6845,6 +6849,8 @@ def board_flow_field(store: ni.NIStore, item_id: str, *, read_only: bool = False
                 if link["url"] not in seen:
                     seen.add(link["url"])
                     out["suggestions"].append(link)
+            assert all(s["kind"] in SUGGESTION_KINDS and s.get("found", "page") in SUGGESTION_FOUND
+                       and set(s.get("needs") or ()) <= SUGGESTION_NEEDS for s in out["suggestions"]), "closed vocab"
         except Exception as exc:  # suggestions are best-effort display data
             log.warning("ni_flow: suggestions failed for %s: %s", item_id, exc)
             out["suggestions"] = []

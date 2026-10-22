@@ -13,9 +13,13 @@ from test_ni_recipe import _recipe
 from smartbrain_3000 import ni_flow, ni_master
 
 _SCRIPT = Path(__file__).resolve().parents[2] / "tools" / "gen-ni-schema.py"
-_spec = importlib.util.spec_from_file_location("gen_ni_schema", _SCRIPT)
-gen = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(gen)
+# the app image ships app/ only: the generator (and web/, where the TS file lives) are repo-only
+pytestmark = pytest.mark.skipif(not _SCRIPT.exists(), reason="gen-ni-schema tool not shipped in the app image")
+gen = None
+if _SCRIPT.exists():
+    _spec = importlib.util.spec_from_file_location("gen_ni_schema", _SCRIPT)
+    gen = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(gen)
 
 
 @pytest.fixture()

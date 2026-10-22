@@ -28,8 +28,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "app"))
 
-from smartbrain_3000 import ni, ni_flow, ni_master, ni_recipe
+from smartbrain_3000 import ni, ni_flow, ni_master, ni_recipe, ni_routes
 from smartbrain_3000.ni_forms import types as ni_form_types
+from smartbrain_3000.ni_forms import verdict as ni_form_verdict
+
+# The modules that own the wire vocabularies; ``enum`` takes only a constant one of them defines.
+OWNERS = (ni, ni_flow, ni_master, ni_recipe, ni_routes, ni_form_types, ni_form_verdict)
 
 OUT_SCHEMA = ROOT / "app" / "smartbrain_3000" / "ni_schema.json"
 OUT_PY = ROOT / "app" / "smartbrain_3000" / "ni_types_gen.py"
@@ -44,6 +48,10 @@ def ref(name: str) -> dict:
 
 
 def enum(values: object) -> dict:
+    """A closed string vocabulary, read from the constant that owns it: an inline literal is refused, so
+    every value list in the schema is the same object the emitting code checks against."""
+    assert isinstance(values, (frozenset, tuple)) and values, "a non-empty constant"
+    assert any(v is values for m in OWNERS for v in vars(m).values()), "enum() takes an owning module's constant"
     return {"enum": sorted(values)}  # type: ignore[type-var]
 
 
@@ -80,8 +88,9 @@ def _same(found: frozenset[str], declared: dict, what: str) -> None:
 
 
 def _flow_defs() -> dict[str, dict]:
-    suggestion = obj({"title": STR, "host": STR, "url": STR, "kind": enum({"library", "link"}),
-                      "found": enum({"dataset", "page"}), "evidence": arr(STR), "needs": arr(enum({"key", "contact"}))},
+    suggestion = obj({"title": STR, "host": STR, "url": STR, "kind": enum(ni_flow.SUGGESTION_KINDS),
+                      "found": enum(ni_flow.SUGGESTION_FOUND), "evidence": arr(STR),
+                      "needs": arr(enum(ni_flow.SUGGESTION_NEEDS))},
                      opt=("kind", "found", "evidence", "needs"))
     progress = obj({"step": INT, "of": INT, "label": STR, "gate": STR, "try": ref("FlowTry")}, opt=("gate", "try"))
     question = obj({"kind": ref("FlowQuestionKind"), "prompt": STR, "model": STR, "local": STR},
@@ -111,7 +120,7 @@ def _row_defs() -> dict[str, dict]:
         "needs_credentials": arr(ref("NeedsItem")), "needs_params": arr(ref("NeedsItem")),
         "l2_proposal": BOOL, "c2_ok": BOOL, "awaiting_yes": nullable(ref("AwaitingYes")), "shell": BOOL,
         "born": STR, "flow": nullable(ref("Flow")),
-        "payload_slot": nullable(enum({"latest", "last_good", "preview"})), "payload_at": nullable(STR),
+        "payload_slot": nullable(enum(ni_routes.PAYLOAD_SLOTS)), "payload_at": nullable(STR),
         "payload_ok": nullable(BOOL), "payload": {},
         "interpretation": STR, "query": ref("RowQuery"), "fit": ref("Fit"), "actions": arr(ref("ActionKind")),
         "rendered": BOOL, "render": nullable(ref("RowRender")), "draft": nullable(ref("RowDraft")),
@@ -120,14 +129,14 @@ def _row_defs() -> dict[str, dict]:
         desc="One row of GET /api/ni/board. `actions` is present only under the v2 flow; `payload` is the bound scene.")
     return {
         "NeedsItem": obj({"name": STR, "label": STR}), "Display": obj({"size": ref("DisplaySize")}),
-        "AwaitingYes": obj({"from": enum({"page", "dataset", "library"}), "host": STR, "title": STR, "used_key": BOOL},
+        "AwaitingYes": obj({"from": enum(ni_routes.AWAITING_FROM), "host": STR, "title": STR, "used_key": BOOL},
                            opt=("used_key",)),
-        "Fit": obj({"verdict": enum({"no", "partly"}), "missing": arr(STR)}),
+        "Fit": obj({"verdict": enum(ni_form_verdict.VISIBLE_VERDICTS), "missing": arr(STR)}),
         "FeedCandidate": obj({"url": STR, "site": STR}),
         "RowRender": obj({"sites": arr(STR), "unavailable": BOOL}),
-        "RowDraft": obj({"reason": enum({"render_sites"}), "sites": arr(STR)}),
+        "RowDraft": obj({"reason": enum(ni_routes.DRAFT_REASONS), "sites": arr(STR)}),
         "RowPreview": obj({"feed_candidates": arr(ref("FeedCandidate"))}),
-        "RowQuery": obj({"coverage": {"type": "object", "additionalProperties": STR}}, opt=("coverage",)),
+        "RowQuery": obj({"coverage": {"type": "object", "additionalProperties": ref("QueryCoverage")}}, opt=("coverage",)),
         "BoardRow": row,
         "FlowPoll": obj({"id": STR, "state": ref("ItemState"), "flow": nullable(ref("Flow")),
                          "awaiting_yes": nullable(ref("AwaitingYes")), "actions": arr(ref("ActionKind"))},
@@ -187,6 +196,7 @@ def build_schema() -> dict:
     """The whole schema: vocabularies from the Python constants, shapes declared above."""
     defs: dict[str, dict] = {
         "ItemState": enum(ni._STATES), "DisplaySize": enum(ni._DISPLAY_SIZES), "FlowState": enum(ni_flow.FLOW_STATES),
+        "QueryCoverage": enum(ni._QUERY_COVERAGE_VALUES),
         "ActionKind": enum(ni_master.ACTION_KINDS), "FlowQuestionKind": enum(ni_master.QUESTION_KINDS),
         "ReopenKind": enum(ni_master.REOPEN_KINDS), "CardKind": enum(ni_form_types.KINDS),
         "QualityTier": enum(ni_recipe.QUALITY_TIERS), "RecipeQuestionKind": enum(ni_recipe.QUESTION_KINDS),

@@ -742,114 +742,21 @@ export interface NiFinding {
 // How one clause of the ask's query was carried (ni-format §36 "Coverage and notes"):
 // "unbound" = the ask said something the query does not carry, "approximated" = carried
 // coarser (a part of a day read as the day), "rules" = decided by the rules floor.
-export type NiCoverage = "bound" | "unbound" | "approximated" | "rules";
+export type NiCoverage = G.QueryCoverage;
 
 // The fit advisory (operator ruling 2026-10-12): the code-built verdict that a card's design may
 // not answer the ask — "no" (it may not) or "partly" (it may not fully) — with at most 3
 // code-written labels of what it lacks. Advisory only: nothing blocks on it.
-export interface NiFit {
-  verdict: "no" | "partly";
-  missing: string[];
-}
+export type NiFit = G.Fit;
 
 export type NiAwaitingYes = G.AwaitingYes;
 
 // GET /api/ni/items/{id}/flow (v2 only): one item's flow fields for the 3 s poll.
-export interface NiFlowPoll {
-  id: string;
-  state: NiState;
-  flow: NiItemFlow | null;
-  awaiting_yes: NiAwaitingYes | null;
-  actions: string[];
-}
+export type NiFlowPoll = G.FlowPoll;
 
-export interface NiBoardItem {
-  id: string;
-  title: string;
-  state: NiState;
-  enabled: boolean;
-  interval_minutes: number;
-  last_checked: string | null;
-  last_status: string; // host-free
-  consecutive_failures: number;
-  position: number;
-  display: NiDisplay;
-  // Bound payload for the appropriate slot (§10 /board): draft -> preview, live -> latest,
-  // degraded/failing/etc -> last_good. null when no snapshot has ever been written.
-  payload: SceneNode | null;
-  // null when no snapshot has ever been written (payload is also null then).
-  payload_slot: "preview" | "latest" | "last_good" | null;
-  payload_at: string | null;
-  // Honesty flag (§13): true when the item's pipeline contains an llm stage or its
-  // source is model-generated. Surfaced on the card as an "Interpreted" chip.
-  interpreted: boolean;
-  // Fleet-healing signals (ni-format §20): this item was installed from a library
-  // template that has since been fixed/changed. Applying is per-item + user-driven —
-  // NEVER silent (the card gets a small accent chip + confirm modal). `template_gone`
-  // is informational only: the library retired this template.
-  template_update?: boolean;
-  template_gone?: boolean;
-  // P1 debt rider (2026-09-22): sealed _born marker ("flow" | "recipe" |
-  // "chat" | "") — the draft badge says "real data" for flow/recipe-born
-  // previews (the actual source was sampled) and "sample data" otherwise.
-  born?: string;
-  // W2 (2026-09-15): true while the card is a flow shell whose creation never
-  // finished — the card hides Activate and directs to retry-in-chat or delete.
-  shell?: boolean;
-  // C2 verdict already given (F2, 2026-09-15): true once the user tapped
-  // "Looks right" — the card stops asking and shows "Confirmed — verifying"
-  // until the C3 run promotes it to live.
-  c2_ok?: boolean;
-  // Ruling 2026-10-04 ("hold open paths for a YES"): set while a card built from a web page
-  // or a model-mapped dataset waits for the user's YES — the card shows its reading (payload)
-  // and where it came from. YES = niValidate(id, true); NO = niValidate(id, false), which
-  // re-lands the source pick without that source. null/absent for every other card.
-  awaiting_yes?: NiAwaitingYes | null;
-  // L2 frontier-repair proposal parked for review (ni-format §23). PARK-ONLY: a valid
-  // proposal is NEVER auto-applied — the card shows a "Fix proposed" chip; the review
-  // modal renders the diff and offers Apply (trial, may auto-revert) / Dismiss.
-  l2_proposal?: boolean;
-  // Secret params whose credential is missing from the store (ni-format "Status truth"
-  // amendments). Rendered on the card as an "Add key" affordance opening the
-  // Desktop-local credential PUT (`name` is the spec's param name — the wire the
-  // PUT wants; `label` is the human name shown in the modal + on the card).
-  needs_credentials?: { name: string; label: string }[];
-  // Non-secret params the spec references via {{param:X}} whose value is still
-  // empty (needs_params, 2026-09-14). The engine refuses runs (param_empty) and
-  // commission 409s while any remain; the card renders a "Fill" affordance
-  // opening the Desktop-local param PUT.
-  needs_params?: { name: string; label: string }[];
-  // Creation/remap flow status. Non-null while the engine is walking the intent →
-  // source → sampling → mapping → assembling → ready pipeline, or has ended in
-  // awaiting_credential / unsupported / failed. Null once the item is settled and
-  // the card should render its bound payload (or Waiting/first-run copy).
-  flow?: NiItemFlow | null;
-  // v2 only: the card actions the backend declares for this row (closed vocabulary, e.g. "keep",
-  // "cancel", "retry"). When present the card renders its buttons from this list and ignores
-  // unknown kinds; when absent (v1) the page keeps its own client-side conditions.
-  actions?: string[];
-  // Round 20 interpretation line (ni-format §36): the code-authored sentence saying how
-  // the ask was read ("Earthquakes · Magnitude > 4 · past 7 days · count", ≤200 chars)
-  // and the per-clause coverage, as sealed on the spec (spec.interpretation,
-  // spec.query.coverage). Absent on a card built before Round 20 or served by an older
-  // server — the card then renders exactly as before (version-skew rule).
-  interpretation?: string;
-  query?: { coverage?: Record<string, NiCoverage> };
-  // The fit advisory (NiFit) — the card wears a "May not answer your question" chip and the C2
-  // panel says so in one line ($lib/ni/fit). Absent on a card that fits, one built before the
-  // ruling, or a row from an older server; an unknown shape reads as absent (version-skew rule).
-  fit?: NiFit | null;
-  // Round 20 (B3a, ni-format §35): only rows of cards that read their page in the page browser
-  // carry these. `render.sites` = the sealed registrable domains, the page's own first;
-  // `render.unavailable` = the page browser was unavailable on this machine at the last update
-  // (never a failure). `draft` while the card waits for the Activate that lets every update load
-  // its other sites (niActivate; niCommission refuses it). `preview.feed_candidates` = the site's
-  // own data feeds the creation visit saw (niSwitchFeed). Absent → the card renders as before.
-  rendered?: boolean;
-  render?: { sites: string[]; unavailable: boolean } | null;
-  draft?: { reason: "render_sites"; sites: string[] } | null;
-  preview?: { feed_candidates: NiFeedCandidate[] | null } | null;
-}
+// One /api/ni/board row, as generated from the Python sources ($lib/ni/types.gen, BoardRow; the field
+// notes live in tools/gen-ni-schema.py), with the bound payload typed as the scene the card paints.
+export type NiBoardItem = Omit<G.BoardRow, "payload"> & { payload: SceneNode | null };
 
 // One data feed the page browser saw the page request (≤ 5 per card): the exact https address
 // and the sealed site it is on.
