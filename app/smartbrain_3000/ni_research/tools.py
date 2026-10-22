@@ -138,7 +138,8 @@ def library_search(ctx: ResearchCtx, query: str) -> dict:
     for row in rows[:MAX_CANDIDATES]:  # bounded by the limit
         blocked = bool(row.get("needs_key") or row.get("needs_contact"))
         ctx.record(row["url"], "library", format=row.get("format"), scope=row.get("scope"),
-                   title=one_line(row.get("title") or "", 120), blocked=blocked, query=query.strip())
+                   title=one_line(row.get("title") or "", 120), blocked=blocked, query=query.strip(),
+                   page=row.get("page"))
         found.append({"title": one_line(row.get("title") or "", 120), "provider": one_line(row.get("provider") or "", 80),
                       "url": row["url"], "format": row.get("format"), "scope": row.get("scope"),
                       "tier": row.get("tier"), "needs_access": blocked})

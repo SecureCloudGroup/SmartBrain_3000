@@ -262,13 +262,17 @@ def test_blind50_baseline_results_rescore_to_the_human_review() -> None:
 def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
     gold = ne.load_gold(_EVAL / "gold" / "ci.json")
     runs = ne.replay_all(gold, _EVAL / "cassettes" / "ci")
-    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6", "CI7", "CI8"], runs
+    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6", "CI7", "CI8", "CI9"], runs
     assert all(r["cassette_drift"] == 0 for r in runs), "scripted cassette has no prompt hashes"
     scored, table = ne.score_all(gold, runs)
     got = {s["id"]: s["cls"] for s in scored}
-    assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "declined", "CI5": "links",
-                   "CI6": "right", "CI7": "right", "CI8": "right"}, got
-    assert (table["ALL"]["n"], table["ALL"]["right"]) == (8, 4), table["ALL"]
+    # CI4 ("countdown to Christmas", no date) ends on the card's question "when is it?", which the user answers: it
+    # waits. It scored "declined" while every unsupported terminal read as one; since the declined card is its own
+    # state, a terminal that holds a question is "waiting", and a decline the gold expects would score right.
+    assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "waiting", "CI5": "links",
+                   "CI6": "right", "CI7": "right", "CI8": "right",
+                   "CI9": "right"}, got  # CI9 (new): the gold expects a decline and the flow ends on the declined card
+    assert (table["ALL"]["n"], table["ALL"]["right"], table["ALL"]["decl_ok"]) == (9, 5, 1), table["ALL"]
 
 
 def test_replay_is_deterministic() -> None:
@@ -276,7 +280,7 @@ def test_replay_is_deterministic() -> None:
     first = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     second = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     assert first == second, "two replays must score identically"
-    assert len(first) == 8, first
+    assert len(first) == 9, first
 
 
 def test_missing_cassette_entry_surfaces_as_an_error_not_a_pass(tmp_path) -> None:
@@ -343,3 +347,68 @@ def test_the_research_flag_is_closed_and_defaults_to_the_environment() -> None:
     with pytest.raises(SystemExit):
         ne.main(["replay", "--cassette-dir", str(_EVAL), "--research", "web"])
     assert set(ne.RESEARCH_MODES) == {"cloud", "local", "off"}
+
+
+# --- the declined card as its own class ---------------------------------------------------------------------
+
+DECLINE_GOLD = {"expected_outcome": "decline", "forbidden_outcomes": ["card"]}
+
+
+def test_a_decline_is_right_when_the_gold_expects_one_and_declined_otherwise() -> None:
+    run = {"outcome": "declined", "decline": {"reason": "no_answering_source"}}
+    res = ne.score_ask(run, _gold(**DECLINE_GOLD))
+    assert (res["cls"], res["reason"]) == ("right", ne.DECLINE_RIGHT), res
+    assert ne.score_ask(run, _gold(expected_outcome=None, forbidden_outcomes=["card"]))["cls"] == "right"
+    for open_gold in (_gold(), _gold(expected_outcome=None)):  # a card was expected, or the gold is silent
+        res = ne.score_ask(run, open_gold)
+        assert res["cls"] == "declined" and res["cls"] not in ("right", "wrong"), res
+
+
+def test_only_a_declined_outcome_earns_the_decline_credit() -> None:
+    gold = _gold(**DECLINE_GOLD)
+    assert ne.score_ask(_card(["1"]), gold)["cls"] == "wrong", "a card where a decline was expected"
+    assert ne.score_ask({"outcome": "links"}, gold)["cls"] == "links", "links are not a decline"
+    assert ne.score_ask({"outcome": "needs-key"}, gold)["cls"] == "links"
+    assert ne.score_ask({"outcome": "asks"}, gold)["cls"] == "waiting", "a question for the user is not a decline"
+    assert ne.score_ask({"outcome": "crash"}, gold)["cls"] == "error"
+
+
+def test_flow_outcome_names_a_declined_record_and_a_question() -> None:
+    assert ne.flow_outcome({"state": "ready"}) == "live"
+    assert ne.flow_outcome({"state": "declined"}) == "declined"
+    assert ne.flow_outcome({"state": "unsupported", "_question": {"kind": "supply_date"}}) == "asks"
+    assert ne.flow_outcome({"state": "unsupported"}) == "unsupported", "a v1 ending keeps its word"
+    assert ne.flow_outcome({"state": "source"}) == "source"
+
+
+def test_the_summary_tables_count_declined_apart_from_links_and_credit_the_expected_ones() -> None:
+    scored = [{"kind": "a", "cls": "right", "reason": ne.DECLINE_RIGHT}, {"kind": "a", "cls": "right", "reason": "x"},
+              {"kind": "a", "cls": "declined"}, {"kind": "a", "cls": "links"}]
+    row = ne.aggregate(scored)["a"]
+    assert (row["right"], row["decl_ok"], row["declined"], row["links"]) == (2, 1, 1, 1), row
+    assert row["R"] == 0.5 and row["D"] == 0.25 and row["L"] == 0.5, "L stays links + declined; D is declined alone"
+    lines = ne.format_table(ne.aggregate(scored)).splitlines()
+    assert lines[0].split()[-1] == "dok" and lines[0].index("decl") < lines[0].index("dok")
+    assert next(line for line in lines if line.startswith("ALL")).split()[-1] == "1"
+
+
+def test_a_declined_flow_replays_to_its_closed_reason_and_scores_right(tmp_path) -> None:
+    gold = [g for g in ne.load_gold(_EVAL / "gold" / "ci.json") if g["id"] == "CI9"]
+    assert gold[0]["expected_outcome"] == "decline" and gold[0]["forbidden_outcomes"] == ["card"]
+    run = ne.replay_all(gold, _EVAL / "cassettes" / "ci")[0]
+    assert run["outcome"] == "declined" and run["decline"]["reason"] == "no_answering_source", run
+    assert run["decline"]["headline"] == "I couldn't build a reliable card for this" and len(run["decline"]["links"]) <= 3
+    assert ne.score_ask(run, gold[0])["cls"] == "right"
+    card_gold = {**gold[0], "expected_outcome": "card", "forbidden_outcomes": []}
+    assert ne.score_ask(run, card_gold)["cls"] == "declined", "the same decline, were a card expected"
+
+
+def test_the_live_harness_reports_a_declined_record_as_declined_with_its_links() -> None:
+    e2e = _load_e2e()
+    rec = {"state": "declined", "notes": ["n"], "_decline_card": {
+        "reason": "research_gave_up", "line": "I ran out of steps.",
+        "links": [{"title": "Docs", "url": "https://docs.example.org/x"}, {"title": "no", "url": "http://insecure.example/x"}]}}
+    out = e2e._v2_stop(None, "id", rec, {"outcome": "", "links": [], "notes": []})
+    assert out["outcome"] == "declined" and out["detail"].startswith("research_gave_up: ")
+    assert [x["host"] for x in out["links"]] == ["docs.example.org"], "an insecure link is never listed"
+    assert ne.outcome_class(out) == "declined"

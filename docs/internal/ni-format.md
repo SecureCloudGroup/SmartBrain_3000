@@ -3975,3 +3975,69 @@ question with two or more entities. The prompt gains rule 9.
 
 **Known limits.** A compare reads the current value only. Four web-found things can exceed the three-search budget. The
 auto-pick skips Library rows that need a key, a lookup or a clock parameter.
+
+## 39. The declined card (plan G6, P6, 6.1, 6.2)
+
+"A decline is acceptable, a wrong card is the failure." An ask the system cannot answer reliably ends in ONE
+terminal flow state, `declined` (v2 only; `ni_flow` v1 keeps `unsupported`). The record carries the verdict in a
+sealed `_decline_card`, `{reason, line, links}`; the card renders it, and the flow field repeats it as `decline`.
+
+**The rule is one table.** `ni_master.ENDINGS` maps every v2 ending that is not a card to `(flow state, decline
+code or None)`; `ni_flow._end(store, item_id, ending, reason, links=None)` is the only writer of a decline and
+reads the table, so a caller names the ending and never picks the state. An ending declines when nothing the user
+can do on this card would change the answer; it keeps its own state when the user can still act.
+
+| ending (`ENDINGS` key) | lands in | code |
+|---|---|---|
+| `research_declined_checks` (the verifier refused the card twice, or the local model could not pass the checks) | `declined` | `verify_refused` |
+| `research_declined_budget` (budget or steps spent, the model stopped or was unavailable) | `declined` | `research_gave_up` |
+| `research_declined_no_source` (the closed-world tier found no Library source) | `declined` | `no_answering_source` |
+| `no_source_research_off` (no Library source declares an answer, research off, unconsented or unavailable) | `declined` | `no_answering_source` |
+| `no_source_rows_exhausted` (every row the auto-pick tried failed or did not fit, research gave nothing) | `declined` | `no_answering_source` |
+| `compare_unbuildable` (no source reads the things side by side, more than four, or research declined a compare) | `declined` | `compare_unbuildable` |
+| `compare_refused_at_build` (a card that shows fewer things than were asked, on any build path) | `declined` | `compare_unbuildable` |
+| `source_cant_answer` (the one source the user pasted, tapped or Fix re-reads does not answer this ask) | `declined` | `source_cant_answer` |
+| `ask_unsupported` (the kind of ask is not built, e.g. the computed source is off) | `declined` | `ask_unsupported` |
+| `pick_has_untried_row` (the pick still offers a Library source that declares its answers) | `source` + pick marker | none |
+| `needs_key_or_email` (the picked source's key or contact email) | `awaiting_access` | none |
+| `model_consent_question` (build with a model outside this computer?) | `unsupported` + question | none |
+| `date_question` ("when is it?") | `unsupported` + question | none |
+| `fault` (fetch, mapping, assembly: a retry runs it again) | `failed` | none |
+
+A built card that waits for a key or a value (`awaiting_credential`, `awaiting_params`) is a draft with its own
+gate, not an ending. `tests/test_ni_declined.py` drives every row through the real flow.
+
+**Codes.** `ni_master.DECLINE_REASONS` (closed): `no_answering_source`, `research_gave_up`, `verify_refused`,
+`compare_unbuildable`, `source_cant_answer`, `ask_unsupported`. `DECLINE_LINES` holds one default plain line per
+code; a caller may pass a more specific one (a compare names the thing it could not read), cut to 200 characters.
+`DECLINE_HEADLINE` is "I couldn't build a reliable card for this". The record's `error` is `"<code>: <line>"`, so
+`ni_master.error_class_of` reads the code.
+
+**Links.** At most `DECLINE_LINKS` (3), `{title, url, host}`, https only, one per address (`ni_master.clean_links`
+is the only filter; anything else is dropped, never shown). They come from what the run saw: the researcher's
+Library and search results (`Outcome.links`; a Library row's page when it has one), or the pick's link rows (a
+Library source without declared answers: its page; the web pages a search found). The card lists them read-only;
+none builds a card.
+
+**Wire shape.** The flow field of a declined card is `{state: "declined", error, reason (= the line), decline:
+{reason, headline, line, links}, reopen: ["retry", "pick_source"], actions}`. `FlowDecline`, `DeclineLink` and
+`DeclineReason` are in the generated schema (the code list is `ni_master.DECLINE_REASONS`, read by
+`tools/gen-ni-schema.py`; an inline literal is refused). `ni_master.TERMINAL_STATES` is `failed`, `unsupported`,
+`declined`; the no-dead-end law (§ G1) covers all three: `terminal_surface` always returns a non-empty `reason` and a
+question or a reopen, and `ni_watch` audits declined records like the others (a decline is a verdict, so it is not
+clustered as a failure class).
+
+**Never refreshes, never fetches.** A declined card is a shell (draft, not enabled): `due_items` does not list it,
+the tick reads nothing for it, `/run` and `/commission` refuse it (409), and the stranded-flow sweep skips a
+terminal record. A finished card whose Fix ended declined keeps rendering its working payload (the terminal record is
+hidden, as for `failed`).
+
+**Reopen.** A shell: `POST /flow/retry` re-runs the sealed request; `POST /flow/reopen` re-enters the source pick
+(the card then lists the Library's pages and the paste-a-link field). Both drop the seal (`_transition` clears
+`_decline_card` on any other state). A finished card: Fix or Refine, as for any card. Actions on the flow field:
+a shell `["retry", "delete"]`, a finished card `["retry", "fix", "refine", "delete"]`.
+
+**Client.** `DeclinedCard.svelte` shows the headline, the line, the https links (client guard: `declinedLinks`, at
+most three) and the reopen buttons the page declares; the page owns the requests. Terminal states are
+`TERMINAL_FLOW_STATES` in `lib/ni/flow.ts`.
+

@@ -1103,7 +1103,7 @@ def intake(request: Request, body: IntakeIn) -> dict:
 def retry_flow(request: Request, item_id: str) -> dict:
     """NI Foreman P1: the failed-creation card's Retry — re-run the flow with
     the SAME sealed request (and optionally the same user URL). Allowed only
-    on a shell whose flow ended terminally (failed/unsupported); a healthy or
+    on a shell whose flow ended terminally (failed/unsupported/declined); a healthy or
     running flow refuses (409). Deterministic: nothing about the request or
     consent state changes — this is 'try the same thing again', honestly.
     """
@@ -1117,7 +1117,7 @@ def retry_flow(request: Request, item_id: str) -> dict:
                             detail="retry is for unfinished creations only")
     record = ni_flow._flow_read(store, item_id) or {}
     state = str(record.get("state") or "")
-    if state not in ("failed", "unsupported"):
+    if state not in ni_master.TERMINAL_STATES:
         raise HTTPException(
             status_code=409,
             detail=f"nothing to retry (flow state {state or 'none'!r})")
@@ -1401,7 +1401,7 @@ def reopen_flow_pick(request: Request, item_id: str) -> dict:
                             detail="finished cards reopen via Fix, not the source pick")
     record = ni_flow._flow_read(store, item_id)
     state = str((record or {}).get("state") or "")
-    if record is None or state not in ("failed", "unsupported"):
+    if record is None or state not in ni_master.TERMINAL_STATES:
         raise HTTPException(status_code=409,
                             detail=f"nothing to reopen (flow state {state or 'none'!r})")
     ni_flow.reenter_source_pick(store, item_id, "user reopened the source pick")

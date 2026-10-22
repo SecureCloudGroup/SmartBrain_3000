@@ -13,7 +13,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .. import gateway, usage
+from .. import gateway, ni_master, usage
 from . import prompt, schemas, tools
 from .ctx import ResearchCtx, error, one_line
 
@@ -41,6 +41,7 @@ class Outcome:
     proposal: dict | None = None
     reasons: list = field(default_factory=list)
     links: list = field(default_factory=list)
+    ending: str = ""                 # a declined run's row of ``ni_master.ENDINGS`` (how the flow ends it)
     usage: dict = field(default_factory=lambda: {"calls": 0, "prompt": 0, "completion": 0, "cache_read": 0,
                                                  "cache_write": 0})
 
@@ -49,14 +50,16 @@ def _links(ctx: ResearchCtx) -> list[dict]:
     """Up to three sources the run saw (title and address; Library rows first, then search results), for the honest decline."""
     assert MAX_LINKS > 0, "a link cap"
     assert isinstance(ctx, ResearchCtx), "a research ctx"
-    rows = [{"title": str(v.get("title") or "")[:120], "url": k} for kind in ("library", "search")
+    rows = [{"title": str(v.get("title") or "")[:120], "url": str(v.get("page") or k)} for kind in ("library", "search")
             for k, v in ctx.urls.items() if v.get("kind") == kind]
     return rows[:MAX_LINKS]
 
 
-def _decline(ctx: ResearchCtx, out: Outcome, reasons: list) -> Outcome:
+def _decline(ctx: ResearchCtx, out: Outcome, reasons: list, ending: str = "research_declined_budget") -> Outcome:
     assert isinstance(reasons, list), "reasons are a list"
     assert out.status in ("declined", "proposed"), "a status"
+    assert ni_master.ENDINGS[ending][0] == "declined", "an ending that declines"
+    out.ending = ending
     out.status = "declined"
     out.proposal = None
     out.reasons = [one_line(r, 200) for r in reasons if r][:MAX_REASONS] or ["the research did not finish"]
@@ -232,7 +235,7 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
                     fails += 1
                     why = [one_line(r, 200) for r in result.get("reasons") or [result.get("detail")]]
                     if fails >= MAX_VERIFY_FAILS:
-                        return _decline(ctx, out, ["the card failed its checks twice", *why])
+                        return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks")
             shown = {**result, "budget": _left(ctx)} if n < MAX_CALLS_PER_TURN else result
             turns.append({"role": "tool", "tool_call_id": call["id"], "content": prompt.result_text(shown)})
         for call in calls[MAX_CALLS_PER_TURN:]:  # a call beyond the cap still gets its (refusal) result
@@ -349,13 +352,14 @@ def _closed_world(ctx: ResearchCtx, chat: ChatFn, out: Outcome, accept: AcceptFn
     assert callable(chat), "a chat seam"
     reasons, fills = [], 0
     if len(ctx.question.get("entities") or []) >= 2:   # S7: comparing needs one search per thing; the local tier has none
-        return _decline(ctx, out, ["the local tier compares only through the Library; no source reads them side by side"])
+        return _decline(ctx, out, ["the local tier compares only through the Library; no source reads them side by side"],
+                        "compare_unbuildable")
     rows, why = _ranked(ctx)
     if not rows:
-        return _decline(ctx, out, [why or "the Library has no source for this ask"])
+        return _decline(ctx, out, [why or "the Library has no source for this ask"], "research_declined_no_source")
     order = _pick(chat, ctx, rows, out)
     if not order:
-        return _decline(ctx, out, ["no listed Library source can answer this ask"])
+        return _decline(ctx, out, ["no listed Library source can answer this ask"], "research_declined_no_source")
     for row in order:  # bounded by MAX_LOCAL_ROWS
         proposal, reasons, fills = _fill(chat, ctx, row, out, accept, fills)
         if proposal is not None:
@@ -363,4 +367,5 @@ def _closed_world(ctx: ResearchCtx, chat: ChatFn, out: Outcome, accept: AcceptFn
             return out
         if _budget_stop(ctx) or fills >= MAX_LOCAL_FILLS:
             break
-    return _decline(ctx, out, ["the local model could not build a card that passes the checks", *reasons])
+    return _decline(ctx, out, ["the local model could not build a card that passes the checks", *reasons],
+                    "research_declined_checks")

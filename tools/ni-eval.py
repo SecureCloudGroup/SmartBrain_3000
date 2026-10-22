@@ -12,7 +12,9 @@ Seams (nothing in app/smartbrain_3000 is edited): model replies are recorded at 
 the flow already accepts; fetch responses at ``netguard.safe_fetch_json / safe_fetch_text /
 safe_fetch / safe_fetch_feed / safe_post_json``, patched for the span of one ask. Headers (keys)
 are never recorded and secret-looking query parameters are redacted from the cassette key.
-Classes per ask: right / partial / wrong / links / declined / waiting / error (see ``score_ask``).
+Classes per ask: right / partial / wrong / links / declined / waiting / error (see ``score_ask``). A declined card
+(the v2 honest "I couldn't build a reliable card for this") is its own class: "right" when the gold expects a decline
+(``expected_outcome: decline``), else "declined", which is neither right nor wrong.
 ``--flow v1|v2`` on record and replay sets the ``ni_flow`` flag (env ``SMARTBRAIN_NI_FLOW``) for the run.
 ``--research cloud|local|off`` (S4c, v2 only) sets the researcher tier for the run (env ``SMARTBRAIN_NI_RESEARCH``)
 and routes its model turns through the cassette like every other model reply: ``cloud`` uses ``--research-model``
@@ -51,8 +53,10 @@ _OUTCOME = {
     "links": "links", "source": "links", "needs-key": "links", "needs-email": "links",
     "no-source": "links", "unsupported": "declined", "declined": "declined",
     "waiting-pick": "waiting",  # a run parked at the source pick (state source + awaiting_pick)
+    "asks": "waiting",          # a run stopped on a question the user answers (build with a model? what date?)
 }
 SOURCE_REVIEW = "built source not in the gold's acceptable sources"
+DECLINE_RIGHT = "declined, as the gold expects"
 _SECRET_Q = re.compile(r"(?i)(key|token|secret|auth|sig|appid|password)")
 
 
@@ -66,6 +70,24 @@ def outcome_class(run: dict) -> str:
     out = str(run.get("outcome") or "")
     assert isinstance(out, str), "outcome is text"
     return _OUTCOME.get(out, "error")
+
+
+def expects_decline(gold: dict) -> bool:
+    """True when the gold wants an honest decline: ``expected_outcome: decline``, or a card is a forbidden outcome."""
+    assert isinstance(gold, dict), "gold required"
+    return gold.get("expected_outcome") == "decline" or "card" in (gold.get("forbidden_outcomes") or [])
+
+
+def flow_outcome(rec: dict) -> str:
+    """The outcome word of a finished flow record: ``live`` (ready), ``declined`` (the v2 declined card), ``asks`` (a
+    terminal that holds a question for the user: waiting, not a decline), else the state itself."""
+    assert isinstance(rec, dict), "record required"
+    state = str(rec.get("state") or "")
+    if state == "ready":
+        return "live"
+    if state == "unsupported" and isinstance(rec.get("_question"), dict):
+        return "asks"
+    return state
 
 
 def card_text(run: dict) -> str:
@@ -189,8 +211,10 @@ def score_ask(run: dict, gold: dict) -> dict:
     oc = outcome_class(run)
     if oc != "card":
         cls = {"links": "links", "declined": "declined", "waiting": "waiting"}.get(oc, "error")
+        if cls == "declined" and expects_decline(gold):  # the honest answer to an ask whose gold is a decline
+            return {**res, "cls": "right", "reason": DECLINE_RIGHT}
         return {**res, "cls": cls, "reason": str(run.get("outcome") or "")}
-    if gold.get("expected_outcome") == "decline" or "card" in (gold.get("forbidden_outcomes") or []):
+    if expects_decline(gold):
         return {**res, "cls": "wrong", "reason": "forbidden outcome: card"}
     checks = run_checks(run, gold)
     cls, reason = _verdict_from_checks(checks)
@@ -202,31 +226,35 @@ def score_ask(run: dict, gold: dict) -> dict:
 
 
 def aggregate(scored: list[dict]) -> dict:
-    """Counts and R/P/W/L per kind plus an ALL row. L = links + declined; errors are counted apart;
-    ``needs_review`` counts the runs flagged for a human look, whatever their class."""
+    """Counts and R/P/W/L/D per kind plus an ALL row. R counts a decline the gold expects (``decl_ok`` says how many of
+    the right ones were that); L = links + declined, the plan's "links/declined" line; D = declined alone (an ask the
+    gold left open or expected a card for: neither right nor wrong); errors are counted apart; ``needs_review``
+    counts the runs flagged for a human look, whatever their class."""
     assert isinstance(scored, list), "scored list required"
     table: dict[str, dict] = {}
     for item in scored:
         assert item["cls"] in CLASSES, f"unknown class {item['cls']}"
         for key in (str(item.get("kind") or "unknown"), "ALL"):
-            row = table.setdefault(key, {"n": 0, "needs_review": 0, **{c: 0 for c in CLASSES}})
+            row = table.setdefault(key, {"n": 0, "needs_review": 0, "decl_ok": 0, **{c: 0 for c in CLASSES}})
             row["n"] += 1
             row[item["cls"]] += 1
+            row["decl_ok"] += item.get("reason") == DECLINE_RIGHT
             row["needs_review"] += bool(item.get("needs_review"))  # a card a human still has to look at
     for row in table.values():
         n = row["n"]
         row["R"], row["P"], row["W"] = (row[c] / n for c in ("right", "partial", "wrong"))
         row["L"] = (row["links"] + row["declined"]) / n
+        row["D"] = row["declined"] / n
     return table
 
 
 def format_table(table: dict) -> str:
     assert isinstance(table, dict), "table required"
-    lines = [f"{'kind':<14}{'n':>4}{'right':>7}{'part':>6}{'wrong':>7}{'review':>7}{'links':>7}{'decl':>6}{'wait':>6}{'err':>5}"]
+    lines = [f"{'kind':<14}{'n':>4}{'right':>7}{'part':>6}{'wrong':>7}{'review':>7}{'links':>7}{'decl':>6}{'wait':>6}{'err':>5}{'dok':>5}"]
     for key in sorted(table, key=lambda k: (k == "ALL", k)):
         r = table[key]
         lines.append(f"{key:<14}{r['n']:>4}{r['right']:>7}{r['partial']:>6}{r['wrong']:>7}"
-                     f"{r['needs_review']:>7}{r['links']:>7}{r['declined']:>6}{r['waiting']:>6}{r['error']:>5}")
+                     f"{r['needs_review']:>7}{r['links']:>7}{r['declined']:>6}{r['waiting']:>6}{r['error']:>5}{r['decl_ok']:>5}")
     assert lines, "header at least"
     return "\n".join(lines)
 
@@ -486,7 +514,10 @@ def drive_url(ask: str, source_url: str | None, call: Callable[[str, str], str])
         state = str(rec.get("state") or "")
         out["notes"] = [str(n) for n in rec.get("notes") or []]
         out["detail"] = str(rec.get("error") or "")[:160]
-        out["outcome"] = "live" if state == "ready" else state
+        out["outcome"] = flow_outcome(rec)
+        if state == "declined":  # the closed reason and the links ride the run, so a report can tell declines apart
+            from smartbrain_3000 import ni_master
+            out["decline"] = ni_master.decline_view(rec)
         snap = store.read_snapshot(item_id, "preview_data") if state == "ready" else None
         out["preview"] = snap["payload"] if snap else None
         if source_url:
@@ -580,7 +611,10 @@ def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) 
         state = str(rec.get("state") or "")
         out["notes"] = [str(n) for n in rec.get("notes") or []]
         out["detail"] = str(rec.get("error") or "")[:160]
-        out["outcome"] = {"ready": "live"}.get(state, state)
+        out["outcome"] = flow_outcome(rec)
+        if state == "declined":  # the closed reason and the links ride the run, so a report can tell declines apart
+            from smartbrain_3000 import ni_master
+            out["decline"] = ni_master.decline_view(rec)
         item = store.get_item(item_id)
         if state == "ready":
             snap = store.read_snapshot(item_id, "preview_data")

@@ -43,6 +43,16 @@ CardKind = Literal[
     "events", "image", "measure", "records", "series", "text"
 ]
 
+class DeclineLink(TypedDict):
+    title: str
+    url: str
+    host: str
+
+DeclineReason = Literal[
+    "ask_unsupported", "compare_unbuildable", "no_answering_source", "research_gave_up", "source_cant_answer",
+    "verify_refused"
+]
+
 Dir = Literal[
     "asc", "desc"
 ]
@@ -66,6 +76,12 @@ class FlowBrowser(TypedDict):
     phase: str
     pct: int
 
+class FlowDecline(TypedDict):
+    reason: DeclineReason
+    headline: str
+    line: str
+    links: list[DeclineLink]
+
 class FlowDocsKey(TypedDict):
     docs_url: str
 
@@ -86,8 +102,8 @@ class FlowQuestion(TypedDict):
     local: NotRequired[str]
 
 FlowState = Literal[
-    "assembling", "awaiting_access", "awaiting_credential", "awaiting_params", "failed", "intent", "mapping",
-    "ready", "sampling", "source", "unsupported"
+    "assembling", "awaiting_access", "awaiting_credential", "awaiting_params", "declined", "failed", "intent",
+    "mapping", "ready", "sampling", "source", "unsupported"
 ]
 
 class FlowTap(TypedDict):
@@ -233,6 +249,7 @@ class Flow(TypedDict):
     access: NotRequired[FlowAccess]
     tap: NotRequired[FlowTap]
     browser: NotRequired[FlowBrowser]
+    decline: NotRequired[FlowDecline]
 
 class BoardRow(TypedDict):
     id: str

@@ -32,6 +32,15 @@ export type Cadence = (typeof CADENCES)[number];
 export const CARD_KINDS = ["events", "image", "measure", "records", "series", "text"] as const;
 export type CardKind = (typeof CARD_KINDS)[number];
 
+export interface DeclineLink {
+  title: string;
+  url: string;
+  host: string;
+}
+
+export const DECLINE_REASONS = ["ask_unsupported", "compare_unbuildable", "no_answering_source", "research_gave_up", "source_cant_answer", "verify_refused"] as const;
+export type DeclineReason = (typeof DECLINE_REASONS)[number];
+
 export const DIRS = ["asc", "desc"] as const;
 export type Dir = (typeof DIRS)[number];
 
@@ -57,6 +66,14 @@ export interface FlowBrowser {
   pct: number;
 }
 
+/** A declined card (flow state `declined`): the closed reason code, the headline, one plain line and up to three links. Present only on a declined flow. */
+export interface FlowDecline {
+  reason: DeclineReason;
+  headline: string;
+  line: string;
+  links: DeclineLink[];
+}
+
 export interface FlowDocsKey {
   docs_url: string;
 }
@@ -78,7 +95,7 @@ export interface FlowQuestion {
   local?: string;
 }
 
-export const FLOW_STATES = ["assembling", "awaiting_access", "awaiting_credential", "awaiting_params", "failed", "intent", "mapping", "ready", "sampling", "source", "unsupported"] as const;
+export const FLOW_STATES = ["assembling", "awaiting_access", "awaiting_credential", "awaiting_params", "declined", "failed", "intent", "mapping", "ready", "sampling", "source", "unsupported"] as const;
 export type FlowState = (typeof FLOW_STATES)[number];
 
 export interface FlowTap {
@@ -232,6 +249,7 @@ export interface Flow {
   access?: FlowAccess;
   tap?: FlowTap;
   browser?: FlowBrowser;
+  decline?: FlowDecline;
 }
 
 /** One row of GET /api/ni/board. `actions` is present only under the v2 flow; `payload` is the bound scene. */

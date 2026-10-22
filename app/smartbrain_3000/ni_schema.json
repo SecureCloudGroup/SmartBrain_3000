@@ -328,6 +328,42 @@
         "text"
       ]
     },
+    "DeclineLink": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "url": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "host": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "url",
+        "host"
+      ]
+    },
+    "DeclineReason": {
+      "enum": [
+        "ask_unsupported",
+        "compare_unbuildable",
+        "no_answering_source",
+        "research_gave_up",
+        "source_cant_answer",
+        "verify_refused"
+      ]
+    },
     "Dir": {
       "enum": [
         "asc",
@@ -436,6 +472,9 @@
         },
         "browser": {
           "$ref": "#/$defs/FlowBrowser"
+        },
+        "decline": {
+          "$ref": "#/$defs/FlowDecline"
         }
       },
       "additionalProperties": false,
@@ -490,6 +529,37 @@
         "phase",
         "pct"
       ]
+    },
+    "FlowDecline": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/DeclineReason"
+        },
+        "headline": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeclineLink"
+          },
+          "maxItems": 3
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "headline",
+        "line",
+        "links"
+      ],
+      "description": "A declined card (flow state `declined`): the closed reason code, the headline, one plain line and up to three links. Present only on a declined flow."
     },
     "FlowDocsKey": {
       "type": "object",
@@ -613,6 +683,7 @@
         "awaiting_access",
         "awaiting_credential",
         "awaiting_params",
+        "declined",
         "failed",
         "intent",
         "mapping",

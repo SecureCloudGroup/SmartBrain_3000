@@ -210,9 +210,9 @@ def plan_for(store: ni.NIStore, item_id: str, record: dict, web: bool | None = N
 
 
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict | None:
-    """Research before the honest stop. The landed (held) card, or the consent question, as the flow record;
-    None when research is off, unavailable or declined (the caller then makes the honest stop, with the reasons
-    appended to its note)."""
+    """Research before the honest stop. The landed (held) card, the consent question, or (a run that ended without a
+    card) the declined card, as the flow record; None when research is off, unavailable, or the card was cancelled
+    (the caller then ends the ask itself)."""
     assert isinstance(intent, dict) and request, "intent and request required"
     assert store is not None and item_id, "args required"
     record = ni_flow._flow_read(store, item_id) or {}
@@ -244,7 +244,12 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
     if out.status == "proposed" and out.proposal is not None:
         return _land(store, item_id, request, ctx, out.proposal, out)
     ni_flow._append_note(store, item_id, one_line("researched, no card: " + "; ".join(out.reasons), 240))
-    return None
+    # the run ended without a card: that is the honest declined card (a closed code, up to three links the run saw),
+    # not a stop on links. A compare that no source built says so; one the verifier refused says that.
+    ending = out.ending or "research_declined_budget"
+    if question["entities"] and ending != "research_declined_checks":
+        ending = "compare_unbuildable"
+    return ni_flow._end(store, item_id, ending, "", links=out.links)
 
 
 def research_plan(store: ni.NIStore, item: dict) -> policy.Plan | None:

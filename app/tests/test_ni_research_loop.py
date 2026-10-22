@@ -431,7 +431,7 @@ def test_model_json_depth_is_checked_outside_strings() -> None:
 def test_a_decline_stops_honestly_with_the_reasons_and_builds_nothing(lib, monkeypatch) -> None:  # noqa: F811
     store, item_id, out, _ = _flow(monkeypatch, _wrap(lib), seam=Script(reply(call("library_search", query="q"))),
                                    cloud="anthropic/x", consented=True)
-    assert out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up"
     assert store.get_item(item_id)["spec"].get("_shell") is True
     assert any("researched, no card" in n for n in ni_flow._flow_read(store, item_id)["notes"])
 

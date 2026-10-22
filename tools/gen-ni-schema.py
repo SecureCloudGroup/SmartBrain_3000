@@ -98,9 +98,9 @@ def _flow_defs() -> dict[str, dict]:
     flow = obj({"state": ref("FlowState"), "error": STR, "actions": arr(ref("ActionKind")),
                 "progress": ref("FlowProgress"), "suggestions": arr(ref("Suggestion")), "reason": STR,
                 "question": ref("FlowQuestion"), "reopen": arr(ref("ReopenKind")), "access": ref("FlowAccess"),
-                "tap": ref("FlowTap"), "browser": ref("FlowBrowser")},
+                "tap": ref("FlowTap"), "browser": ref("FlowBrowser"), "decline": ref("FlowDecline")},
                opt=("error", "actions", "progress", "suggestions", "reason", "question", "reopen", "access",
-                    "tap", "browser"),
+                    "tap", "browser", "decline"),
                desc="The flow field of a board row: present while a card builds or after it ended abnormally.")
     return {
         "Suggestion": suggestion, "FlowProgress": progress, "FlowTry": obj({"n": INT, "of": INT, "host": STR}),
@@ -108,6 +108,11 @@ def _flow_defs() -> dict[str, dict]:
         "FlowAccess": obj({"host": STR, "provider": STR, "key": nullable(ref("FlowDocsKey")), "contact": BOOL}),
         "FlowDocsKey": obj({"docs_url": STR}),
         "FlowTap": obj({"render_notice": BOOL, "site_cap": INT}), "FlowBrowser": obj({"phase": STR, "pct": INT}),
+        "FlowDecline": obj({"reason": ref("DeclineReason"), "headline": STR, "line": text(200),
+                            "links": arr(ref("DeclineLink"), maxItems=ni_master.DECLINE_LINKS)},
+                           desc="A declined card (flow state `declined`): the closed reason code, the headline, one plain "
+                                "line and up to three links. Present only on a declined flow."),
+        "DeclineLink": obj({"title": text(120), "url": text(500), "host": text(120)}),
         "Flow": flow,
     }
 
@@ -203,7 +208,7 @@ def build_schema() -> dict:
         "ItemState": enum(ni._STATES), "DisplaySize": enum(ni._DISPLAY_SIZES), "FlowState": enum(ni_flow.FLOW_STATES),
         "QueryCoverage": enum(ni._QUERY_COVERAGE_VALUES),
         "ActionKind": enum(ni_master.ACTION_KINDS), "FlowQuestionKind": enum(ni_master.QUESTION_KINDS),
-        "ReopenKind": enum(ni_master.REOPEN_KINDS), "BriefSummaryState": enum(ni_brief.SUMMARY_STATES), "CardKind": enum(ni_form_types.KINDS),
+        "ReopenKind": enum(ni_master.REOPEN_KINDS), "DeclineReason": enum(ni_master.DECLINE_REASONS), "BriefSummaryState": enum(ni_brief.SUMMARY_STATES), "CardKind": enum(ni_form_types.KINDS),
         "QualityTier": enum(ni_recipe.QUALITY_TIERS), "RecipeQuestionKind": enum(ni_recipe.QUESTION_KINDS),
         "Cadence": enum(ni_recipe.CADENCES), "RecipeCheckName": enum(ni_recipe.CHECKS),
         "SourceKind": enum(ni_recipe.SOURCE_KINDS), "Verdict": enum(ni_recipe.VERDICTS), "Tool": enum(ni_recipe.TOOLS),

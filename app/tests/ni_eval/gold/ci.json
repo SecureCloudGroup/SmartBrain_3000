@@ -265,5 +265,46 @@
     }
    ]
   }
+ },
+ {
+  "id": "CI9",
+  "set": "CI",
+  "ask": "will the new park downtown be crowded this weekend",
+  "kind": "unanswerable",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": null,
+  "expected_outcome": "decline",
+  "forbidden_outcomes": [
+   "card"
+  ],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "research",
+   "research": "off",
+   "library_rows": [
+    {
+     "source_id": "sensor-docs",
+     "title": "Sensor vendor documentation",
+     "host": "docs.example.org",
+     "url": "https://docs.example.org/sensors",
+     "provider": "Example",
+     "authority": "official",
+     "format": "json",
+     "scope": "global",
+     "label": "",
+     "choice": false
+    }
+   ]
+  }
  }
 ]

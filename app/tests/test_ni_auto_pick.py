@@ -139,7 +139,7 @@ def test_exhausting_every_row_never_searches_the_web_and_stops_honestly(lib, mon
                         _fetcher(fetched, {_QUAKE_URL: {"x": 1}, WEATHER_URL: {"y": 2}}), search=search)
     assert fetched == [_QUAKE_URL, WEATHER_URL]  # only Library rows were fetched: no search result page
     assert search.queries == []  # v2 never searches the web before Keep
-    assert out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"  # the honest end
     assert store.get_item(item_id)["spec"].get("_shell") is True  # nothing was built
     assert not out.get("_auto_picked")
 
@@ -149,11 +149,13 @@ def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) 
     wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is a link
     search = _Search()
     item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), search=search)
-    assert fetched == [] and out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
+    assert fetched == [] and out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"
     assert store.get_item(item_id)["spec"].get("_shell") is True
     assert search.queries == [] and not out.get("_ranked_search")  # no web search, no web pages
-    field = ni_flow.board_flow_field(store, item_id)  # the stop draws no bar and offers no Cancel
+    field = ni_flow.board_flow_field(store, item_id)  # the decline draws no bar and offers no Cancel, but a way back
     assert "progress" not in field and "cancel" not in field["actions"] and "delete" in field["actions"]
+    assert field["state"] == "declined" and field["decline"]["headline"] == "I couldn't build a reliable card for this"
+    assert len(field["decline"]["links"]) <= 3 and field["reopen"] == ["retry", "pick_source"]
 
 
 def test_a_keyless_row_is_tried_before_a_row_that_needs_a_key(lib, monkeypatch) -> None:  # noqa: F811

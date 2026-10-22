@@ -10,6 +10,7 @@ import {
   hasAction,
   rowActions,
   isFlowActive,
+  declinedLinks,
   linkWhat,
   pickRows,
 } from "./flow";
@@ -78,6 +79,7 @@ describe("isFlowActive", () => {
   it("is false for terminal error states (fast-poll would spin forever)", () => {
     expect(isFlowActive({ state: "failed" })).toBe(false);
     expect(isFlowActive({ state: "unsupported" })).toBe(false);
+    expect(isFlowActive({ state: "declined" })).toBe(false); // a declined card never polls fast
   });
 
   it("is false for a null / undefined flow", () => {
@@ -268,5 +270,19 @@ describe("awaitingYesNotice", () => {
   it("is empty for page and dataset cards", () => {
     expect(awaitingYesNotice({ from: "page", host: "h", title: "t" })).toBe("");
     expect(awaitingYesNotice({ from: "dataset", host: "h", title: "t", used_key: true })).toBe("");
+  });
+});
+
+describe("declined flows", () => {
+  it("has no stage label (the DeclinedCard speaks) even with a stale progress label", () => {
+    expect(flowStageLabel({ state: "declined", progress: { step: 2, of: 4, label: "Finding a source" } })).toBe("");
+  });
+
+  it("declinedLinks keeps https only, one per address, at most three", () => {
+    const link = (n: number, scheme = "https") => ({ url: `${scheme}://h${n}.example/p`, title: `t${n}`, host: `h${n}.example` });
+    const got = declinedLinks({ links: [link(1), link(2, "http"), link(1), link(3), link(4), link(5)] });
+    expect(got.map((l) => l.url)).toEqual(["https://h1.example/p", "https://h3.example/p", "https://h4.example/p"]);
+    expect(declinedLinks(undefined)).toEqual([]);
+    expect(declinedLinks({})).toEqual([]);
   });
 });
