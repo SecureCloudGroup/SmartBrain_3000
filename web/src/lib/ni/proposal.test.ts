@@ -4,7 +4,7 @@
 // modal can hit off the happy path is exercised here.
 
 import { describe, expect, it } from "vitest";
-import { formatStageJson, stagesFromSpec } from "./proposal";
+import { formatStageJson, readResearchProposal, stagesFromSpec } from "./proposal";
 
 describe("stagesFromSpec", () => {
   it("returns both stages when the spec's pipeline has extract + transform", () => {
@@ -85,5 +85,42 @@ describe("formatStageJson", () => {
   it("pretty-prints an array (the transform apply-list)", () => {
     const out = formatStageJson([{ fn: "round" }]);
     expect(out).toContain("\"fn\": \"round\"");
+  });
+});
+
+describe("readResearchProposal", () => {
+  const research = (reason: unknown) => ({
+    _l2_proposal: {
+      origin: "research",
+      reason,
+      spec: { _built_from: { host: "example.org", title: "Example" }, recipe: { tier: "compiled" } },
+    },
+  });
+
+  it("reads host, title, tier and a plain reason", () => {
+    expect(readResearchProposal(research("constraint_drift"))).toEqual({
+      host: "example.org",
+      title: "Example",
+      tier: "compiled",
+      reasonText: "the source stopped answering your question",
+    });
+  });
+
+  it("uses the dead-source wording for source_dead and unknown reasons", () => {
+    expect(readResearchProposal(research("source_dead"))?.reasonText).toBe("the source stopped responding");
+    expect(readResearchProposal(research("weird"))?.reasonText).toBe("the source stopped responding");
+  });
+
+  it("returns null for stage-patch proposals and junk", () => {
+    expect(readResearchProposal({ _l2_proposal: { stages: { extract: {} } } })).toBeNull();
+    expect(readResearchProposal({ _l2_proposal: { origin: "research" } })).toBeNull();
+    expect(readResearchProposal({ _l2_proposal: [] })).toBeNull();
+    expect(readResearchProposal(null)).toBeNull();
+    expect(readResearchProposal({})).toBeNull();
+  });
+
+  it("tolerates malformed inner fields", () => {
+    const r = readResearchProposal({ _l2_proposal: { origin: "research", spec: { _built_from: 5, recipe: { tier: 3 } } } });
+    expect(r).toMatchObject({ host: null, title: null, tier: null });
   });
 });

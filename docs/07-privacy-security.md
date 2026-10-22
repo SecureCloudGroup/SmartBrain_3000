@@ -94,9 +94,19 @@ not. Being precise about the line matters more than claiming everything:
   card keeps following it. A card built from the web is always a preview, marked as coming
   from the web, and starts refreshing only after you Keep it. Allowing a model before web
   research existed, or while it was switched off, covers the Library only: if research
-  could then use the web, the card asks again with the web wording. To limit research to the Library, set `SMARTBRAIN_NI_RESEARCH_WEB=off` (or the
-  `ni_research_web` setting to `off`). With a local model, research runs on this computer,
-  reads the Library only, and sends nothing.
+  could then use the web, the card asks again with the web wording. To limit research to
+  the Library, set `SMARTBRAIN_NI_RESEARCH_WEB=off` (or the `ni_research_web` setting to
+  `off`). With a local model, research runs on this computer, reads the Library only, and
+  sends nothing. A card the researcher built can **research again later**, in the
+  background, when its source stops answering the question you asked or stops answering at
+  all (at most once a day per card, and at most 10 background runs a day across all your
+  cards; after a "no safe replacement" answer the card waits 1 day before asking again, then
+  2, then 4, never more than 7, and a dismissed proposal is not asked for again until the
+  card recovers). Set `SMARTBRAIN_NI_RERESEARCH_DAILY` (or the `ni_reresearch_daily`
+  setting) to change the daily total; `0` turns background research off. It reads the Library only, sends what the first research did
+  (no web search), to the same cloud model, and only for a card you already allowed that
+  model for; with research off, or no allowed model, it never runs. Its result is only
+  ever a proposal on the card that you can Apply or Dismiss, never a silent change.
 - **Claude Code models.** The `claudecode/*` models send the conversation to Anthropic
   under your own Claude sign-in, exactly like a cloud provider — configured beside the
   local servers, but not local in the privacy sense. SmartBrain drives the `claude`

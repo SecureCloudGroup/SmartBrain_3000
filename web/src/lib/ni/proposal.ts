@@ -57,3 +57,31 @@ export function formatStageJson(value: unknown): string {
     return "(unserializable)";
   }
 }
+
+/** A whole-card replacement proposal parked by the researcher (§23.1). Every field is
+ *  read defensively from untrusted JSON; absent/malformed pieces are null. */
+export interface ResearchProposal {
+  host: string | null;
+  title: string | null;
+  tier: string | null;
+  /** Plain-words reason; never echoes an unknown server string. */
+  reasonText: string;
+}
+
+/** Pull a research replacement proposal out of an item spec's `_l2_proposal`.
+ *  Returns null for stage-patch proposals (no `origin === "research"` + `spec`). */
+export function readResearchProposal(spec: Record<string, unknown> | null | undefined): ResearchProposal | null {
+  console.assert(spec === null || spec === undefined || typeof spec === "object", "readResearchProposal: spec is object|null|undefined");
+  console.assert(!Array.isArray(spec), "readResearchProposal: spec is not an array");
+  if (!isRecord(spec)) return null;
+  const proposal = spec._l2_proposal;
+  if (!isRecord(proposal) || proposal.origin !== "research" || !isRecord(proposal.spec)) return null;
+  const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const built = isRecord(proposal.spec._built_from) ? proposal.spec._built_from : {};
+  const recipe = isRecord(proposal.spec.recipe) ? proposal.spec.recipe : {};
+  const reasonText =
+    proposal.reason === "constraint_drift"
+      ? "the source stopped answering your question"
+      : "the source stopped responding";
+  return { host: str(built.host), title: str(built.title), tier: str(recipe.tier), reasonText };
+}

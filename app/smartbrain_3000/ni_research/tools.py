@@ -208,6 +208,14 @@ def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]
     return [*checks, {"check": "empty", "ok": not empty, "reason": "every output is empty" if empty else ""}]
 
 
+def checks_for(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]:
+    """The recipe checks for ``outputs`` (the verifier ``try_recipe`` and ``propose_card`` run), for the refresh
+    re-check (S9): the same classes on a fresh payload, so a constraint cannot pass at Keep by a different rule."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert isinstance(outputs, dict), "outputs must be a dict"
+    return _checks(ctx, outputs, url, info)
+
+
 def _run(ctx: ResearchCtx, draft: object) -> dict:
     """Validate ``draft`` as a researcher draft and run its pipeline on the stored sample (no network)."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
@@ -315,9 +323,13 @@ def propose_card(ctx: ResearchCtx, draft_spec: object) -> dict:
         return _done(ctx, "propose_card", "draft", error("provenance", why))
     url = spec["source"]["url"]
     ctx.note("propose_card", "draft", "ok")
+    scope = (ctx.urls.get(key) or {}).get("scope")
+    source = {"kind": {"library": "library", "search": "search"}.get(origin or "", "endpoint"),
+              "ref": url[:300], "host": (key.split("/")[2])[:253], "why": _ORIGIN_WHY[origin]}
+    if isinstance(scope, str) and scope.strip():
+        source["scope"] = scope.strip()[:20]  # what the place check had; the refresh re-check reads it back
     recipe = {"question": ctx.question,
-              "sources": [{"kind": {"library": "library", "search": "search"}.get(origin or "", "endpoint"),
-                           "ref": url[:300], "host": (key.split("/")[2])[:253], "why": _ORIGIN_WHY[origin]}],
+              "sources": [source],
               "constraints": _constraints(ctx.question), "tier": _tier(origin, got["format"]),
               "verification": {"verdict": "pass", "checks": got["checks"], "verified_at": ctx.now.isoformat()[:40],
                                "fetches": min(ctx.fetches, 8)},

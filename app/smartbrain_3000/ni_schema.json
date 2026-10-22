@@ -1012,6 +1012,11 @@
           "type": "string",
           "minLength": 0,
           "maxLength": 200
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 20
         }
       },
       "additionalProperties": false,

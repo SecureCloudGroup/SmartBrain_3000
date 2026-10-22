@@ -47,7 +47,8 @@ _PLUS_RE = re.compile(r"(?<![\w.])m?(?P<n>\d+(?:\.\d+)?)\s*\+")
 
 _VS_RE = re.compile(r"\s(?:vs\.?|versus|v\.|against|compared (?:to|with))\s")
 _COMPARE_RE = re.compile(r"\b(?:compare|comparison of|difference between|differences between)\s+(.+)")
-_LIST_SPLIT_RE = re.compile(r",\s*(?:and\s+)?|\s+and\s+|\s*&\s*|\s+(?:with|to)\s+")
+# every whitespace-led branch starts only at the head of a whitespace run, so a long run is scanned once (linear)
+_LIST_SPLIT_RE = re.compile(r",\s*(?:and\s+)?|(?<!\s)\s+and\s+|(?<!\s)\s*&\s*|(?<!\s)\s+(?:with|to)\s+")
 _ENTITY_FILL = frozenset({
     "weather", "forecast", "price", "prices", "temperature", "temperatures", "temp", "temps", "stats", "stat",
     "score", "scores", "comparison", "compare", "the", "a", "an", "how", "is", "are", "what", "whats", "current",

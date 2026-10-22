@@ -53,7 +53,7 @@
     templateCategories,
     validateParamForm,
   } from "$lib/ni/library";
-  import { formatStageJson, stagesFromSpec } from "$lib/ni/proposal";
+  import { formatStageJson, readResearchProposal, stagesFromSpec } from "$lib/ni/proposal";
   import { bodyShowsPanel, cardSpan, cardState, footerText, formBoxChrome, interpretationOf } from "$lib/ni/shell";
   import { createBoard } from "$lib/ni/board.svelte";
   import { isStale, relTime } from "$lib/ni/time";
@@ -124,6 +124,8 @@
     proposalDetail ? stagesFromSpec(proposalDetail.spec) : { extract: null, transform: null },
   );
   const proposalProposedStages = $derived(readProposedStages(proposalDetail));
+  // A research replacement proposal (§23.1) swaps the whole card; null for stage patches.
+  const proposalResearch = $derived(proposalDetail ? readResearchProposal(proposalDetail.spec) : null);
 
   // Per-card repair-policy modal (§23). The overflow row on every card opens this —
   // it lazily fetches niItem(id) so the checkboxes reflect the CURRENT spec's
@@ -1956,17 +1958,35 @@
       onclose={() => { if (!proposalBusy) closeProposal(); }}
     >
       <h2 class="modal-title">A proposed fix from Claude</h2>
+      {#if proposalResearch}
+        <p class="modal-body">
+          Claude found a replacement source because {proposalResearch.reasonText}. Nothing
+          has been applied.
+        </p>
+        <ul class="modal-body">
+          {#if proposalResearch.title}<li>New source: {proposalResearch.title}</li>{/if}
+          {#if proposalResearch.host}<li>Site: {proposalResearch.host}</li>{/if}
+          {#if proposalResearch.tier}<li>Tier: {proposalResearch.tier}</li>{/if}
+        </ul>
+        <p class="modal-body">
+          Apply switches this card to the new source, as a trial. The old source’s contract
+          is not carried over, because it described the old data. The trial is kept if the
+          next refresh runs cleanly on the new source and is reverted automatically if it
+          fails; the new contract is captured after that.
+        </p>
+      {:else}
       <p class="modal-body">
         Your card kept failing, so (with your per-card permission) Claude proposed new
         data mappings. Nothing has been applied. Applying runs it as a trial — kept only
         if the next refresh passes this card’s validated contract, automatically reverted
         otherwise.
       </p>
+      {/if}
       {#if proposalLoading}
         <Spinner block />
       {:else if !proposalDetail}
         <p class="error">Couldn’t load this proposal.</p>
-      {:else}
+      {:else if !proposalResearch}
         <div class="prop-diff">
           <div class="prop-col">
             <p class="prop-col-label">Current mapping</p>

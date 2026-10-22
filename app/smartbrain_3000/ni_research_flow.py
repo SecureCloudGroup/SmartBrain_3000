@@ -6,19 +6,23 @@ proposal, lands the card exactly like an auto-pick: ``_built_from.path`` is the 
 apart from ``auto`` so the board and the eval can tell a researched recipe from a declared-answers build; both
 are open paths, so a preview shows and nothing recurs until Keep, whatever the source). The interval is stamped
 by code from ``recipe.question.cadence``. Fetches are Library rows only, unless the plan carries the open web
-(cloud tier, kill switch not off): then also exact search results and plain addresses on a found site (S5b,
+(cloud tier, kill switch not off, consent given under the web wording): then also exact search results (S5b,
 ``ResearchCtx.origin``). No keys, no redirects either way; the local closed-world tier never has the web.
+
+``reresearch`` (S9) runs the same loop again for a kept card whose source drifted or died, Library only, and PARKS
+the result as a proposal on the card (``_l2_proposal`` with a whole replacement ``spec``); it is never applied by code.
 """
 from __future__ import annotations
 
 import copy
 import json
 import logging
+import time
 from collections.abc import Callable
-from datetime import UTC
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from . import gateway, ni, ni_flow, ni_recipe
+from . import gateway, ni, ni_flow, ni_recipe, ni_refresh
 from .ni_research import loop, policy
 from .ni_research.ctx import ResearchCtx, normal_url, one_line
 
@@ -185,8 +189,9 @@ def _audit(item_id: str, plan: policy.Plan) -> bool:
         return False
 
 
-def plan_for(store: ni.NIStore, item_id: str, record: dict) -> policy.Plan:
-    """The research tier for this card: the setting, the routes, and the consent the card itself holds."""
+def plan_for(store: ni.NIStore, item_id: str, record: dict, web: bool | None = None) -> policy.Plan:
+    """The research tier for this card: the setting, the routes, and the consent the card itself holds. ``web``
+    False plans a Library-only run whatever the switch says (a Library consent then suffices); None reads the switch."""
     assert isinstance(record, dict), "a record"
     assert store is not None and item_id, "args required"
     cloud = _SEAM["cloud"] if _CHAT is not None else policy.cloud_route(store.conn)
@@ -195,7 +200,7 @@ def plan_for(store: ni.NIStore, item_id: str, record: dict) -> policy.Plan:
     consent = cloud if seam else ni_flow._model_consent_of(store, item_id, record)
     consent_web = seam or ni_flow._model_consent_web_of(store, item_id, record)
     return policy.choose(policy.setting(store.conn), cloud, local, consent, bool(record.get("_use_local")),
-                         web=policy.web_enabled(store.conn), consent_web=consent_web)
+                         web=policy.web_enabled(store.conn) if web is None else bool(web), consent_web=consent_web)
 
 
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict | None:
@@ -232,3 +237,94 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
         return _land(store, item_id, request, ctx, out.proposal, out)
     ni_flow._append_note(store, item_id, one_line("researched, no card: " + "; ".join(out.reasons), 240))
     return None
+
+
+def research_plan(store: ni.NIStore, item: dict) -> policy.Plan | None:
+    """The plan a re-research of this card would run on, or None. Only the cloud tier with the consent this
+    card already holds (``_model_consent``) re-researches: off, ask, local and a missing Library all read None,
+    and the card simply stays failing with its own status."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    assert item.get("id"), "an item id"
+    if not ni_flow._is_v2(store) or ni_flow._resolve_library() is None:
+        return None
+    plan = plan_for(store, item["id"], {}, web=False)  # re-research reads the Library only: any consent covers it
+    return plan if plan.mode == "cloud" else None
+
+
+def _sources_of(spec: dict) -> set:
+    """Every address this card read or recorded, raw and normalised: a replacement must be a different source."""
+    assert isinstance(spec, dict), "spec required"
+    assert normal_url("https://a.example/x#y") == "https://a.example/x", "the normaliser drops fragments"
+    urls = [str((spec.get("source") or {}).get("url") or "")]
+    urls += [str(s.get("ref") or "") for s in (spec.get("recipe") or {}).get("sources") or []]
+    return {u for url in urls if url for u in (url, normal_url(url))}
+
+
+def _park(store: ni.NIStore, item: dict, ctx: ResearchCtx, proposal: dict, reason: str, plan: policy.Plan) -> bool:
+    """Seal the researcher's card as the parked proposal on ``item`` (the card's own consent, birth marker and
+    repair policy ride along). False when it cannot be parked: invalid, the same source, or the card moved."""
+    assert reason in ni.RESEARCH_REASONS, "a closed reason"
+    assert isinstance(proposal, dict), "a proposal"
+    spec = item["spec"]
+    new = _stamp(proposal["spec"], str(spec.get("goal") or ""))
+    url = str(new["source"]["url"])
+    if normal_url(url) in _sources_of(spec):
+        return False
+    new["repair_policy"] = spec.get("repair_policy") or new["repair_policy"]
+    for key in ("_model_consent", "_model_consent_web", "_born"):  # bounded: what the card keeps across a new source
+        if spec.get(key) is not None:
+            new[key] = spec[key]
+    new["_built_from"] = ni_flow._built_from_of(store, item["id"], "research", url,
+                                                (ctx.urls.get(normal_url(url)) or {}).get("title") or "")
+    parked = {"spec": new, "origin": "research", "reason": reason, "created_at": datetime.now(UTC).isoformat(),
+              "model": plan.model or "research"}
+    try:
+        ni._validate_l2_proposal(parked)
+    except ValueError:
+        return False
+    return store.set_l2_proposal(item["id"], parked, expected_rev=int(item["spec_rev"]),
+                                 expected_first_failure_at=item.get("first_failure_at"),
+                                 states=("degraded", "failing"))
+
+
+def reresearch(store: ni.NIStore, item: dict, reason: str) -> dict | None:
+    """Re-run the researcher for this kept card's recorded question and park what it proposes. The carrier
+    notice on a parked proposal; None when research is off or unconsented (nothing recorded, nothing sent) or
+    when it declined or could not park (recorded as an attempt, journaled, the card stays failing). The source
+    the card has now is never offered back."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    assert reason in ni.RESEARCH_REASONS, "a closed reason"
+    plan = research_plan(store, item)
+    spec, request = item["spec"], str(item["spec"].get("goal") or "")
+    if plan is None or not request or not isinstance(spec.get("recipe"), dict):
+        return None
+    question = copy.deepcopy(spec["recipe"]["question"])
+    place = question["places"][0] if question.get("places") else ""
+    started = time.monotonic()
+    now = datetime.now(UTC)
+    if not ni_refresh.take_budget(store.conn, now):  # the process-wide daily ceiling: nothing is sent past it
+        return None
+    first = item.get("first_failure_at")
+    # the durable bound (M1): stamped on the sealed spec BEFORE the model call, so a crash still counts and the
+    # pruned ni_runs ring is not what holds it
+    store.set_research_attempt(item["id"], ni_refresh.next_marker(spec.get("_research_last_attempt"), first, now, "started"))
+    store.record_run(item["id"], ni_refresh.RUN_STARTED, duration_ms=0, error=reason, contract_ok=None)
+    hint = {"subject": question.get("subject"), "wants": [], "place": place or None, "frame_kind": question.get("kind")}
+    ctx = ResearchCtx(request=request, question=question, now=ni._clock().astimezone(UTC),
+                      zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=frozenset({"library"}),
+                      library=_Library(ni_flow._resolve_library(), ni_flow._library_hint(hint), _sources_of(spec)))
+    _audit(item["id"], plan)
+    accept = lambda proposal: _can_land(ctx, item["id"], request, proposal)
+    out = loop.run_research(ctx, _chat_for(store, plan.model or "", False), place=place, accept=accept)
+    parked = out.status == "proposed" and out.proposal is not None and _park(store, item, ctx, out.proposal, reason, plan)
+    note = ("re-researched: a replacement source is parked for your approval" if parked
+            else one_line("re-researched, no safe replacement: " + "; ".join(out.reasons or ["could not be parked"]), 240))
+    ni_flow._try_journal(store, item["id"], "updated", note)
+    fresh = store.get_item(item["id"])
+    store.set_research_attempt(item["id"], ni_refresh.next_marker(
+        ((fresh or item)["spec"]).get("_research_last_attempt"), first, datetime.now(UTC),
+        "proposed" if parked else "declined"))
+    store.record_run(item["id"], ni_refresh.RUN_PROPOSED if parked else ni_refresh.RUN_DECLINED,
+                     duration_ms=int((time.monotonic() - started) * 1000), error=None if parked else "declined",
+                     contract_ok=None)
+    return {"item_id": item["id"], "title": str(spec.get("title") or "")} if parked else None

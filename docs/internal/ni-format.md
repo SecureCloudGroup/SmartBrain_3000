@@ -1073,6 +1073,44 @@ under the strictest consent in the system:
 - Every attempt/outcome is an `ni_runs` row (`repair_l2_proposed` /
   `repair_l2_failed`); Apply/Dismiss are audited.
 
+### 23.1 Re-research proposals (S9)
+
+A card with a sealed `recipe` (the researcher's, plan 6.1) adds two things to the ladder.
+
+- **`constraint_drift`.** After a successful fetch and pipeline, `_finalize_run` re-runs, on
+  the fresh outputs, the verifier checks that passed at Keep (`ni_refresh.drift_reasons`:
+  place, window, threshold, compare, empty; the recipe's own `verification` is the record of
+  what passed). A failing one fails the run with status `constraint_drift` (`ni.CONSTRAINT_DRIFT`):
+  failure streak, backoff and `last_good` as for any failure; no L1 (not a spec-shape class), no
+  stage-patch L2. A spec with no `recipe` skips the check entirely.
+- **Parked re-research.** `_collect_l2_candidate` also marks a card when `ni_refresh` says its
+  failure may ask for a new source and `ni_research_flow.research_plan` is `cloud` (the v2 flow,
+  research not off, the card's own `_model_consent` equal to the cloud route). The same
+  single-flight L2 worker then runs `ni_research_flow.reresearch`: the researcher on
+  `recipe.question` with the Library only and the card's current source withheld. A proposal is
+  sealed as `_l2_proposal = {spec, origin: "research", reason: constraint_drift|source_dead,
+  created_at, model}` (a whole replacement card carrying the old `_model_consent`, `_born` and
+  `repair_policy`) in place of `stages`. It is never applied by code. Apply swaps the card
+  through `apply_repair(replace_spec=True)`: the old `contract` and `_c2_ok` are not carried
+  (the next clean run captures a new contract); the §14 trial and auto-revert apply.
+- **Triggers** (`ni_refresh.TRIGGER`, by `recipe.tier`): `curated` asks only once the card is
+  `failing` (the backoff has walked; no local repair applies to these statuses);
+  `verified_endpoint` and `page_reading` ask on the first `constraint_drift`
+  (`degraded` or `failing`) and, for a dead source (`fetch_failed`), once `failing`.
+- **Bounds.** The durable record is the rev-preserving sealed marker `_research_last_attempt =
+  {at, streak, outcome: started|proposed|declined, declines}` (modelled on `_l2_last_attempt`:
+  written by `reresearch` before the model call, carried through `_revert_l1_trial_if_active`,
+  `apply_repair` and `update_spec`, stripped on export and install, refused in template packs).
+  `ni_refresh.may_research` reads it, never the pruned `ni_runs` ring (`repair_research_*` rows
+  stay as telemetry). No second attempt within 24 hours of a start; no further attempt in a
+  streak (`streak` = `first_failure_at`) that already parked a proposal (a Dismiss is final until
+  the streak resets); after each decline in a streak the wait is 1, 2, 4 days, capped at 7.
+  Process-wide, `take_budget` spends one of `SMARTBRAIN_NI_RERESEARCH_DAILY` / meta
+  `ni_reresearch_daily` (default 10, `0` = off) per UTC day from the meta counter
+  `ni_reresearch_count` (`day:n`); `_research_eligible` reads it before the card is marked.
+  Research off, ask or local never sends anything. `recipe.sources[].scope` (optional) records the
+  Library scope the place check had at Keep; the refresh re-check passes it back.
+
 ## 24. `http_image` source + `image` scene node (v4c — the pixel channel)
 
 Cards can watch an IMAGE the user consented to: a weather-radar frame, a webcam

@@ -33,6 +33,9 @@ export function runStatusLabel(status: string): string {
   if (status === "repaired") return "Repaired itself";
   if (status === "stale") return "Superseded";
   if (status === "proposal") return "Fix proposed";
+  if (status === "repair_research_started") return "Looking for a replacement source";
+  if (status === "repair_research_proposed") return "Found a replacement source for your approval";
+  if (status === "repair_research_declined") return "No safe replacement found";
   return status;
 }
 

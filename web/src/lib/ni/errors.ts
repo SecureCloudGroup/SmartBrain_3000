@@ -10,6 +10,9 @@ const FRIENDLY: Record<string, string> = {
   llm_requires_local: "needs a local model",
   model_consent_required: "needs your OK to use a model off this computer; rebuild the card to choose",
   mcp_unavailable: "your MCP server didn't answer",
+  // S9 (ni-format §23.1): a kept research-built card re-checked its constraints and the source
+  // no longer answers the question. The card keeps showing its last good reading.
+  constraint_drift: "this source stopped answering your question; the last good reading is still shown",
   secret_missing: "credential problem",
   secret_host_mismatch: "credential problem",
   // Round 20 (B3a, ni-format §35): the page browser's failure classes (ni._RENDER_FAILURES).

@@ -3,7 +3,8 @@
 ``recipe`` = ``{question, sources, constraints, tier}`` plus optional ``verification``, ``provenance`` and
 ``research`` (a size-capped trace of the research loop). Every key is closed and every size is bounded.
 The block is system-owned: stripped on export and refused in template packs (``ni_library`` / ``ni_routes``),
-so a template can neither claim a quality tier nor carry a research trace. Nothing writes it yet (S4c).
+so a template can neither claim a quality tier nor carry a research trace. The researcher writes it (S4c); each refresh re-checks it and a
+drifted or dead source may re-research it (S9, ``ni_refresh``).
 
 The researcher-draft rules (plan 6.4) live here too: a draft marked researcher-authored may not carry an
 ``llm`` stage, a ``$secret``, a model or MCP source, or a model-chosen interval.
@@ -131,12 +132,15 @@ def _validate_sources(v: object) -> None:
     if not isinstance(v, list) or not v or len(v) > MAX_SOURCES:
         raise ValueError(f"recipe.sources must hold 1..{MAX_SOURCES} entries")
     for s in v:  # bounded by MAX_SOURCES
-        _closed(s, frozenset({"kind", "ref", "host", "why"}), "recipe.sources[]")
+        _closed(s, frozenset({"kind", "ref", "host", "why", "scope"}), "recipe.sources[]",
+                required=frozenset({"kind", "ref", "host", "why"}))
         if s["kind"] not in SOURCE_KINDS:
             raise ValueError(f"recipe.sources[].kind must be one of {sorted(SOURCE_KINDS)}")
         _text(s["ref"], "recipe.sources[].ref", 300)
         _text(s["host"], "recipe.sources[].host", 253)
         _text(s["why"], "recipe.sources[].why", 200)
+        if "scope" in s:  # S9: the Library scope the place check had at Keep (optional: older cards have none)
+            _text(s["scope"], "recipe.sources[].scope", 20)
 
 
 def _validate_constraints(v: object) -> None:
