@@ -510,7 +510,7 @@ def test_applied_reresearch_carries_the_summary_to_a_brief(client) -> None:
     store, iid = _proposal_card(client, replacement_is_brief=True)
     assert client.post(f"/api/ni/items/{iid}/l2-proposal/apply").status_code == 200
     spec = store.get_item(iid)["spec"]
-    assert spec["source"]["url"].startswith("https://other.example.org")
+    assert spec["source"]["url"] == "https://other.example.org/headlines"
     assert spec["brief"] == {"summary": True} and ni_brief.summary_on(spec)
     assert sum(1 for s in spec["pipeline"] if s.get("op") == "llm") == 1
     assert spec["model"] == ni_brief.LOCAL_MODEL
