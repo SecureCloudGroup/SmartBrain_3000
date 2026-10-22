@@ -262,7 +262,7 @@ def test_blind50_baseline_results_rescore_to_the_human_review() -> None:
 def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
     gold = ne.load_gold(_EVAL / "gold" / "ci.json")
     runs = ne.replay_all(gold, _EVAL / "cassettes" / "ci")
-    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6", "CI7", "CI8", "CI9"], runs
+    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6", "CI7", "CI8", "CI9", "CI10"], runs
     assert all(r["cassette_drift"] == 0 for r in runs), "scripted cassette has no prompt hashes"
     scored, table = ne.score_all(gold, runs)
     got = {s["id"]: s["cls"] for s in scored}
@@ -271,8 +271,8 @@ def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
     # state, a terminal that holds a question is "waiting", and a decline the gold expects would score right.
     assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "waiting", "CI5": "links",
                    "CI6": "right", "CI7": "right", "CI8": "right",
-                   "CI9": "right"}, got  # CI9 (new): the gold expects a decline and the flow ends on the declined card
-    assert (table["ALL"]["n"], table["ALL"]["right"], table["ALL"]["decl_ok"]) == (9, 5, 1), table["ALL"]
+                   "CI9": "right", "CI10": "right"}, got  # CI9 (new): the gold expects a decline and the flow ends on the declined card
+    assert (table["ALL"]["n"], table["ALL"]["right"], table["ALL"]["decl_ok"]) == (10, 6, 1), table["ALL"]
 
 
 def test_replay_is_deterministic() -> None:
@@ -280,7 +280,7 @@ def test_replay_is_deterministic() -> None:
     first = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     second = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     assert first == second, "two replays must score identically"
-    assert len(first) == 9, first
+    assert len(first) == 10, first
 
 
 def test_missing_cassette_entry_surfaces_as_an_error_not_a_pass(tmp_path) -> None:

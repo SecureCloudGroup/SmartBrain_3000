@@ -91,8 +91,15 @@ not. Being precise about the line matters more than claiming everything:
   Library returned, exactly as returned; the model never writes an address of its own, so
   neither a page nor the model can send it somewhere else or carry your data in a link.
   Sites found on the web are read only where their robots.txt allows it, and a kept web
-  card keeps following it. A card built from the web is always a preview, marked as coming
-  from the web, and starts refreshing only after you Keep it. Allowing a model before web
+  card keeps following it. A web page is read for its **data tables only**: research reads
+  the cells of a table (the digest it gets holds the table's columns and a few capped sample
+  rows), never the prose around it, and a page without a table is not a source. A card built
+  from a page's table is marked as a page reading, is checked against the page, and keeps
+  finding its table by its column names, wherever it moves on the page. If the table changes
+  or goes away the card says so and keeps its last good value: it never reads a different
+  table, and it never follows a redirect off the address you kept. A card built from the web
+  is always a preview, marked as coming from the web, and starts refreshing only after you
+  Keep it. Allowing a model before web
   research existed, or while it was switched off, covers the Library only: if research
   could then use the web, the card asks again with the web wording. To limit research to
   the Library, set `SMARTBRAIN_NI_RESEARCH_WEB=off` (or the `ni_research_web` setting to

@@ -626,7 +626,7 @@ def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) 
                 out["outcome"] = "awaiting-yes"
                 tier = (item["spec"].get("recipe") or {}).get("tier") or ""
                 out["tier"] = tier  # curated = a Library row; verified_endpoint / page_reading = found on the web
-                out["from"] = {"kind": "dataset" if tier not in ("", "curated") else "library",
+                out["from"] = {"kind": "page" if tier == "page_reading" else "dataset" if tier not in ("", "curated") else "library",
                                "host": built.get("host") or "", "title": built.get("title") or ""}
     except Exception as exc:
         out["outcome"], out["detail"] = "crash", f"{type(exc).__name__}: {str(exc)[:160]}"

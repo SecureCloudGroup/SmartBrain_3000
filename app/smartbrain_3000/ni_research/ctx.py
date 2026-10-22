@@ -82,6 +82,7 @@ class ResearchCtx:
     now: datetime = field(default_factory=lambda: datetime.now(UTC))
     zone: tzinfo = UTC
     preview_url: str | None = None
+    window: str | None = None   # the ask's forward window token (``now``, ``today``...), for the page-reading gate
     max_turns: int = ni_recipe.MAX_TURNS
     max_fetches: int = MAX_FETCHES
     max_searches: int = MAX_SEARCHES

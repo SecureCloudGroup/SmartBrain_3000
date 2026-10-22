@@ -306,5 +306,46 @@
     }
    ]
   }
+ },
+ {
+  "id": "CI10",
+  "set": "CI",
+  "ask": "latest river gauge levels",
+  "kind": "status",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": null,
+   "units": null,
+   "entities": []
+  },
+  "acceptable_sources": [
+   "water.example.org"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "research",
+   "research": "cloud",
+   "library_rows": [
+    {
+     "source_id": "wx-1",
+     "title": "Daily weather",
+     "host": "data.example.org",
+     "url": "https://data.example.org/weather.json",
+     "provider": "Example",
+     "authority": "official",
+     "format": "json",
+     "scope": "global",
+     "label": "",
+     "choice": false
+    }
+   ]
+  }
  }
 ]

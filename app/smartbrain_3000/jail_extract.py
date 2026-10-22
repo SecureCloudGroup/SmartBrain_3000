@@ -305,6 +305,8 @@ class _GraphParser(HTMLParser):
         self._heading: str | None = None
         self._head_buf: list[str] = []
         self._table: dict | None = None
+        self._caption: list[str] | None = None   # an open <caption> of the open table
+        self._last_heading = ""                  # the latest h1-h3 text: the context a table sits under
         self._row: list[str] | None = None
         self._cell: list[str] | None = None
         self._cell_is_header = False
@@ -428,6 +430,10 @@ class _GraphParser(HTMLParser):
             self._heading, self._head_buf = tag, []
         elif tag == "table" and self._table is None and len(self.tables) < _MAX_TABLES:
             self._table = {"caption": "", "headers": [], "rows": []}
+            if self._last_heading:
+                self._table["heading"] = self._last_heading
+        elif self._table is not None and tag == "caption" and not self._hidden:
+            self._caption = []
         elif self._table is not None and tag == "tr":
             self._row, self._header_row = [], False
         elif self._table is not None and self._row is not None and tag in ("td", "th"):
@@ -450,8 +456,10 @@ class _GraphParser(HTMLParser):
             self._jsonld_buf.append(data)
         if self._heading is not None:
             self._head_buf.append(data)
-        if self._cell is not None:
+        if self._cell is not None and not self._hidden:  # hidden text is never a cell's value
             self._cell.append(data)
+        if self._caption is not None and not self._hidden:
+            self._caption.append(data)
         self._evidence_data(data)
 
     def handle_endtag(self, tag: str) -> None:
@@ -488,7 +496,12 @@ class _GraphParser(HTMLParser):
             text = " ".join("".join(self._head_buf).split())
             if text:
                 self.outline.append(f"{tag}: {text[:120]}")
+                self._last_heading = text[:120]
             self._heading = None
+        elif tag == "caption" and self._caption is not None:
+            if self._table is not None:
+                self._table["caption"] = " ".join("".join(self._caption).split())[:120]
+            self._caption = None
         elif self._table is not None and tag in ("td", "th") and self._cell is not None:
             text = " ".join("".join(self._cell).split())[:_MAX_CELL_CHARS]
             if self._row is not None:

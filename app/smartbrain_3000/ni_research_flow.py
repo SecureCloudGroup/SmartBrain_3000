@@ -104,6 +104,14 @@ class _Library:
         return getattr(self._lib, name)
 
 
+def _window_of(request: str, intent: dict) -> str | None:
+    """The forward window the ask states (``now``, ``today``...), for the page-reading gate: a right-now ask needs a
+    page that shows it is fresh. Read by the same recognizers the page door uses; None when the ask names none."""
+    assert isinstance(request, str) and isinstance(intent, dict), "args required"
+    names = [n for n in intent.get("names") or [] if isinstance(n, str)]
+    return ni_flow._ask_window(request, intent.get("frame_kind"), names)
+
+
 def _stamp(spec: dict, request: str) -> dict:
     """The researcher's spec with the code-owned fields: the goal is the user's words and the interval comes
     from the question's cadence (never the model's)."""
@@ -126,7 +134,7 @@ def _preview_of(ctx: ResearchCtx, spec: dict) -> dict:
         return ni.run_pipeline(copy.deepcopy(spec["pipeline"]), ni_compare.payload_of(things, values))
     sample = ctx.samples.get(normal_url(str(spec["source"]["url"])))
     assert sample is not None, "propose_card ran on a stored sample"
-    return ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(tools.sample_payload(sample["parsed"])))
+    return ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(tools.spec_input(sample, spec["source"])))
 
 
 def _can_land(ctx: ResearchCtx, item_id: str, request: str, proposal: dict) -> str | None:
@@ -230,7 +238,7 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
     question = question_from_intent(request, intent)
     # a compare is searched one thing at a time: the intent's one place must not steer every search
     hint = {**ni_flow._library_hint(intent), **({"place": None} if question["entities"] else {})}
-    ctx = ResearchCtx(request=request, question=question, now=now,
+    ctx = ResearchCtx(request=request, question=question, now=now, window=_window_of(request, intent),
                       zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=ORIGINS_WEB if web else ORIGINS_LIBRARY,
                       searcher=_searcher() if web else None, library=_Library(lib, hint, set(record.get("_declined") or [])))
     ni_flow._transition(store, item_id, record.get("state") or "source", error=record.get("error"),

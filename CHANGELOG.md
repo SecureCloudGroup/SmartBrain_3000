@@ -13,6 +13,19 @@ to know when a release changes behavior.
 
 ### Added
 
+- **Research reads data tables on ordinary web pages.** When no data file answers an ask, the researcher can now
+  read a web page's `<table>`, by its column names, and build a card from its rows; before, every page it found
+  came back as "not data" and the searches were wasted. It reads table cells only, never the prose around them,
+  and a page with no table is still not a source. Such a card is marked as a page reading (quality tier
+  `page_reading`, shown as coming from a page), is checked against the page by the same verifier a page card gets
+  plus the usual checks, and is held for your Keep like every card built from the web. It finds its table again by
+  its column names wherever the table moves, and when the table changes or goes away the card keeps its last good
+  value and says so; it never reads a different table and never follows a redirect off the address you kept. Sites
+  are still read only where robots.txt allows, and only at addresses a search or the Library returned. The researcher's
+  prompt and `fetch_sample` description changed to say so (the cached prompt prefix is re-pinned). A hidden cell's text
+  is no longer read as part of a page's table, and the page graph's tables now carry their caption and the heading
+  they sit under. New source format `table` for `http_json` sources (researched cards only), module `ni_table`, eval
+  cassette `CI10`. Details: `docs/internal/ni-format.md` §40 and `docs/07-privacy-security.md`.
 - **An honest "declined" card.** When SmartBrain cannot answer an ask reliably it now says so: "I couldn't
   build a reliable card for this", with one plain line on why and up to three links to pages that may help,
   instead of stopping on a list of links or a half-built card. It declines when research ran and found
