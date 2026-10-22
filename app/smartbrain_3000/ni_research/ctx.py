@@ -87,6 +87,7 @@ class ResearchCtx:
     max_seconds: float = MAX_SECONDS
     token_cap: int = TOKEN_CAP
     clock: Callable[[], float] = time.monotonic
+    allowed_origins: frozenset = frozenset({"library", "search", "preview", "same_domain"})  # S4c: library only
     resolver: Callable[[str, str], dict] | None = None
     turns: int = 0
     fetches: int = 0
@@ -172,13 +173,24 @@ class ResearchCtx:
         if bad:
             return None, bad
         key = normal_url(url)
+        found = self._origin_of(key)
+        if found is None:
+            return None, "not a Library row, a search result, the previewed endpoint or a site already found"
+        if found not in self.allowed_origins:
+            return None, "this run reads SmartBrain Library sources only"
+        return found, ""
+
+    def _origin_of(self, key: str) -> str | None:
+        """How the normalised ``key`` was found, ignoring which origins this run allows."""
+        assert isinstance(key, str), "key must be text"
+        assert isinstance(self.urls, dict), "a url table"
         if key in self.urls:
-            return self.urls[key]["kind"], ""
+            return self.urls[key]["kind"]
         if self.preview_url and key == normal_url(self.preview_url):
-            return "preview", ""
+            return "preview"
         if registrable_domain(urlsplit(key).hostname or "") in self.domains:
-            return "same_domain", ""
-        return None, "not a Library row, a search result, the previewed endpoint or a site already found"
+            return "same_domain"
+        return None
 
     def budget_used(self) -> dict:
         """The budget block ``recipe.research`` seals."""

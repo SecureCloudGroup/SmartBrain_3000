@@ -6,15 +6,26 @@ lands. Patterns that only see bounded spec fields (ni, ni_flow) are out of scope
 """
 from __future__ import annotations
 
+import importlib
+import pkgutil
 import re
 import time
 
 import pytest
 
-from smartbrain_3000 import formats, netguard, ni_fetch, ni_polite, pagegraph
+from smartbrain_3000 import (
+    formats,
+    netguard,
+    ni_fetch,
+    ni_polite,
+    ni_research,
+    pagegraph,
+)
 from smartbrain_3000.ni_research import digest
 
-MODULES = (formats, netguard, ni_fetch, ni_polite, pagegraph, digest)
+# every ni_research module reads fetched text or model replies, so the package is walked, not listed
+MODULES = (formats, netguard, ni_fetch, ni_polite, pagegraph,
+           *(importlib.import_module(f"{ni_research.__name__}.{m.name}") for m in pkgutil.iter_modules(ni_research.__path__)))
 N = 40000
 SHAPES = ("<a hidden ", "<script>", "<!--", "<html ", "<", " ", "a", "a=", "=", "\t\n", "<?xml ", "<!doctype ",
           "key: ", "bearer ", "sk-", "eyJ", "A" * 8 + ".", "</", "<div style='display:none' ", "&#", "\\\"", "0x")

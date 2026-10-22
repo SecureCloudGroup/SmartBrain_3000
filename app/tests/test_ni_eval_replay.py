@@ -262,12 +262,13 @@ def test_blind50_baseline_results_rescore_to_the_human_review() -> None:
 def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
     gold = ne.load_gold(_EVAL / "gold" / "ci.json")
     runs = ne.replay_all(gold, _EVAL / "cassettes" / "ci")
-    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5"], runs
+    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6"], runs
     assert all(r["cassette_drift"] == 0 for r in runs), "scripted cassette has no prompt hashes"
     scored, table = ne.score_all(gold, runs)
     got = {s["id"]: s["cls"] for s in scored}
-    assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "declined", "CI5": "links"}, got
-    assert (table["ALL"]["n"], table["ALL"]["right"]) == (5, 1), table["ALL"]
+    assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "declined", "CI5": "links",
+                   "CI6": "right"}, got
+    assert (table["ALL"]["n"], table["ALL"]["right"]) == (6, 2), table["ALL"]
 
 
 def test_replay_is_deterministic() -> None:
@@ -275,7 +276,7 @@ def test_replay_is_deterministic() -> None:
     first = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     second = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     assert first == second, "two replays must score identically"
-    assert len(first) == 5, first
+    assert len(first) == 6, first
 
 
 def test_missing_cassette_entry_surfaces_as_an_error_not_a_pass(tmp_path) -> None:
@@ -284,3 +285,52 @@ def test_missing_cassette_entry_surfaces_as_an_error_not_a_pass(tmp_path) -> Non
     run = ne.run_entry(gold[0], sess)
     assert run["outcome"] != "live", run
     assert ne.score_ask(run, gold[0])["cls"] in ("error", "links", "declined"), run
+
+
+# --- S4c: the researcher through the cassette ---------------------------------------------------------------------
+
+def test_a_research_ask_replays_from_a_hand_built_cassette_with_no_model() -> None:
+    gold = [g for g in ne.load_gold(_EVAL / "gold" / "ci.json") if g["id"] == "CI6"]
+    assert gold[0]["harness"]["mode"] == "research"
+    runs = ne.replay_all(gold, _EVAL / "cassettes" / "ci")
+    run = runs[0]
+    assert run["outcome"] == "awaiting-yes" and run["from"]["kind"] == "library", run  # held for Keep, nothing recurs
+    assert run["source"] == "https://data.example.org/quakes.json" and run["cassette_drift"] == 0
+    assert run["research"] == {"calls": 4, "prompt": 29500, "completion": 240, "cache_read": 12700,
+                               "cache_write": 5000, "cost_usd": 0.0}, run["research"]
+    assert ne.score_all(gold, runs)[0][0]["cls"] == "right"
+    assert "median" in ne.research_summary(runs) and ne.research_summary([{"id": "x"}]) == ""
+
+
+def test_research_off_and_local_change_what_the_same_cassette_can_do() -> None:
+    gold = [g for g in ne.load_gold(_EVAL / "gold" / "ci.json") if g["id"] == "CI6"]
+    off = ne.replay_all(gold, _EVAL / "cassettes" / "ci", research="off")[0]
+    assert off["outcome"] != "awaiting-yes" and "research" not in off, off  # no researcher, no card: the honest stop
+    local = ne.replay_all(gold, _EVAL / "cassettes" / "ci", research="local")[0]
+    assert local["outcome"] != "awaiting-yes", "the cloud turns are never served to the closed-world local mode"
+    assert os.environ.get("SMARTBRAIN_NI_RESEARCH") in (None, "off"), "the env is restored after each ask"
+
+
+def test_research_turns_record_and_replay_and_count_drift(tmp_path) -> None:
+    rec = ne.Session("R2", recording=True)
+    seen = []
+
+    def real(model, messages, tools):
+        seen.append((model, tools))
+        return {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 2,
+                                         "prompt_tokens_details": {"cached_read_tokens": 4}}}
+
+    rec.research_turn("anthropic/x", [{"role": "user", "content": "a"}], [{"t": 1}], real)
+    ne.save_session(tmp_path, rec)
+    rep = ne.load_session(tmp_path, "R2")
+    assert rep.research_turn("anthropic/x", [{"role": "user", "content": "b"}], None)["usage"]["prompt_tokens"] == 10
+    assert rep.drift == 1 and seen == [("anthropic/x", [{"t": 1}])]
+    assert rep.research_stats()["cache_read"] == 4
+    with pytest.raises(ne.CassetteMiss):
+        rep.research_turn("anthropic/x", [{"role": "user", "content": "c"}], None)
+
+
+def test_the_research_flag_is_closed_and_defaults_to_the_environment() -> None:
+    with pytest.raises(SystemExit):
+        ne.main(["replay", "--cassette-dir", str(_EVAL), "--research", "web"])
+    assert set(ne.RESEARCH_MODES) == {"cloud", "local", "off"}

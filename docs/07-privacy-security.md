@@ -79,7 +79,14 @@ not. Being precise about the line matters more than claiming everything:
   and local self-repair run on a local model or not at all.) **Building** a card
   reads your request and samples of its source, so if that routing points off this
   computer, the new card asks you first: build with that model (this card only; a
-  later Fix or refine doesn't ask again) or with your local model.
+  later Fix or refine doesn't ask again) or with your local model. When the new
+  flow finds no ready-made Library source, it can **research** one, and the same question
+  then says what leaves this computer if you allow a cloud model: your exact question, the
+  titles and details of Library sources, digests of up to 8 data samples it reads, today's
+  date and your time zone, and the research steps so far. Never your email, notes or other
+  cards. Research reads SmartBrain Library sources only (no web search yet), sends no keys,
+  and the finished card is a preview that starts refreshing only after you Keep it. With a
+  local model, research runs on this computer and sends nothing.
 - **Claude Code models.** The `claudecode/*` models send the conversation to Anthropic
   under your own Claude sign-in, exactly like a cloud provider — configured beside the
   local servers, but not local in the privacy sense. SmartBrain drives the `claude`
@@ -110,7 +117,12 @@ not. Being precise about the line matters more than claiming everything:
   card watching a page fetches that page; a card watching an image fetches that
   image; cards built on your schedules, your knowledge, or other cards fetch nothing
   at all. A card with a credential sends it only to the host it was entered for,
-  only over HTTPS, and never follows a redirect while carrying it.
+  only over HTTPS, and never follows a redirect while carrying it. Cards read only
+  ports 80 and 443. While a card is being built, the only other port it may use is one
+  the SmartBrain Library lists for that source. Once you keep a card, the port in the
+  address you kept is part of it. Hosts on your own network may use any port. A card
+  rests a site that is asked too often, waits as long as a site asks with "slow down",
+  and page readers follow the site's robots.txt.
 - **The page browser (only for a page you pasted, and only when it needs one).** Some pages
   show their data only after their scripts run. For a page you pasted, or a page card you press
   Fix on, SmartBrain may open it once in its own local, locked-down page browser (Obscura,

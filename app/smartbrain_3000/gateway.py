@@ -762,6 +762,17 @@ def chat_recorded(conn, purpose: str, messages: list[dict], model: str, **kwargs
     return data
 
 
+def chat_with_tools_recorded(conn, purpose: str, messages: list[dict], model: str, tools_spec: list[dict], **kwargs) -> dict:
+    """``chat_with_tools`` plus best-effort usage recording (cache tokens included), like ``chat_recorded``."""
+    from . import usage  # local import: keeps usage free of gateway at import time
+
+    assert purpose, "purpose label required"
+    assert tools_spec, "tools spec must be non-empty"
+    data = chat_with_tools(messages, model, tools_spec, **kwargs)
+    usage.record_response(conn, model, data, purpose=purpose)
+    return data
+
+
 def completion_text(data: dict) -> str:
     """Extract the assistant message text from a ``chat`` response (choices[0].message.content).
 

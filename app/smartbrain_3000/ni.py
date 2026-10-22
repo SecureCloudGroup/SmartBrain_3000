@@ -667,8 +667,8 @@ def _validate_born_marker(value: object) -> None:
 # ``declared`` = a Library source's declared answers (goes live as before); ``page`` (a web page,
 # compiled or interpreted) and ``mapping`` (the model mapped a dataset / any source without
 # declared answers) are OPEN paths: the card waits for the user's YES (``awaits_yes``).
-_BUILT_FROM_PATHS: frozenset[str] = frozenset({"declared", "page", "mapping", "auto"})
-_OPEN_PATHS: frozenset[str] = frozenset({"page", "mapping", "auto"})
+_BUILT_FROM_PATHS: frozenset[str] = frozenset({"declared", "page", "mapping", "auto", "research"})
+_OPEN_PATHS: frozenset[str] = frozenset({"page", "mapping", "auto", "research"})
 _MAX_BUILT_FROM_HOST = 253
 _MAX_BUILT_FROM_TITLE = 200
 
