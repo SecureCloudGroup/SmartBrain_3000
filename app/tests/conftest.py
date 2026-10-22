@@ -96,3 +96,4 @@ def _research_off_unless_asked(monkeypatch):
     monkeypatch.setenv("SMARTBRAIN_NI_RESEARCH", "off")
     from smartbrain_3000 import ni_research_flow
     ni_research_flow.set_research_chat(None)
+    ni_research_flow.set_research_search(None)

@@ -125,7 +125,9 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     """The board's ``awaiting_yes`` block for one item (None unless it waits for the user's YES / Keep)."""
     assert isinstance(item, dict), "item required"
     built_from = item["spec"].get("_built_from") or {}
-    block = ({"from": {"page": "page", "auto": "library", "research": "library"}.get(built_from.get("path"), "dataset"),
+    web = (item["spec"].get("recipe") or {}).get("tier") not in (None, "curated")  # a researched card from the open web
+    block = ({"from": {"page": "page", "auto": "library", "research": "dataset" if web else "library"}.get(
+                  built_from.get("path"), "dataset"),
               "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
              if ni.awaits_yes(item) else None)
     if block is not None and _used_access(item["spec"].get("source")):

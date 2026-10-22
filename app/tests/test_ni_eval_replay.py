@@ -262,13 +262,13 @@ def test_blind50_baseline_results_rescore_to_the_human_review() -> None:
 def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
     gold = ne.load_gold(_EVAL / "gold" / "ci.json")
     runs = ne.replay_all(gold, _EVAL / "cassettes" / "ci")
-    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6"], runs
+    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6", "CI7"], runs
     assert all(r["cassette_drift"] == 0 for r in runs), "scripted cassette has no prompt hashes"
     scored, table = ne.score_all(gold, runs)
     got = {s["id"]: s["cls"] for s in scored}
     assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "declined", "CI5": "links",
-                   "CI6": "right"}, got
-    assert (table["ALL"]["n"], table["ALL"]["right"]) == (6, 2), table["ALL"]
+                   "CI6": "right", "CI7": "right"}, got
+    assert (table["ALL"]["n"], table["ALL"]["right"]) == (7, 3), table["ALL"]
 
 
 def test_replay_is_deterministic() -> None:
@@ -276,7 +276,7 @@ def test_replay_is_deterministic() -> None:
     first = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     second = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     assert first == second, "two replays must score identically"
-    assert len(first) == 6, first
+    assert len(first) == 7, first
 
 
 def test_missing_cassette_entry_surfaces_as_an_error_not_a_pass(tmp_path) -> None:

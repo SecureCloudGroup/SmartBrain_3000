@@ -82,11 +82,18 @@ not. Being precise about the line matters more than claiming everything:
   later Fix or refine doesn't ask again) or with your local model. When the new
   flow finds no ready-made Library source, it can **research** one, and the same question
   then says what leaves this computer if you allow a cloud model: your exact question, the
-  titles and details of Library sources, digests of up to 8 data samples it reads, today's
-  date and your time zone, and the research steps so far. Never your email, notes or other
-  cards. Research reads SmartBrain Library sources only (no web search yet), sends no keys,
-  and the finished card is a preview that starts refreshing only after you Keep it. With a
-  local model, research runs on this computer and sends nothing.
+  titles and details of Library sources, the web search results it gets back (titles,
+  snippets and addresses), digests of up to 8 pages or data files it reads, today's date,
+  your time zone and the place you named, and the research steps so far. Never your email,
+  notes, knowledge-base text or other cards, and no keys. Research may search the web (at
+  most 3 searches), so your search words reach your search provider, and the sites it reads
+  see this computer's IP address. It fetches only addresses a search or the Library
+  returned, or a plain address (no query string) on a site it already found, so a page
+  cannot send it somewhere else or carry your data in a link. A card built from the web
+  is always a preview, marked as coming from the web, and starts refreshing only after you
+  Keep it. To limit research to the Library, set `SMARTBRAIN_NI_RESEARCH_WEB=off` (or the
+  `ni_research_web` setting to `off`). With a local model, research runs on this computer,
+  reads the Library only, and sends nothing.
 - **Claude Code models.** The `claudecode/*` models send the conversation to Anthropic
   under your own Claude sign-in, exactly like a cloud provider — configured beside the
   local servers, but not local in the privacy sense. SmartBrain drives the `claude`

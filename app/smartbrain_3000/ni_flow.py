@@ -3761,19 +3761,39 @@ _RESEARCH_DISCLOSURE = (" If no ready-made source fits, it may also research one
                         "sends your exact question, the titles and details of Library sources, digests of up to 8 "
                         "data samples it reads, today's date and your time zone, and the research steps so far; "
                         "never email, notes or other cards. The card only starts refreshing after you Keep it.")
+# S5b: with the open web on, the same consent also names the search and the page reads.
+_RESEARCH_DISCLOSURE_WEB = (" If no ready-made source fits, it may also research one with the same service, "
+                            "including searching the web and reading public pages and data files. That sends your "
+                            "exact question, the titles and details of Library sources, the search results it "
+                            "gets back (titles, snippets and addresses), "
+                            "digests of up to 8 data samples or pages it reads, today's date, your time zone and the "
+                            "place you named, and the research steps so far (the tool transcript); never email, notes or "
+                            "other cards, and no knowledge-base text. Its search queries reach the search "
+                            "provider, and the sites it reads see this computer's IP address. A card built from "
+                            "the web is always held for your Keep and only starts refreshing after you Keep it.")
+
+
+def _research_web(store: ni.NIStore) -> bool:
+    """True when a cloud research run on this store may use the open web (the kill switch is not off)."""
+    assert store is not None, "store required"
+    from .ni_research import (
+        policy,  # local: keeps the researcher off this module's import edge
+    )
+    return policy.web_enabled(store.conn)
 
 
 def _ask_model_consent(store: ni.NIStore, item_id: str, model: str,
                        local: str | None, research: bool = False) -> dict:
     """Stop before any model call and ask the card's owner (ruling 2). ``research`` (v2): the question also
-    names what leaves the device when the researcher runs, in place of the plain build wording."""
+    names what leaves the device when the researcher runs, in place of the plain build wording (with the web
+    items when the open-web switch is on)."""
     prompt = (f"This card is set to build with {model}. Building sends your "
               "request and samples from the source to that service; the "
               "finished card still refreshes on this computer.")
     if research:
         prompt = (f"This card would use {model}, a service outside this computer. Building sends your request "
                   "and samples from the source to it; the finished card still refreshes on this computer."
-                  + _RESEARCH_DISCLOSURE)
+                  + (_RESEARCH_DISCLOSURE_WEB if _research_web(store) else _RESEARCH_DISCLOSURE))
     return _terminate_unsupported(
         store, item_id,
         f"building this card would use {model}, which runs outside this computer",

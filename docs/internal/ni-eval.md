@@ -96,7 +96,11 @@ Library-mode cassettes also need `--pack-dir` at replay (the pack is not recorde
 flow itself staying on `--model`; `local` is the closed-world mode on `--model`; `off` is no researcher. A
 gold entry with `harness: {"mode": "research", "library_rows": [...]}` drives `run_flow` over a fixed Library
 (`CI6` is one, built by hand: four scripted tool turns). The summary line prints median seconds, model calls,
-tokens, cache reads and cost per ask. Measure S4c on the gold with, for example:
+tokens, cache reads and cost per ask. Open web (S5b): the cloud tier also runs `web_search` and fetches pages.
+Searches are recorded in the cassette's `search` list (keyed by query, failures included) and the page fetches
+ride the netguard patch, so a held-out run replays offline; `--research-web off` gives a Library-only run of the
+same asks (`CI7` is a hand-built web ask: the card lands `verified_endpoint`, held for Keep). Measure S4c on the
+gold with, for example:
 
 ```
 python3 tools/ni-eval.py record --flow v2 --research cloud --research-model anthropic/claude-sonnet-5-5 \

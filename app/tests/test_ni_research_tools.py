@@ -392,7 +392,7 @@ def test_html_and_non_data_pages_are_not_samples(monkeypatch) -> None:
 
 # --- schemas -----------------------------------------------------------------------------------------------------
 
-PINNED_SCHEMA_SHA256 = "79a06f4a040eed4f0ad3040a8d89128fe145a3949022ded11de1eafb3dacee38"
+PINNED_SCHEMA_SHA256 = "0b8a81db3769957dba9df101cbb1cb6a737b0b770c19f7fa8ad10a5caf2a32f1"  # S5b: + web_search
 
 
 def test_tool_schemas_are_byte_stable_and_anthropic_shaped() -> None:
@@ -400,7 +400,8 @@ def test_tool_schemas_are_byte_stable_and_anthropic_shaped() -> None:
     assert first == second == json.dumps(json.loads(schemas.TOOLS_JSON), sort_keys=True)
     assert schemas.TOOLS_JSON == json.dumps(json.loads(schemas.TOOLS_JSON), sort_keys=True, separators=(",", ":"))
     names = [t["name"] for t in schemas.tool_schemas()]
-    assert names == sorted(names) == ["fetch_sample", "library_search", "propose_card", "resolve_entity", "try_recipe"]
+    assert names == sorted(names) == ["fetch_sample", "library_search", "propose_card", "resolve_entity", "try_recipe",
+                                                    "web_search"]
     assert set(names) <= ni_recipe.TOOLS
     for t in schemas.tool_schemas():
         assert set(t) == {"name", "description", "input_schema"} and t["input_schema"]["type"] == "object"
@@ -413,7 +414,7 @@ def test_run_tool_dispatches_and_refuses_unknown_tools_and_extra_arguments(monke
     ctx, _ = _listed(monkeypatch, url, QUAKES)
     assert schemas.run_tool(ctx, "fetch_sample", {"url": url})["ok"]
     assert schemas.run_tool(ctx, "fetch_sample", {"url": url, "headers": {"X": "y"}})["error"] == "invalid_args"
-    assert schemas.run_tool(ctx, "web_search", {"query": "x"})["error"] == "unknown_tool"
+    assert schemas.run_tool(ctx, "browse_anywhere", {"query": "x"})["error"] == "unknown_tool"
     assert schemas.run_tool(ctx, "fetch_sample", "x")["error"] == "invalid_args"
 
 

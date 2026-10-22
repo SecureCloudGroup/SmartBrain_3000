@@ -15,7 +15,13 @@ from ..netguard import FetchError
 from ..ni_verify.classes import shadow_reasons
 from ..ni_verify.rows import SourceInfo, read_result
 from .ctx import ResearchCtx, error, normal_url, one_line
-from .digest import clean_text, digest
+from .digest import (
+    MAX_SEARCH_ROWS,
+    clean_search_rows,
+    clean_text,
+    digest,
+    search_digest,
+)
 
 MAX_QUERY = 200
 MAX_DRAFT_BYTES = 32 * 1024
@@ -81,6 +87,31 @@ def _fetch_and_digest(ctx: ResearchCtx, url: str, fmt: str | None) -> dict:
     ctx.samples[normal_url(url)] = {"format": seen, "parsed": parsed}
     return {"ok": True, "url": url, "format": seen, "digest": digest(url, seen, parsed),
             "fetches_left": ctx.max_fetches - ctx.fetches}
+
+
+def web_search(ctx: ResearchCtx, query: str) -> dict:
+    """Search the web (cloud tier, web allowed, at most ``ctx.max_searches`` per run) and return a fenced digest of
+    titles, snippets and addresses; every kept address becomes a legal ``search`` fetch origin."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert ctx.max_searches >= 0, "a search cap"
+    if not isinstance(query, str) or not query.strip() or len(query) > MAX_QUERY:
+        return error("invalid_args", f"query must be 1..{MAX_QUERY} characters")
+    out = ctx.spend("web_search", "search")
+    if out is not None:
+        return out
+    if "search" not in ctx.allowed_origins:
+        return _done(ctx, "web_search", query, error("web_off", "this run reads SmartBrain Library sources only"))
+    if not callable(ctx.searcher):
+        return _done(ctx, "web_search", query, error("search_unavailable", "no search service is set up"))
+    asked = clean_text(query.strip(), MAX_QUERY)
+    try:
+        got = ctx.searcher(asked, MAX_SEARCH_ROWS)
+    except Exception as exc:  # a failed search degrades to a typed error, never a crash
+        return _done(ctx, "web_search", query, error("search_unavailable", type(exc).__name__))
+    rows = clean_search_rows(got.get("results") if isinstance(got, dict) else None)
+    ctx.record_search_results(rows)
+    return _done(ctx, "web_search", asked, {"ok": True, "results": len(rows), "digest": search_digest(asked, rows),
+                                            "searches_left": ctx.max_searches - ctx.searches})
 
 
 def library_search(ctx: ResearchCtx, query: str) -> dict:

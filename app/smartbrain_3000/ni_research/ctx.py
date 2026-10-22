@@ -23,6 +23,12 @@ TOKEN_CAP = 60_000
 MAX_SAMPLES = 8
 _MAX_URLS = 200
 _BAD_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".lan", ".home", ".corp")
+# Hosting platforms where one registrable domain is thousands of unrelated sites: a result on one of these
+# makes only its own host a "same site", never the whole platform (the eTLD+1 heuristic has no suffix list).
+_SHARED_SUFFIXES = ("github.io", "gitlab.io", "blogspot.com", "herokuapp.com", "vercel.app", "netlify.app",
+                    "pages.dev", "workers.dev", "web.app", "firebaseapp.com", "appspot.com", "azurewebsites.net",
+                    "amazonaws.com", "cloudfront.net", "wordpress.com", "wixsite.com", "weebly.com", "ngrok.io",
+                    "repl.co", "glitch.me", "onrender.com", "fly.dev", "surge.sh")
 
 
 def one_line(text: object, n: int) -> str:
@@ -71,6 +77,16 @@ def host_refusal(url: str) -> str | None:
     return None if ip.is_global else "loopback and private addresses are off limits"
 
 
+def site_of(host: str) -> str:
+    """The "same site" key of ``host``: its registrable domain, or the whole host on a shared hosting platform."""
+    assert isinstance(host, str), "host must be text"
+    h = host.lower().rstrip(".")
+    assert "/" not in h, "a host, not a URL"
+    if any(h == s or h.endswith("." + s) for s in _SHARED_SUFFIXES):
+        return h
+    return registrable_domain(h)
+
+
 @dataclass
 class ResearchCtx:
     """One research run: the ask, the library, the clock, the budgets, what may be fetched and what happened."""
@@ -87,8 +103,9 @@ class ResearchCtx:
     max_seconds: float = MAX_SECONDS
     token_cap: int = TOKEN_CAP
     clock: Callable[[], float] = time.monotonic
-    allowed_origins: frozenset = frozenset({"library", "search", "preview", "same_domain"})  # S4c: library only
+    allowed_origins: frozenset = frozenset({"library", "search", "preview", "same_domain"})  # {"library"}: no web
     resolver: Callable[[str, str], dict] | None = None
+    searcher: Callable[[str, int], dict] | None = None   # (query, limit) -> {"results": [{title,url,snippet}]}
     turns: int = 0
     fetches: int = 0
     searches: int = 0
@@ -154,7 +171,7 @@ class ResearchCtx:
             return
         key = normal_url(url)
         self.urls.setdefault(key, {"kind": kind, **info})
-        self.domains.add(registrable_domain(urlsplit(key).hostname or ""))
+        self.domains.add(site_of(urlsplit(key).hostname or ""))
 
     def record_search_results(self, rows: list) -> None:
         """Web search results the loop got (S5b): each ``{url, title}`` becomes a legal fetch origin."""
@@ -178,6 +195,10 @@ class ResearchCtx:
             return None, "not a Library row, a search result, the previewed endpoint or a site already found"
         if found not in self.allowed_origins:
             return None, "this run reads SmartBrain Library sources only"
+        if found == "same_domain":  # a composed address: no query to carry data out, no fragment
+            parts = urlsplit(url.strip())
+            if parts.query or parts.fragment or "?" in url or "#" in url:
+                return None, "another address on a found site must be plain: no query string and no fragment"
         return found, ""
 
     def _origin_of(self, key: str) -> str | None:
@@ -188,7 +209,7 @@ class ResearchCtx:
             return self.urls[key]["kind"]
         if self.preview_url and key == normal_url(self.preview_url):
             return "preview"
-        if registrable_domain(urlsplit(key).hostname or "") in self.domains:
+        if site_of(urlsplit(key).hostname or "") in self.domains:
             return "same_domain"
         return None
 

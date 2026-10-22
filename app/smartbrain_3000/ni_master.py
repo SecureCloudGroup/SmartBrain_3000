@@ -271,7 +271,7 @@ def question_for(state: str, record: dict) -> dict | None:
     stamped = record.get("_question")
     if isinstance(stamped, dict) and stamped.get("kind") in QUESTION_KINDS:
         question = {"kind": str(stamped["kind"]),
-                    **({"prompt": str(stamped.get("prompt"))[:(800 if stamped["kind"] == "model_consent" else 200)]}
+                    **({"prompt": str(stamped.get("prompt"))[:(1400 if stamped["kind"] == "model_consent" else 200)]}
                        if stamped.get("prompt") else {})}
         if stamped["kind"] == "model_consent":  # the card names both choices exactly
             question["model"] = str(stamped.get("model") or "")[:200]

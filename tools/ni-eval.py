@@ -19,6 +19,10 @@ and routes its model turns through the cassette like every other model reply: ``
 (default anthropic/claude-sonnet-5-5) with the eval operator's consent, ``local`` the closed-world mode on
 ``--model``, ``off`` no researcher. Each ask's cassette gains a ``research`` list (the raw model responses, usage
 included) and the run a ``research`` block (calls, tokens, cache reads, cost) the summary prints.
+Open web (S5b): the cloud tier may also ``web_search`` and fetch pages. Each search is recorded in the cassette's
+``search`` list (the service's results, or its failure) and served from it on replay, keyed by the query like a
+fetch; the page fetches ride the netguard patch above. ``--research-web on|off`` (default on; env
+``SMARTBRAIN_NI_RESEARCH_WEB``) switches the web off for a Library-only comparison run. Local mode never has the web.
 """
 from __future__ import annotations
 
@@ -267,6 +271,8 @@ class Session:
         self.ask_id, self.recording = ask_id, recording
         self.data = data or {"ask_id": ask_id, "meta": {}, "fetches": [], "model": []}
         self.data.setdefault("research", [])
+        self.data.setdefault("search", [])
+        self._search_seen: dict[str, int] = {}
         self._fetch_seen: dict[str, int] = {}
         self._model_i = 0
         self._research_i = 0
@@ -306,6 +312,31 @@ class Session:
         if rec.get("sha") and rec["sha"] != sha:
             self.drift += 1
         return json.loads(json.dumps(rec["reply"]))
+
+    def research_search(self, query: str, limit: int, real: Callable | None = None) -> dict:
+        """One researcher web search: record the live service's answer (or its failure), or serve the recorded one
+        by query (a repeat gets the next recorded answer, then the last). A miss is a ``CassetteMiss``."""
+        assert isinstance(query, str) and query, "query required"
+        assert limit > 0, "a positive limit"
+        if self.recording:
+            assert real is not None, "recording needs the real search"
+            try:
+                value = real(query, limit)
+            except Exception as exc:
+                self.data["search"].append({"query": query, "ok": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+                raise
+            self.data["search"].append({"query": query, "ok": True, "value": value})
+            return value
+        rows = [r for r in self.data["search"] if r["query"] == query]
+        if not rows:
+            raise CassetteMiss(f"{self.ask_id}: search {query!r} not in the cassette")
+        n = self._search_seen.get(query, 0)
+        self._search_seen[query] = n + 1
+        row = rows[min(n, len(rows) - 1)]
+        if not row["ok"]:
+            from smartbrain_3000 import search
+            raise search.SearchError(str(row.get("error") or "recorded failure"))
+        return json.loads(json.dumps(row["value"]))
 
     def research_stats(self) -> dict:
         """Calls and tokens the researcher used on this ask, from the recorded responses' ``usage`` blocks."""
@@ -509,9 +540,9 @@ def _env(values: dict[str, str]) -> Iterator[None]:
 
 @contextlib.contextmanager
 def research_seam(session: Session, mode: str, *, local_model: str, cloud_model: str,
-                  real_chat: Callable | None = None) -> Iterator[None]:
-    """Route the researcher's model turns through ``session`` for one ask. ``cloud`` stands for the operator's
-    consent (the eval runs no UI to tap it); ``local`` offers no cloud route at all."""
+                  real_chat: Callable | None = None, real_search: Callable | None = None) -> Iterator[None]:
+    """Route the researcher's model turns and web searches through ``session`` for one ask. ``cloud`` stands for
+    the operator's consent (the eval runs no UI to tap it); ``local`` offers no cloud route at all."""
     from smartbrain_3000 import ni_research_flow
     assert mode in RESEARCH_MODES, "a known research mode"
     if mode == "off":
@@ -520,10 +551,12 @@ def research_seam(session: Session, mode: str, *, local_model: str, cloud_model:
     ni_research_flow.set_research_chat(
         lambda model, messages, tools: session.research_turn(model, messages, tools, real_chat),
         cloud=cloud_model if mode == "cloud" else None, local=local_model, consented=mode == "cloud")
+    ni_research_flow.set_research_search(lambda query, limit: session.research_search(query, limit, real_search))
     try:
         yield
     finally:
         ni_research_flow.set_research_chat(None)
+        ni_research_flow.set_research_search(None)
 
 
 def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) -> dict:
@@ -557,7 +590,10 @@ def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) 
             out["tapped"] = [{"title": built.get("title") or "", "url": out["source"], "label": "", "params": {}}]
             if ni.awaits_yes(item):
                 out["outcome"] = "awaiting-yes"
-                out["from"] = {"kind": "library", "host": built.get("host") or "", "title": built.get("title") or ""}
+                tier = (item["spec"].get("recipe") or {}).get("tier") or ""
+                out["tier"] = tier  # curated = a Library row; verified_endpoint / page_reading = found on the web
+                out["from"] = {"kind": "dataset" if tier not in ("", "curated") else "library",
+                               "host": built.get("host") or "", "title": built.get("title") or ""}
     except Exception as exc:
         out["outcome"], out["detail"] = "crash", f"{type(exc).__name__}: {str(exc)[:160]}"
     finally:
@@ -567,7 +603,8 @@ def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) 
 
 def run_entry(entry: dict, session: Session, *, llm: Callable[[str], str] | None = None,
               model: str = "", pack_dir: pathlib.Path | None = None, research: str | None = None,
-              research_model: str = DEFAULT_CLOUD_MODEL, real_chat: Callable | None = None) -> dict:
+              research_model: str = DEFAULT_CLOUD_MODEL, real_chat: Callable | None = None,
+              real_search: Callable | None = None, research_web: str | None = None) -> dict:
     """Run one gold entry under ``session`` (record if ``llm`` is the live model, else replay).
 
     ``harness.mode == "url"`` drives ``run_flow`` with a given source (no Library); anything else
@@ -582,10 +619,12 @@ def run_entry(entry: dict, session: Session, *, llm: Callable[[str], str] | None
 
     mode = research or harness.get("research")
     assert mode in (None, *RESEARCH_MODES), "research is cloud, local or off"
-    env = {"SMARTBRAIN_NI_RESEARCH": mode} if mode else {}
+    assert research_web in (None, "on", "off"), "research web is on or off"
+    env = {"SMARTBRAIN_NI_RESEARCH": mode, "SMARTBRAIN_NI_RESEARCH_WEB": research_web or "on"} if mode else {}
     local_model = model if model and "/" in model else LOCAL_STAND_IN
     with patched_netguard(session), _env(env), research_seam(session, mode or "off", local_model=local_model,
-                                                             cloud_model=research_model, real_chat=real_chat):
+                                                             cloud_model=research_model, real_chat=real_chat,
+                                                             real_search=real_search):
         if harness.get("mode") == "url":
             run = drive_url(entry["ask"], harness.get("source_url"), call)
         elif harness.get("mode") == "research":
@@ -609,7 +648,8 @@ def load_gold(path: pathlib.Path = GOLD_PATH) -> list[dict]:
 
 
 def replay_all(gold: list[dict], cassette_dir: pathlib.Path, pack_dir: pathlib.Path | None = None,
-               research: str | None = None, research_model: str = DEFAULT_CLOUD_MODEL, model: str = "") -> list[dict]:
+               research: str | None = None, research_model: str = DEFAULT_CLOUD_MODEL, model: str = "",
+               research_web: str | None = None) -> list[dict]:
     """Replay every gold entry that has a cassette; others are skipped (not errors)."""
     assert isinstance(gold, list), "gold list required"
     runs = []
@@ -617,7 +657,7 @@ def replay_all(gold: list[dict], cassette_dir: pathlib.Path, pack_dir: pathlib.P
         if not (pathlib.Path(cassette_dir) / f"{entry['id']}.json").is_file():
             continue
         runs.append(run_entry(entry, load_session(cassette_dir, entry["id"]), pack_dir=pack_dir, research=research,
-                              research_model=research_model, model=model))
+                              research_model=research_model, model=model, research_web=research_web))
     return runs
 
 
@@ -795,20 +835,30 @@ def bifrost_chat(bifrost: str, timeout: float = 300.0) -> Callable[[str, list, l
     return _call
 
 
+def live_search(query: str, limit: int) -> dict:
+    """The real researcher search for a LIVE record: the app's keyless service (DuckDuckGo behind netguard)."""
+    from smartbrain_3000 import search
+    assert query and limit > 0, "query + limit required"
+    return search.SearchService().search(query, limit=limit)
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     """LIVE: real model through the bifrost gateway, real network. Saves cassette + results."""
     _set_flow(args)
     ev = _load_tool("ni_flow_eval", "ni-flow-eval.py")
     llm = ev._bifrost_llm(args.bifrost, args.model)
     chat = bifrost_chat(args.bifrost) if getattr(args, "research", None) in ("cloud", "local") else None
+    search_live = live_search if getattr(args, "research", None) == "cloud" else None
     gold, runs = load_gold(args.gold), []
     for entry in _select(gold, args):
         sess = Session(entry["id"], recording=True)
         sess.data["meta"] = {"model": args.model, "ask": entry["ask"], "research": getattr(args, "research", None),
                              "research_model": getattr(args, "research_model", None),
+                             "research_web": getattr(args, "research_web", None) or "on",
                              "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         run = run_entry(entry, sess, llm=lambda p: llm(p, 600), model=args.model, pack_dir=args.pack_dir,
-                        research=getattr(args, "research", None), real_chat=chat,
+                        research=getattr(args, "research", None), real_chat=chat, real_search=search_live,
+                        research_web=getattr(args, "research_web", None),
                         research_model=getattr(args, "research_model", None) or DEFAULT_CLOUD_MODEL)
         save_session(args.cassette_dir, sess)
         runs.append(run)
@@ -820,7 +870,8 @@ def cmd_replay(args: argparse.Namespace) -> int:
     _set_flow(args)
     gold = _select(load_gold(args.gold), args)
     runs = replay_all(gold, args.cassette_dir, args.pack_dir, research=getattr(args, "research", None),
-                      research_model=getattr(args, "research_model", None) or DEFAULT_CLOUD_MODEL)
+                      research_model=getattr(args, "research_model", None) or DEFAULT_CLOUD_MODEL,
+                      research_web=getattr(args, "research_web", None))
     return _finish(args, gold, runs)
 
 
@@ -890,6 +941,8 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--research", choices=RESEARCH_MODES,
                            help="v2 researcher tier: cloud (consented), local (closed-world) or off")
             p.add_argument("--research-model", default=None, help=f"cloud route (default {DEFAULT_CLOUD_MODEL})")
+            p.add_argument("--research-web", choices=("on", "off"), default=None,
+                           help="cloud researcher may search and read the open web (default on); off = Library only")
         if name == "record":
             p.add_argument("--model", default="mlx/Qwen3.5-9B-MLX-4bit")
             p.add_argument("--bifrost", default="http://127.0.0.1:38080")
