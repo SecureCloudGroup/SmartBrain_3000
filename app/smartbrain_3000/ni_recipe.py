@@ -3,7 +3,8 @@
 ``recipe`` = ``{question, sources, constraints, tier}`` plus optional ``verification``, ``provenance`` and
 ``research`` (a size-capped trace of the research loop). Every key is closed and every size is bounded.
 The block is system-owned: stripped on export and refused in template packs (``ni_library`` / ``ni_routes``),
-so a template can neither claim a quality tier nor carry a research trace. Nothing writes it yet (S4c).
+so a template can neither claim a quality tier nor carry a research trace. The researcher writes it (S4c); each refresh re-checks it and a
+drifted or dead source may re-research it (S9, ``ni_refresh``).
 
 The researcher-draft rules (plan 6.4) live here too: a draft marked researcher-authored may not carry an
 ``llm`` stage, a ``$secret``, a model or MCP source, or a model-chosen interval.

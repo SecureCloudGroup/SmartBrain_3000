@@ -227,6 +227,12 @@ _RENDER_INTERVAL_FLOOR = 15  # minutes: about two renders a minute serve ~30 car
 # ``host_busy`` (S5a): the card's host is over its request budget or paused by a 429 / 503; the card
 # stays due and the tick asks again, it is never a failure.
 CAPACITY_KINDS: frozenset[str] = frozenset({"render_busy", "render_unavailable", "model_busy", "host_busy"})
+# S9: the run status of a recipe card whose source still answers but no longer the question it was kept
+# for (wrong place, window, threshold, compare count, or nothing where data was expected). A real failure:
+# ``last_good`` keeps rendering and the streak runs, never a blank or wrong card marked ok.
+CONSTRAINT_DRIFT = "constraint_drift"
+# S9: why a re-research proposal was asked for (``ni_refresh`` decides; the proposal records it).
+RESEARCH_REASONS: frozenset[str] = frozenset({"constraint_drift", "source_dead"})
 # Render outcomes that ARE failures (the runner's statuses, renamed host-free).
 _RENDER_FAILURES: dict[str, str] = {
     "refused": "render_refused", "timeout": "render_timeout", "blocked": "render_blocked",
@@ -961,30 +967,51 @@ def _validate_l2_system_keys(body: dict) -> None:
         except ValueError as exc:
             raise ValueError(f"spec._l2_last_attempt not ISO-8601: {exc}") from None
     if "_l2_proposal" in body and body["_l2_proposal"] is not None:
-        proposal = body["_l2_proposal"]
-        if not isinstance(proposal, dict):
-            raise ValueError("spec._l2_proposal must be an object")
-        _closed_keys(proposal, {"stages", "created_at", "model"}, "spec._l2_proposal")
-        stages = proposal.get("stages")
-        if not isinstance(stages, dict):
-            raise ValueError("spec._l2_proposal.stages must be an object")
-        _closed_keys(stages, {"extract", "transform"}, "spec._l2_proposal.stages")
-        if not stages:
-            raise ValueError("spec._l2_proposal.stages must have at least one of extract/transform")
-        if "extract" in stages and not isinstance(stages["extract"], dict):
-            raise ValueError("spec._l2_proposal.stages.extract must be an object")
-        if "transform" in stages and not isinstance(stages["transform"], list):
-            raise ValueError("spec._l2_proposal.stages.transform must be a list")
-        created_at = proposal.get("created_at")
-        if not isinstance(created_at, str) or not created_at:
-            raise ValueError("spec._l2_proposal.created_at must be an ISO-8601 string")
-        try:
-            datetime.fromisoformat(created_at)
-        except ValueError as exc:
-            raise ValueError(f"spec._l2_proposal.created_at not ISO-8601: {exc}") from None
-        model_name = proposal.get("model")
-        if not isinstance(model_name, str) or not model_name:
-            raise ValueError("spec._l2_proposal.model must be a non-empty string")
+        _validate_l2_proposal(body["_l2_proposal"])
+
+
+def _validate_l2_proposal(proposal: object) -> None:
+    """Shape of a parked proposal: a stage patch (``stages``, the §23 repair) or, from S9's re-research, a whole
+    replacement ``spec`` (never both) with the ``reason`` it was asked for."""
+    assert proposal is not None, "a proposal"
+    assert RESEARCH_REASONS, "the closed reasons"
+    _require_dict(proposal, "spec._l2_proposal")
+    _closed_keys(proposal, {"stages", "spec", "origin", "reason", "created_at", "model"}, "spec._l2_proposal")
+    if ("stages" in proposal) == ("spec" in proposal):
+        raise ValueError("spec._l2_proposal holds stages or spec, one of them")
+    if "spec" in proposal:
+        if proposal.get("origin") != "research" or proposal.get("reason") not in RESEARCH_REASONS:
+            raise ValueError("spec._l2_proposal.spec needs origin research and a closed reason")
+        inner = _require_dict(proposal["spec"], "spec._l2_proposal.spec")
+        if "_l2_proposal" in inner:
+            raise ValueError("spec._l2_proposal.spec may not carry a proposal")
+        validate_spec(inner, researcher=True)
+    else:
+        _validate_l2_stages(proposal["stages"])
+    created_at = proposal.get("created_at")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError("spec._l2_proposal.created_at must be an ISO-8601 string")
+    try:
+        datetime.fromisoformat(created_at)
+    except ValueError as exc:
+        raise ValueError(f"spec._l2_proposal.created_at not ISO-8601: {exc}") from None
+    model_name = proposal.get("model")
+    if not isinstance(model_name, str) or not model_name:
+        raise ValueError("spec._l2_proposal.model must be a non-empty string")
+
+
+def _validate_l2_stages(stages: object) -> None:
+    """The closed §23 stage patch: ``{extract?, transform?}``, at least one."""
+    assert stages is not None, "stages required"
+    assert _MAX_PIPELINE_STAGES > 0, "a stage cap"
+    _require_dict(stages, "spec._l2_proposal.stages")
+    _closed_keys(stages, {"extract", "transform"}, "spec._l2_proposal.stages")
+    if not stages:
+        raise ValueError("spec._l2_proposal.stages must have at least one of extract/transform")
+    if "extract" in stages and not isinstance(stages["extract"], dict):
+        raise ValueError("spec._l2_proposal.stages.extract must be an object")
+    if "transform" in stages and not isinstance(stages["transform"], list):
+        raise ValueError("spec._l2_proposal.stages.transform must be a list")
 
 
 _NI_SELF_PLACEHOLDER = "ni:self:"
@@ -5235,7 +5262,8 @@ class NIStore:
 
     def apply_repair(self, item_id: str, new_spec: dict, *,
                       origin: str = "repair_l1",
-                      expected_rev: int | None = None) -> int | None:
+                      expected_rev: int | None = None,
+                      replace_spec: bool = False) -> int | None:
         """§14/§23: apply a repaired spec, keeping contract/_c2_ok/state/counters intact.
 
         Unlike ``update_spec`` — which strips ``_c2_ok`` + ``contract`` because a
@@ -5256,6 +5284,11 @@ class NIStore:
         undo their change. The caller records ``repair_failed`` with a spec_changed
         error; the trial is NOT stamped so the (already-superseded) streak may still
         try again on a later pass.
+
+        ``replace_spec`` (S9): ``new_spec`` is a whole replacement from an approved re-research
+        proposal, not a stage patch. The old contract and ``_c2_ok`` described the old source's
+        data, so neither is carried (the next clean run captures a fresh contract); the trial and
+        its auto-revert apply as for any repair.
         """
         assert item_id and isinstance(new_spec, dict), "item id + spec required"
         validated = validate_spec(new_spec)
@@ -5269,8 +5302,8 @@ class NIStore:
             if expected_rev is not None and current_rev != int(expected_rev):
                 return None  # spec moved under us — caller aborts
             preserved = dict(validated)
-            preserved["contract"] = current["spec"].get("contract")
-            if current["spec"].get("_c2_ok") is True:
+            preserved["contract"] = None if replace_spec else current["spec"].get("contract")
+            if current["spec"].get("_c2_ok") is True and not replace_spec:
                 preserved["_c2_ok"] = True
             if current["spec"].get("_present_ok") in _PRESENTATION_IDS:
                 preserved["_present_ok"] = current["spec"]["_present_ok"]
@@ -5309,7 +5342,8 @@ class NIStore:
 
     def set_l2_proposal(self, item_id: str, proposal: dict, *,
                          expected_rev: int,
-                         expected_first_failure_at: datetime | None = None) -> bool:
+                         expected_first_failure_at: datetime | None = None,
+                         states: tuple[str, ...] = ("failing",)) -> bool:
         """§23: seal ``_l2_proposal`` onto the item's spec (rev-preserving).
 
         Refuses (returns False) when the current ``spec_rev`` no longer matches
@@ -5329,7 +5363,9 @@ class NIStore:
         broken — Apply would 409 anyway (Phase 4b D4), but a park during broken
         would leave a dead proposal on the card. ``expected_first_failure_at``
         defaults to None for backward-compat with test seeders that call this
-        directly; the worker always passes both.
+        directly; the worker always passes both. ``states`` (S9): the states a
+        proposal may land in; a re-research proposal for a first-trigger tier also
+        lands on a ``degraded`` card.
         """
         assert item_id and isinstance(proposal, dict), "id + proposal required"
         assert isinstance(expected_rev, int) and expected_rev >= 1, "expected_rev positive"
@@ -5340,7 +5376,7 @@ class NIStore:
             if int(current["spec_rev"]) != expected_rev:
                 return False
             if expected_first_failure_at is not None:
-                if current["state"] != "failing":
+                if current["state"] not in states:
                     return False  # L5: streak reset (recovery) or ladder broken
                 current_first = current.get("first_failure_at")
                 if current_first != expected_first_failure_at:
@@ -6315,6 +6351,19 @@ def _refuse_blank_page_run(spec: dict, outputs: dict, llm_fields: set[str]) -> N
         raise NIError("extract_miss", "the page held none of this card's values this time")
 
 
+def _constraint_drift(spec: dict, outputs: dict, now: datetime) -> str:
+    """S9: why a recipe card's fresh outputs fail a constraint that passed at Keep (host-free, one line), or
+    "" when they hold. A spec with no ``recipe`` returns "" before anything else runs."""
+    assert isinstance(spec, dict), "spec must be a dict"
+    assert now.tzinfo is not None, "now must be aware"
+    if not isinstance(spec.get("recipe"), dict):
+        return ""
+    from . import (
+        ni_refresh,  # lazy: ni_refresh reads the research verifier, which imports ni
+    )
+    return "; ".join(ni_refresh.drift_reasons(spec, outputs, now))[:_MAX_STATUS]
+
+
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
                   started: float, *, history: dict,
                   image_blob: dict | None = None,
@@ -6377,6 +6426,14 @@ def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
             _handle_failure(store, item, exc, started, contract_ok=False,
                              started_rev=started_rev)
             raise exc
+    drift = _constraint_drift(spec, outputs, fetched_at or datetime.now(UTC))
+    if drift:
+        # S9: the source answers but no longer the question it was kept for. A failure like any other:
+        # ``last_good`` keeps rendering, the streak runs, re-research may park a proposal.
+        exc = NIError(CONSTRAINT_DRIFT, drift)
+        _handle_failure(store, item, exc, started, contract_ok=contract_ok,
+                         started_rev=started_rev)
+        raise exc
     try:
         image_ref = _resolve_image_ref(store, item["id"], image_blob)
         bound = bind_scene(spec["scene"], outputs, history=history,
@@ -7591,8 +7648,27 @@ def _collect_l2_candidate(store: NIStore, item_id: str,
     fresh = store.get_item(item_id)
     if fresh is None:
         return
-    if _l2_eligible(fresh, fresh["spec"]):
+    if _l2_eligible(fresh, fresh["spec"]) or _research_eligible(store, fresh):
         candidates.append(item_id)
+
+
+def _research_eligible(store: NIStore, item: dict) -> bool:
+    """S9: a recipe card whose source drifted or died, past its tier's trigger, with no proposal parked and no
+    re-research today or this streak. Silent on every no; a card with no recipe is out before any read."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    assert isinstance(item.get("spec"), dict), "a decrypted item"
+    spec = item["spec"]
+    if not isinstance(spec.get("recipe"), dict) or isinstance(spec.get("_l2_proposal"), dict):
+        return False
+    from . import (
+        ni_refresh,  # lazy: ni_refresh reads the research verifier, which imports ni
+    )
+    if ni_refresh.reason_of(item) is None or not ni_refresh.trigger_met(item, spec):
+        return False
+    if not ni_refresh.may_research(store.list_runs(item["id"]), item.get("first_failure_at"), datetime.now(UTC)):
+        return False
+    from . import ni_research_flow  # lazy: it imports ni and ni_flow
+    return ni_research_flow.research_plan(store, item) is not None  # off, unconsented or unavailable: no
 
 
 def _l2_eligible(item: dict, spec: dict) -> bool:
@@ -7618,8 +7694,8 @@ def _l2_eligible(item: dict, spec: dict) -> bool:
     L2 door for items where L1 could still fire.
     """
     assert isinstance(item, dict) and isinstance(spec, dict), "item + spec required"
-    if item.get("state") != "failing":
-        return False
+    if item.get("state") != "failing" or item.get("last_status") == CONSTRAINT_DRIFT:
+        return False  # S9: a stage patch cannot move a source back to the scope it was kept for
     policy = spec.get("repair_policy") or {}
     if not policy.get("l2_frontier"):
         return False
@@ -7721,7 +7797,14 @@ def _run_l2_worker(app, item_ids: list[str]) -> None:
         store = NIStore(cursor, key)
         for item_id in item_ids[:_MAX_ITEMS_PER_PASS]:  # bounded: same cap as the tick
             fresh = store.get_item(item_id)
-            if fresh is None or not _l2_eligible(fresh, fresh["spec"]):
+            if fresh is None:
+                continue
+            if _research_eligible(store, fresh):
+                notice = _attempt_research_repair(store, fresh)  # S9: a parked re-research proposal
+                if notice is not None:
+                    _post_l2_carrier_notice(ScheduleStore(cursor, key), notice)
+                return  # one item per spawn, as for L2; a decline leaves the card failing with its status
+            if not _l2_eligible(fresh, fresh["spec"]):
                 continue
             notice = _attempt_l2_repair(store, fresh, gateway_mod)
             if notice is not None:
@@ -7732,6 +7815,20 @@ def _run_l2_worker(app, item_ids: list[str]) -> None:
             cursor.close()
         except Exception:
             pass
+
+
+def _attempt_research_repair(store: NIStore, item: dict) -> dict | None:
+    """S9: re-run the researcher for the card's recorded question and park the result (never applied).
+    The carrier-notice dict on a parked proposal, else None. Any failure is an honest None: the card keeps
+    failing with its own status."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    assert isinstance(item["spec"].get("recipe"), dict), "a recipe card"
+    from . import ni_refresh, ni_research_flow  # lazy: they import ni
+    try:
+        return ni_research_flow.reresearch(store, item, ni_refresh.reason_of(item) or "source_dead")
+    except Exception as exc:  # last-resort net: research never wedges the worker or the card
+        log.warning("ni re-research failed: item=%s: %s", item["id"], exc.__class__.__name__)
+        return None
 
 
 def _post_l2_carrier_notice(schedules_store, notice: dict) -> None:

@@ -32,6 +32,21 @@ to know when a release changes behavior.
   `SMARTBRAIN_NI_RESEARCH_WEB=off` to keep research to the Library; a local model never uses
   the web.
 
+- **A researched card notices when its source stops answering its question, and can look for
+  a replacement.** Every refresh of a card the researcher built re-runs the checks it passed
+  when you kept it (place, time window, threshold, how many things are compared, and "not
+  empty"). If the source still answers but no longer the question, the refresh fails with
+  `constraint_drift`: the card keeps showing its last good reading, says so, and never shows
+  the wrong data as current. When such a card's source drifts or stops answering, SmartBrain can
+  run the researcher again for the same question and park the result as a proposal on the card.
+  Nothing changes until you tap Apply, and Apply swaps the card to the new source under the same
+  trial and automatic undo as any repair. This is the same research that built the card, so it
+  sends the same things to the same cloud model and only for a card you already allowed that
+  model for; with research off, or no consent, the card just stays failing. At most one
+  re-research a day per card, and one proposal per failure streak (Dismiss is final until it
+  recovers). A card from a curated Library source waits until its refreshes are failing; a
+  web data file or page reading may ask after the first drift.
+
 ### Changed
 
 - **Neural Interface cards are politer to the sites they read.** Cards

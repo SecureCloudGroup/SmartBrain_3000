@@ -208,6 +208,14 @@ def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]
     return [*checks, {"check": "empty", "ok": not empty, "reason": "every output is empty" if empty else ""}]
 
 
+def checks_for(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]:
+    """The recipe checks for ``outputs`` (the verifier ``try_recipe`` and ``propose_card`` run), for the refresh
+    re-check (S9): the same classes on a fresh payload, so a constraint cannot pass at Keep by a different rule."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert isinstance(outputs, dict), "outputs must be a dict"
+    return _checks(ctx, outputs, url, info)
+
+
 def _run(ctx: ResearchCtx, draft: object) -> dict:
     """Validate ``draft`` as a researcher draft and run its pipeline on the stored sample (no network)."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"

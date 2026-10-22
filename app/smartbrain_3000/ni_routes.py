@@ -1587,11 +1587,13 @@ def apply_l2_proposal(request: Request, item_id: str) -> dict:
         raise HTTPException(status_code=409,
                             detail="item is broken — re-commission it first")
     proposal = item["spec"].get("_l2_proposal")
-    if not isinstance(proposal, dict) or not isinstance(proposal.get("stages"), dict):
+    if not isinstance(proposal, dict) or not (isinstance(proposal.get("stages"), dict)
+                                              or isinstance(proposal.get("spec"), dict)):
         raise HTTPException(status_code=409, detail="no L2 proposal to apply")
-    stages = proposal["stages"]
+    replace = isinstance(proposal.get("spec"), dict)  # S9: a re-research proposal swaps the whole card
     try:
-        new_spec = ni._spec_with_repaired_stages(item["spec"], stages)
+        new_spec = (dict(proposal["spec"]) if replace
+                    else ni._spec_with_repaired_stages(item["spec"], proposal["stages"]))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     # ``_spec_with_repaired_stages`` pops ``_l2_proposal`` alongside the _l1_*
@@ -1602,7 +1604,7 @@ def apply_l2_proposal(request: Request, item_id: str) -> dict:
     expected_rev = int(item["spec_rev"])
     try:
         applied_rev = store.apply_repair(item_id, new_spec, origin="repair_l2",
-                                          expected_rev=expected_rev)
+                                          expected_rev=expected_rev, replace_spec=replace)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if applied_rev is None:
