@@ -50,6 +50,10 @@ _MAX_HOST_LEN = 253  # RFC-1035 total host length; mirrors consent.py's guard
 _MAX_NOTE = 2000  # C2 note length cap (upper-bounded; validate route body)
 _MAX_CRED_VALUE = 8000  # bounded credential value; well over any real token/api key
 _MAX_POSITION = 10_000  # position is a display sort key; verifiable upper bound
+# Board-row vocabularies (tools/gen-ni-schema.py reads these; the emitters check against them)
+PAYLOAD_SLOTS = frozenset({"latest", "last_good", "preview"})
+AWAITING_FROM = frozenset({"page", "dataset", "library"})
+DRAFT_REASONS = frozenset({"render_sites"})
 
 
 class ValidateIn(BaseModel):
@@ -127,6 +131,7 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     if block is not None and _used_access(item["spec"].get("source")):
         block["used_key"] = True  # the preview fetch spent a key or contact email the user typed
     assert block is None or set(block) <= {"from", "host", "title", "used_key"}, "closed keys"
+    assert block is None or block["from"] in AWAITING_FROM, "closed vocab"
     return block
 
 
@@ -167,6 +172,7 @@ def _board_row(store: ni.NIStore, item: dict, *,
     assert store is not None and item, "store + item required"
     snap = _pick_board_snapshot(store, item)
     slot = "preview" if item["state"] == "draft" else (snap.get("slot") if snap else None)
+    assert slot is None or slot in PAYLOAD_SLOTS, "closed vocab"
     source_type = (item["spec"].get("source") or {}).get("type")
     # A flow SHELL (ni_flow._empty_shell_spec) carries a `model` placeholder source but has read
     # nothing: no "Interpreted" chip while it builds (found 2026-10-14 recording the NI clip —
@@ -266,6 +272,7 @@ def _render_fields(item: dict) -> dict:
         "preview": {"feed_candidates": feeds} if feeds else None,
     }
     assert set(out) == {"rendered", "render", "draft", "preview"}, "closed keys"
+    assert out["draft"] is None or out["draft"]["reason"] in DRAFT_REASONS, "closed vocab"
     return out
 
 

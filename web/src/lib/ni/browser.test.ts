@@ -26,6 +26,8 @@ function item(overrides: Partial<NiBoardItem>): NiBoardItem {
     id: "it1", title: "Gas prices", state: "live", enabled: true, interval_minutes: 15,
     last_checked: "2026-10-12T10:00:00Z", last_status: "ok", consecutive_failures: 0, position: 0,
     display: { size: "small" }, payload: null, payload_slot: null, payload_at: null, interpreted: false,
+    template_update: false, template_gone: false, needs_credentials: [], needs_params: [], l2_proposal: false,
+    c2_ok: false, awaiting_yes: null, shell: false, born: "", flow: null, payload_ok: null,
     ...overrides,
   };
 }
@@ -143,7 +145,8 @@ describe("feedCandidates — the site's own data feeds", () => {
   it("is empty when the row carries none (absent, null, or an older server)", () => {
     expect(feedCandidates(item({}))).toEqual([]);
     expect(feedCandidates(item({ preview: null }))).toEqual([]);
-    expect(feedCandidates(item({ preview: { feed_candidates: null } }))).toEqual([]);
+    // an older server's null list, which the current wire never sends
+    expect(feedCandidates(item({ preview: { feed_candidates: null } } as unknown as Partial<NiBoardItem>))).toEqual([]);
   });
 });
 

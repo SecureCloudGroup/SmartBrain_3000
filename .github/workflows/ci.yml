@@ -37,6 +37,17 @@ jobs:
           pip install -c app/requirements.lock "./app[dev]"
       - name: Ruff
         run: python -m ruff check app/smartbrain_3000 app/tests installer
+      # The NI wire contract is generated: one JSON Schema cut from the Python sources (ni_master,
+      # ni_recipe, ni, ni_flow) produces the Python types (ni_types_gen.py) and the web types
+      # (web/src/lib/ni/types.gen.ts). All three are committed and the web build imports the TS
+      # file, so a vocabulary that changed in Python without a regeneration would ship a client
+      # that disagrees with the server. Same pattern as the committed-bundle check below.
+      - name: Require the generated NI schema and types to match the sources
+        run: |
+          if ! python tools/gen-ni-schema.py --check; then
+            echo "::error::The generated NI schema or types are stale. Run 'python tools/gen-ni-schema.py' and commit app/smartbrain_3000/ni_schema.json, app/smartbrain_3000/ni_types_gen.py and web/src/lib/ni/types.gen.ts."
+            exit 1
+          fi
       - name: Pytest (app + signaling)
         working-directory: app
         run: python -m pytest -q
