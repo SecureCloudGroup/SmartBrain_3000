@@ -46,6 +46,12 @@ describe("runStatusLabel", () => {
     expect(runStatusLabel("proposal")).toBe("Fix proposed");
   });
 
+  it("labels the research-replacement repair statuses", () => {
+    expect(runStatusLabel("repair_research_started")).toBe("Looking for a replacement source");
+    expect(runStatusLabel("repair_research_proposed")).toBe("Found a replacement source for your approval");
+    expect(runStatusLabel("repair_research_declined")).toBe("No safe replacement found");
+  });
+
   it("passes unknown statuses through", () => {
     expect(runStatusLabel("running")).toBe("running");
   });
