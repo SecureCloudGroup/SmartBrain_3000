@@ -24,6 +24,18 @@ def _tool(name: str, description: str, prop: str, schema: dict) -> dict:
                              "additionalProperties": False}}
 
 
+_COMPARE = {"type": "object", "additionalProperties": False, "required": ["metric", "things"],
+            "description": "One card for an ask that compares named things: the same number for each, side by side.",
+            "properties": {
+                "metric": {"type": "string", "maxLength": 40, "description": "What is compared, in a few words."},
+                "unit": {"type": "string", "maxLength": 20, "description": "The unit of the number (optional)."},
+                "things": {"type": "array", "minItems": 2, "maxItems": 4, "items": {
+                    "type": "object", "additionalProperties": False, "required": ["name", "url", "path"],
+                    "properties": {
+                        "name": {"type": "string", "maxLength": 80, "description": "Which asked thing this is."},
+                        "url": {"type": "string", "maxLength": 2000, "description": "The fetched address for this thing."},
+                        "path": {"type": "string", "maxLength": 200, "description": "Path to the number in its sample."}}}}}}
+
 _TOOLS = [
     _tool("fetch_sample", "Fetch one data sample (JSON, CSV, feed or XML) with a plain GET and read a fenced digest. "
           "Only a URL library_search or web_search returned, exactly as returned. At most 8 per run.",
@@ -35,6 +47,10 @@ _TOOLS = [
     _tool("web_search", "Search the web for a published data source (a JSON, RSS, CSV or XML address) when the "
           "Library has none. Returns a fenced list of titles, snippets and addresses; they may then be fetched. "
           "At most 3 per run, cloud tier only.", "query", {"type": "string", "maxLength": tools.MAX_QUERY}),
+    _tool("propose_compare", "Finish an ask that compares two to four named things: one fetched address per thing "
+          "(each found by a library_search or web_search for that thing alone, then fetched) and the path to the same "
+          "number in each sample. The program names the rows from the question, checks every thing is shown with its "
+          "own value and seals the card. The run ends here.", "compare", _COMPARE),
     _tool("resolve_entity", "Resolve a place or named entity to the Library's canonical entry (no network).",
           "text", {"type": "string", "maxLength": 120}),
     _tool("try_recipe", "Run a draft spec on the last fetched sample (no network). Returns the card rows and "
@@ -43,6 +59,7 @@ _TOOLS = [
 TOOLS_JSON = json.dumps(sorted(_TOOLS, key=lambda t: t["name"]), sort_keys=True, separators=(",", ":"))
 _DISPATCH = {"fetch_sample": ("url", tools.fetch_sample), "library_search": ("query", tools.library_search),
              "propose_card": ("draft_spec", tools.propose_card), "resolve_entity": ("text", tools.resolve_entity),
+             "propose_compare": ("compare", tools.propose_compare),
              "try_recipe": ("draft_spec", tools.try_recipe),
              "web_search": ("query", tools.web_search)}
 

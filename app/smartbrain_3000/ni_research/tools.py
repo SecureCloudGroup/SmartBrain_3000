@@ -10,7 +10,7 @@ import copy
 import json
 from urllib.parse import urlsplit
 
-from .. import ni, ni_brief, ni_fetch, ni_polite, ni_recipe, pagegraph
+from .. import ni, ni_brief, ni_compare, ni_fetch, ni_polite, ni_recipe, pagegraph
 from ..netguard import FetchError
 from ..ni_verify.classes import shadow_reasons
 from ..ni_verify.rows import SourceInfo, read_result
@@ -113,7 +113,7 @@ def web_search(ctx: ResearchCtx, query: str) -> dict:
     except Exception as exc:  # a failed search degrades to a typed error, never a crash
         return _done(ctx, "web_search", query, error("search_unavailable", type(exc).__name__))
     rows = clean_search_rows(got.get("results") if isinstance(got, dict) else None)
-    ctx.record_search_results(rows)
+    ctx.record_search_results(rows, asked)
     return _done(ctx, "web_search", asked, {"ok": True, "results": len(rows), "digest": search_digest(asked, rows),
                                             "searches_left": ctx.max_searches - ctx.searches})
 
@@ -138,7 +138,7 @@ def library_search(ctx: ResearchCtx, query: str) -> dict:
     for row in rows[:MAX_CANDIDATES]:  # bounded by the limit
         blocked = bool(row.get("needs_key") or row.get("needs_contact"))
         ctx.record(row["url"], "library", format=row.get("format"), scope=row.get("scope"),
-                   title=one_line(row.get("title") or "", 120), blocked=blocked)
+                   title=one_line(row.get("title") or "", 120), blocked=blocked, query=query.strip())
         found.append({"title": one_line(row.get("title") or "", 120), "provider": one_line(row.get("provider") or "", 80),
                       "url": row["url"], "format": row.get("format"), "scope": row.get("scope"),
                       "tier": row.get("tier"), "needs_access": blocked})
@@ -202,6 +202,10 @@ def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]
     source = SourceInfo(name=pagegraph.registrable_domain(urlsplit(url).hostname or ""), url=url,
                         scope=info.get("scope"))
     found = shadow_reasons(ctx.request, result, source, ctx.now, ctx.zone)
+    # S7: the compare check reads the card's own rows, never the ask's words (the ask always names every thing):
+    # each asked thing must appear in a row with a value of its own
+    wanted = list(ctx.question.get("entities") or []) or list(ni_compare.asked(ctx.request))
+    found["compare"] = ni_compare.reasons(wanted, outputs)
     checks = [{"check": check, "ok": not found.get(cls), "reason": one_line("; ".join(found.get(cls) or []), 120)}
               for cls, check in _VERIFY_CLASSES.items()]
     empty = not any(v not in (None, "", [], {}) for v in outputs.values())
@@ -367,3 +371,142 @@ def propose_card(ctx: ResearchCtx, draft_spec: object) -> dict:
     except (ValueError, TypeError) as exc:
         return error("invalid_spec", str(exc))
     return {"ok": True, "proposal": {"spec": sealed, "tier": recipe["tier"], "preview": got["preview"]}}
+
+
+# ---- S7: compare cards ------------------------------------------------------------------------------------
+
+def _compare_things(ctx: ResearchCtx, compare: object) -> tuple[list[dict] | None, dict]:
+    """The proposed things as ``[{name, url, path}]`` with each name taken from the QUESTION's own spelling (the model
+    only says which asked thing an address is for), or ``(None, a typed error)``. Every thing the question asked must
+    be proposed exactly once; every address must be one a Library row or a search handed over, fetched here, and found
+    by a search that named that thing and no other asked thing."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    wanted = [str(e) for e in ctx.question.get("entities") or []]
+    if len(wanted) < ni_compare.MIN_ENTITIES:
+        return None, error("not_a_compare", "the question does not compare named things; use propose_card")
+    rows = compare.get("things") if isinstance(compare, dict) else None
+    if not isinstance(rows, list) or len(rows) != len(wanted) or not all(
+            isinstance(r, dict) and all(isinstance(r.get(k), str) for k in ("name", "url", "path")) for r in rows):
+        return None, error("invalid_args", f"things must list each of: {', '.join(wanted)} (name, url, path)")
+    things: list[dict] = []
+    for row in rows:  # bounded by ni_compare.MAX_ENTITIES
+        hit = [w for w in wanted if ni_compare.names(w, row["name"])]
+        if len(hit) != 1 or any(t["name"] == hit[0] for t in things):
+            return None, error("invalid_args", f"name {one_line(row['name'], 60)!r} is not exactly one asked thing, once")
+        err = _compare_address(ctx, hit[0], wanted, row["url"])
+        if err is not None:
+            return None, err
+        things.append({"name": hit[0], "url": normal_url(row["url"]), "path": row["path"].strip()})
+    return things, {}
+
+
+def _compare_address(ctx: ResearchCtx, name: str, wanted: list[str], url: str) -> dict | None:
+    """A typed error when ``url`` may not stand for ``name`` in a compare (provenance, sample, search), else None."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert name in wanted, "an asked thing"
+    origin, why = ctx.origin(url)
+    if origin is None:
+        return error("provenance", why)
+    info = ctx.urls.get(normal_url(url)) or {}
+    if info.get("blocked"):
+        return error("needs_access", "this source needs a key or contact email")
+    if normal_url(url) not in ctx.samples:
+        return error("no_sample", f"fetch_sample the address for {name} first")
+    others = [w for w in wanted if w != name]
+    for query in info.get("queries") or []:  # bounded by ctx._MAX_QUERIES
+        if ni_compare.names(name, query) and not any(ni_compare.names(o, query) for o in others):
+            return None
+    return error("wrong_thing", f"the address for {name} must come from a search for {name} alone")
+
+
+def _compare_values(ctx: ResearchCtx, things: list[dict]) -> tuple[list | None, str, dict]:
+    """``(numbers, format, error)``: the number at each thing's path in its stored sample; one format throughout."""
+    assert things, "things required"
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    fmts = {ctx.samples[t["url"]]["format"] for t in things}
+    if len(fmts) != 1:
+        return None, "", error("invalid_spec", "every thing's address must answer in the same format")
+    values = []
+    for t in things:  # bounded
+        got = ni_compare.number_at(ctx.samples[t["url"]]["parsed"], t["path"])
+        if got is None:
+            return None, "", error("extract_miss", f"no number at {one_line(t['path'], 80)!r} in the sample for {t['name']}")
+        values.append(got)
+    return values, next(iter(fmts)), {}
+
+
+def _compare_spec(ctx: ResearchCtx, things: list[dict], values: list, fmt: str, label: str, unit: str | None
+                  ) -> tuple[dict | None, dict]:
+    """The sealed compare draft and its outputs (``{spec, outputs}``), or ``(None, a typed error)``."""
+    assert len(things) == len(values), "a number per thing"
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    cadence = ni_recipe.CADENCE_MINUTES.get(ctx.question.get("cadence") or "hourly", 60)
+    title = ni_compare.title_of([t["name"] for t in things], label)
+    built = ni_compare.build(things, values, label=label, unit=unit, title=title, ask=ctx.request, now=ctx.now,
+                             cadence_s=cadence * 60, viewer_tz=str(getattr(ctx.zone, "key", None) or "UTC"))
+    if built is None:
+        return None, error("not_displayable", "these readings can't be laid out side by side")
+    from ..ni_forms.form_scene import display_size_for_span
+    draft = {"version": 1, "title": title, "goal": ctx.request[:ni._MAX_GOAL], "params": {},
+             "source": {"type": "http_json", "url": things[0]["url"], **({"format": fmt} if fmt != "json" else {}),
+                        "compare": {"entities": things}},
+             "pipeline": built["pipeline"], "scene": built["scene"],
+             "display": {"size": display_size_for_span(str(built["scene"]["spans"]["desktop"]))}, "model": None}
+    try:
+        spec = ni.validate_spec(copy.deepcopy(draft), researcher=True)
+    except (ValueError, TypeError, AssertionError) as exc:
+        return None, error("invalid_spec", str(exc))
+    return {"spec": spec, "outputs": built["preview_payload"]}, {}
+
+
+def propose_compare(ctx: ResearchCtx, compare: object) -> dict:
+    """The terminal tool for an ask that compares two to four named things: one address per thing, one path to a
+    number in each, the same metric. The program checks every address's provenance and its search, reads the numbers
+    from the samples already fetched, names each row from the question (never from the model) and seals the card
+    with the same checks and recipe as ``propose_card``. A thing missing, a number missing or a check failing is a
+    typed error, never a card with fewer things."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert ctx.max_turns > 0, "a turn budget"
+    out = ctx.spend("propose_compare")
+    if out is not None:
+        return out
+    things, err = _compare_things(ctx, compare)
+    if things is None:
+        return _done(ctx, "propose_compare", "compare", err)
+    values, fmt, err = _compare_values(ctx, things)
+    if values is None:
+        return _done(ctx, "propose_compare", "compare", err)
+    label = one_line(compare.get("metric") if isinstance(compare, dict) else "", ni_compare.MAX_LABEL)  # type: ignore[union-attr]
+    unit = ni_compare.clean_unit(compare.get("unit") if isinstance(compare, dict) else None)  # type: ignore[union-attr]
+    built, err = _compare_spec(ctx, things, values, fmt, label or "Value", unit)
+    if built is None:
+        return _done(ctx, "propose_compare", "compare", err)
+    checks = _checks(ctx, built["outputs"], things[0]["url"], ctx.urls.get(things[0]["url"]) or {})
+    if any(not c["ok"] for c in checks):
+        reasons = [f"{c['check']}: {c['reason']}" for c in checks if not c["ok"]]
+        return _done(ctx, "propose_compare", "compare", {**error("verify_failed", "; ".join(reasons)), "reasons": reasons})
+    return _seal_compare(ctx, built, things, fmt, checks)
+
+
+def _seal_compare(ctx: ResearchCtx, built: dict, things: list[dict], fmt: str, checks: list[dict]) -> dict:
+    """The proposal for a compare that passed its checks: recipe (one source per thing), tier and trace."""
+    assert things and checks, "things and checks required"
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    origins = [ctx.origin(t["url"])[0] or "preview" for t in things]
+    kinds = [{"library": "library", "search": "search"}.get(o, "endpoint") for o in origins]
+    tier = "curated" if all(o == "library" for o in origins) else _tier("search", fmt)
+    ctx.note("propose_compare", "compare", "ok")
+    recipe = {"question": ctx.question,
+              "sources": [{"kind": k, "ref": t["url"][:300], "host": (t["url"].split("/")[2])[:253],
+                           "why": f"{_ORIGIN_WHY[o]} for {t['name']}"[:200]}
+                          for k, o, t in zip(kinds, origins, things, strict=True)],
+              "constraints": _constraints(ctx.question), "tier": tier,
+              "verification": {"verdict": "pass", "checks": checks, "verified_at": ctx.now.isoformat()[:40],
+                               "fetches": min(ctx.fetches, 8)},
+              "provenance": {"author": "researcher", "built_at": ctx.now.isoformat()[:40]},
+              "research": ctx.sealed_trace()}
+    try:
+        sealed = ni.validate_spec({**built["spec"], "recipe": recipe}, researcher=True)
+    except (ValueError, TypeError) as exc:
+        return error("invalid_spec", str(exc))
+    return {"ok": True, "proposal": {"spec": sealed, "tier": tier, "preview": _bounded(built["outputs"])}}

@@ -281,7 +281,7 @@ export interface FlowPoll {
   actions: ActionKind[];
 }
 
-export const TOOLS = ["fetch_sample", "library_search", "propose_card", "resolve_entity", "try_recipe", "web_search"] as const;
+export const TOOLS = ["fetch_sample", "library_search", "propose_card", "propose_compare", "resolve_entity", "try_recipe", "web_search"] as const;
 export type Tool = (typeof TOOLS)[number];
 
 export interface RecipeTurn {

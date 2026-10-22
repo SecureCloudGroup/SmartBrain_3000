@@ -99,7 +99,8 @@ gold entry with `harness: {"mode": "research", "library_rows": [...]}` drives `r
 tokens, cache reads and cost per ask. Open web (S5b): the cloud tier also runs `web_search` and fetches pages.
 Searches are recorded in the cassette's `search` list (keyed by query, failures included) and the page fetches
 ride the netguard patch, so a held-out run replays offline; `--research-web off` gives a Library-only run of the
-same asks (`CI7` is a hand-built web ask: the card lands `verified_endpoint`, held for Keep). Measure S4c on the
+same asks (`CI7` is a hand-built web ask: the card lands `verified_endpoint`, held for Keep; `CI8` is a hand-built compare ask: two addresses, five scripted tool turns ending in
+`propose_compare`, the card shows both things). Measure S4c on the
 gold with, for example:
 
 ```

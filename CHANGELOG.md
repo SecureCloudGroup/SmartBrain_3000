@@ -13,6 +13,13 @@ to know when a release changes behavior.
 
 ### Added
 
+- **Compare cards.** Ask to compare two to four things ("compare Nvidia and AMD stock prices", "weather in
+  Denver vs Salt Lake City") and the card shows every one of them side by side, each with its own number,
+  named in your words. Where SmartBrain cannot read all of them it says "can't compare these yet" and why,
+  instead of showing one of them. A card that shows fewer things than you asked for is refused on every way a
+  card gets built, and the periodic re-check catches a card that later loses one. If one thing's source
+  stops answering, the card says so and keeps the last good comparison. It reads one address per thing, on the
+  same source and with the same request limits as a single-thing card; nothing new leaves your computer.
 - **Brief cards.** Ask for "the latest news on X" or "a brief on Y" and the card lists the
   source's own headlines (title, link, time and where it came from), taken from any feed, list
   or JSON items source. No model writes a headline. On a kept card you can turn on "Summary

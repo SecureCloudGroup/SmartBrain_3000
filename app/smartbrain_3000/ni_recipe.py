@@ -25,7 +25,7 @@ CHECKS = frozenset({"place", "window", "threshold", "compare", "units", "numbers
 SOURCE_KINDS = frozenset({"library", "search", "endpoint", "page"})
 VERDICTS = frozenset({"pass", "partial", "fail"})
 TOOLS = frozenset({"library_search", "resolve_entity", "web_search", "fetch_sample", "try_recipe",
-                   "propose_card"})
+                   "propose_card", "propose_compare"})
 OPS = frozenset({"=", "!=", "<", "<=", ">", ">=", "in", "contains"})
 DIRS = frozenset({"asc", "desc"})
 MAX_RECIPE_BYTES = 16 * 1024

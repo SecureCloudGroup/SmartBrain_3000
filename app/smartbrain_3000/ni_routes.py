@@ -29,6 +29,7 @@ from . import (
     netguard,
     ni,
     ni_brief,
+    ni_compare,
     ni_flow,
     ni_library,
     ni_master,
@@ -2169,6 +2170,8 @@ def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:
     """
     assert isinstance(item, dict), "item must be a dict"
     spec = ni_library._deep_copy_json(item["spec"])
+    if ni_compare.is_compare(spec):  # S7: its things are this owner's kept addresses, not a shareable source
+        raise ni_library.LibraryError("compare cards read the addresses you kept and can't be exported as a template")
     if ni_brief.summary_on(spec):  # a template ships the headlines, never the installer's model or its summary
         spec = ni_brief.without_summary(spec)
     for key in _EXPORT_STRIP_KEYS:

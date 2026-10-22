@@ -262,13 +262,13 @@ def test_blind50_baseline_results_rescore_to_the_human_review() -> None:
 def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
     gold = ne.load_gold(_EVAL / "gold" / "ci.json")
     runs = ne.replay_all(gold, _EVAL / "cassettes" / "ci")
-    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6", "CI7"], runs
+    assert [r["id"] for r in runs] == ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6", "CI7", "CI8"], runs
     assert all(r["cassette_drift"] == 0 for r in runs), "scripted cassette has no prompt hashes"
     scored, table = ne.score_all(gold, runs)
     got = {s["id"]: s["cls"] for s in scored}
     assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "declined", "CI5": "links",
-                   "CI6": "right", "CI7": "right"}, got
-    assert (table["ALL"]["n"], table["ALL"]["right"]) == (7, 3), table["ALL"]
+                   "CI6": "right", "CI7": "right", "CI8": "right"}, got
+    assert (table["ALL"]["n"], table["ALL"]["right"]) == (8, 4), table["ALL"]
 
 
 def test_replay_is_deterministic() -> None:
@@ -276,7 +276,7 @@ def test_replay_is_deterministic() -> None:
     first = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     second = ne.score_all(gold, ne.replay_all(gold, _EVAL / "cassettes" / "ci"))[0]
     assert first == second, "two replays must score identically"
-    assert len(first) == 7, first
+    assert len(first) == 8, first
 
 
 def test_missing_cassette_entry_surfaces_as_an_error_not_a_pass(tmp_path) -> None:
@@ -300,6 +300,15 @@ def test_a_research_ask_replays_from_a_hand_built_cassette_with_no_model() -> No
                                "cache_write": 5000, "cost_usd": 0.0}, run["research"]
     assert ne.score_all(gold, runs)[0][0]["cls"] == "right"
     assert "median" in ne.research_summary(runs) and ne.research_summary([{"id": "x"}]) == ""
+
+
+def test_a_compare_ask_replays_to_a_card_that_shows_both_things() -> None:
+    """S7: the researcher proposes a compare (one address per thing); the card is held for Keep with both rows."""
+    gold = [g for g in ne.load_gold(_EVAL / "gold" / "ci.json") if g["id"] == "CI8"]
+    run = ne.replay_all(gold, _EVAL / "cassettes" / "ci")[0]
+    assert run["outcome"] == "awaiting-yes" and run["cassette_drift"] == 0, run
+    assert [(r["name"], r["value"]) for r in run["preview"]["rows"]] == [("Alpha Corp", 131.5), ("Beta Corp", 150.25)]
+    assert ne.score_all(gold, [run])[0][0]["cls"] == "right"
 
 
 def test_research_off_and_local_change_what_the_same_cassette_can_do() -> None:

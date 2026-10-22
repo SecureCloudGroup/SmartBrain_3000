@@ -40,6 +40,12 @@ describe("friendlyErrorClass", () => {
     expect(t).toContain("last good reading is still shown");
   });
 
+  it("explains a compare card where one thing couldn't be read", () => {
+    const t = friendlyErrorClass("compare_partial");
+    expect(t).toContain("compared things couldn't be read");
+    expect(t).toContain("last good comparison is still shown");
+  });
+
   it("echoes an unknown class verbatim (no invented story)", () => {
     expect(friendlyErrorClass("contract_violation")).toBe("contract_violation");
     expect(friendlyErrorClass("weird_new_thing")).toBe("weird_new_thing");

@@ -209,5 +209,61 @@
     }
    ]
   }
+ },
+ {
+  "id": "CI8",
+  "set": "CI",
+  "ask": "compare Alpha Corp and Beta Corp stock prices",
+  "kind": "compare",
+  "constraints": {
+   "places": [],
+   "window": null,
+   "threshold": null,
+   "compare_n": 2,
+   "units": null,
+   "entities": [
+    "Alpha Corp",
+    "Beta Corp"
+   ]
+  },
+  "acceptable_sources": [
+   "data.example.org"
+  ],
+  "expected_outcome": "card",
+  "forbidden_outcomes": [],
+  "human_verdict": null,
+  "human_verdict_raw": null,
+  "defect_class": null,
+  "baseline": {},
+  "harness": {
+   "mode": "research",
+   "research": "cloud",
+   "library_rows": [
+    {
+     "source_id": "quote-alpha",
+     "title": "Alpha quote",
+     "host": "data.example.org",
+     "url": "https://data.example.org/quote/alpha",
+     "provider": "Example",
+     "authority": "official",
+     "format": "json",
+     "scope": "global",
+     "label": "",
+     "choice": false
+    },
+    {
+     "source_id": "quote-beta",
+     "title": "Beta quote",
+     "host": "data.example.org",
+     "url": "https://data.example.org/quote/beta",
+     "provider": "Example",
+     "authority": "official",
+     "format": "json",
+     "scope": "global",
+     "label": "",
+     "choice": false
+    }
+   ]
+  }
  }
 ]

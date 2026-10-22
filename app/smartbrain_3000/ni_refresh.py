@@ -13,7 +13,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import db, ni, ni_recipe
+from . import db, ni, ni_compare, ni_recipe
 from .ni_research import tools
 from .ni_research.ctx import ResearchCtx
 
@@ -84,10 +84,11 @@ def drift_reasons(spec: dict, outputs: dict, now: datetime) -> list[str]:
 
 def reason_of(item: dict) -> str | None:
     """Why this failing card could ask for a new source: ``constraint_drift`` (its last status), ``source_dead``
-    (the fetch keeps failing), else None."""
+    (the fetch keeps failing, or one compared thing's address does: ``compare_partial``), else None."""
     assert isinstance(item, dict), "item required"
     status = str(item.get("last_status") or "")
-    out = {ni.CONSTRAINT_DRIFT: "constraint_drift", "fetch_failed": "source_dead"}.get(status)
+    out = {ni.CONSTRAINT_DRIFT: "constraint_drift", "fetch_failed": "source_dead",
+           ni_compare.PARTIAL: "source_dead"}.get(status)
     assert out is None or out in ni.RESEARCH_REASONS, "a closed reason"
     return out
 

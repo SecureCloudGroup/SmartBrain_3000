@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from . import ni_brief, ni_recipe
+from . import ni_brief, ni_compare, ni_recipe
 from .zones import zone_named
 
 log = logging.getLogger("smartbrain.ni")
@@ -147,7 +147,7 @@ _SOURCE_TYPES: frozenset[str] = frozenset(
 # ``smartbrain_3000.formats`` turns into the walker-shaped dict the pipeline
 # grammar already consumes. Refused when absent from a candidate spec.
 _HTTP_JSON_FORMATS: frozenset[str] = frozenset({"json", "csv", "feed", "xml", "text"})
-_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format", "secret_query", "contact_ua", "port"})
+_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format", "secret_query", "contact_ua", "port", "compare"})
 # The user's own key as a query parameter (most free-key APIs: ``?api_key=``): resolved
 # host-bound at fetch time exactly like a ``$secret`` header, never stored in the URL.
 _SECRET_QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\-]{1,40}\Z")
@@ -1217,6 +1217,8 @@ def _validate_http_json_source(s: dict) -> None:
     port = s.get("port")  # S5a: the one non-80/443 port a Library row declared (default: refused)
     if port is not None and (not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536):
         raise ValueError("spec.source.port must be a TCP port number")
+    if s.get("compare") is not None:  # S7: one sealed address per compared thing (ni_compare)
+        ni_compare.validate_source(s)
 
 
 def _validate_http_page_source(s: dict) -> None:
@@ -6495,15 +6497,18 @@ def _refuse_blank_page_run(spec: dict, outputs: dict, llm_fields: set[str]) -> N
 
 def _constraint_drift(spec: dict, outputs: dict, now: datetime) -> str:
     """S9: why a recipe card's fresh outputs fail a constraint that passed at Keep (host-free, one line), or
-    "" when they hold. A spec with no ``recipe`` returns "" before anything else runs."""
+    "" when they hold. A card with neither a ``recipe`` nor a compare source returns "" (S7: a compare card is
+    re-checked whichever path built it)."""
     assert isinstance(spec, dict), "spec must be a dict"
     assert now.tzinfo is not None, "now must be aware"
-    if not isinstance(spec.get("recipe"), dict):
-        return ""
-    from . import (
-        ni_refresh,  # lazy: ni_refresh reads the research verifier, which imports ni
-    )
-    return "; ".join(ni_refresh.drift_reasons(spec, outputs, now))[:_MAX_STATUS]
+    # S7: a compare card, whichever path built it, must still show every thing it was kept with (and asked for)
+    found = ni_compare.drift(spec, outputs)
+    if isinstance(spec.get("recipe"), dict):
+        from . import (
+            ni_refresh,  # lazy: ni_refresh reads the research verifier, which imports ni
+        )
+        found += [r for r in ni_refresh.drift_reasons(spec, outputs, now) if r not in found]
+    return "; ".join(found)[:_MAX_STATUS]
 
 
 def _finalize_run(store: NIStore, item: dict, spec: dict, outputs: dict,
@@ -7840,8 +7845,8 @@ def _l2_eligible(item: dict, spec: dict) -> bool:
     L2 door for items where L1 could still fire.
     """
     assert isinstance(item, dict) and isinstance(spec, dict), "item + spec required"
-    if item.get("state") != "failing" or item.get("last_status") == CONSTRAINT_DRIFT:
-        return False  # S9: a stage patch cannot move a source back to the scope it was kept for
+    if item.get("state") != "failing" or item.get("last_status") in (CONSTRAINT_DRIFT, ni_compare.PARTIAL):
+        return False  # S9: a stage patch cannot move a source back to the scope it was kept for (or bring a thing back)
     policy = spec.get("repair_policy") or {}
     if not policy.get("l2_frontier"):
         return False
@@ -8157,6 +8162,8 @@ def _dispatch_source(spec: dict, item_id: str, gateway_mod, secrets_store,
     assert isinstance(spec, dict) and item_id, "spec + id required"
     source = spec.get("source") or {}
     stype = source.get("type")
+    if stype == "http_json" and source.get("compare"):
+        return _fetch_compare(source), None
     if stype == "http_json":
         return _fetch_http_json(source, item_id, secrets_store), None
     if stype == "http_page" and source.get("render") == RENDER_BROWSER:
@@ -8225,6 +8232,30 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
         except netguard.FetchError as exc:
             raise _fetch_error(exc) from None
     return _fetch_http_textual(url, fmt, resolved_headers, has_headers, port)
+
+
+def _fetch_compare(source: dict) -> dict:
+    """S7 compare source: every compared address through the one shared fetch-and-parse path (``ni_fetch``, so the
+    per-host budget, the port policy and robots.txt apply to each), the rows ``ni_compare.fetch`` reads from them.
+    A busy host defers the whole card (a capacity status); any other failure is that thing's absence."""
+    from . import (  # lazy: keep the fetch layer off ni's import graph edges
+        ni_fetch,
+        ni_polite,
+    )
+
+    assert isinstance(source, dict) and source.get("compare"), "a compare source"
+    fmt = source.get("format") or "json"
+    port = ni_polite.declared_port(source)
+
+    def get(url: str) -> object:
+        try:
+            return ni_fetch.fetch_parsed(url, fmt, allow_redirects=True, port=port)
+        except ni_fetch.ParseError as exc:
+            raise NIError("fetch_failed", exc.kind) from None
+        except ni_fetch.netguard.FetchError as exc:
+            raise _fetch_error(exc) from None
+
+    return ni_compare.fetch(source, get)
 
 
 def http_request_parts(source: dict, item_id: str, secrets_store) -> tuple[str, dict[str, str]]:

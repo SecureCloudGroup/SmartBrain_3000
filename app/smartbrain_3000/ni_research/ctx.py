@@ -21,6 +21,7 @@ MAX_SECONDS = 120.0
 TOKEN_CAP = 60_000
 MAX_SAMPLES = 8
 _MAX_URLS = 200
+_MAX_QUERIES = 4
 _BAD_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".lan", ".home", ".corp")
 ORIGINS = ("library", "search", "preview")
 
@@ -148,22 +149,28 @@ class ResearchCtx:
 
     def record(self, url: str, kind: str, **info: object) -> None:
         """Remember a result URL, exactly, as a fetch origin: ``library`` | ``search`` | ``preview``. A search
-        result counts only over https: an address from the open web is never read in the clear."""
+        result counts only over https: an address from the open web is never read in the clear. ``query`` (S7):
+        the search that handed it over, kept (a few, bounded) so a compare can tell which thing an address is for."""
         assert isinstance(url, str), "url must be text"
         assert kind in ORIGINS, "a known origin"
         if host_refusal(url) is not None or len(self.urls) >= _MAX_URLS:
             return
         if kind == "search" and urlsplit(url.strip()).scheme.lower() != "https":
             return
-        self.urls.setdefault(normal_url(url), {"kind": kind, **info})
+        query = info.pop("query", None)
+        entry = self.urls.setdefault(normal_url(url), {"kind": kind, **info})
+        if isinstance(query, str) and query.strip():
+            seen = entry.setdefault("queries", [])
+            if len(seen) < _MAX_QUERIES and one_line(query, 200) not in seen:
+                seen.append(one_line(query, 200))
 
-    def record_search_results(self, rows: list) -> None:
+    def record_search_results(self, rows: list, query: str = "") -> None:
         """Web search results the loop got (S5b): each ``{url, title}`` becomes a legal fetch origin."""
         assert len(rows) < 1000, "a bounded result list"
         assert isinstance(rows, list), "rows must be a list"
         for r in rows[:10]:  # bounded: a result page
             if isinstance(r, dict) and isinstance(r.get("url"), str):
-                self.record(r["url"], "search", title=one_line(r.get("title") or "", 120))
+                self.record(r["url"], "search", title=one_line(r.get("title") or "", 120), query=query)
 
     def origin(self, url: str) -> tuple[str | None, str]:
         """``(origin, reason)``: how ``url`` may be fetched (``library`` | ``search`` | ``preview``) or ``(None, why

@@ -1325,6 +1325,7 @@
         "fetch_sample",
         "library_search",
         "propose_card",
+        "propose_compare",
         "resolve_entity",
         "try_recipe",
         "web_search"

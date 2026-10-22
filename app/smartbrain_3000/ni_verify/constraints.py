@@ -53,7 +53,10 @@ _ENTITY_FILL = frozenset({
     "weather", "forecast", "price", "prices", "temperature", "temperatures", "temp", "temps", "stats", "stat",
     "score", "scores", "comparison", "compare", "the", "a", "an", "how", "is", "are", "what", "whats", "current",
     "currently", "latest", "live", "show", "me", "of", "and", "which", "better", "warmer", "colder", "cooler",
-    "hotter", "cost", "costs", "rate", "rates", "standings", "record", "records", "news", "difference"}) | _WINDOW_WORDS
+    "hotter", "cost", "costs", "rate", "rates", "standings", "record", "records", "news", "difference",
+    # what kind of thing the compared names are ("Nvidia and AMD stock prices"): context, not part of a name
+    "stock", "stocks", "share", "shares", "coin", "coins", "crypto", "cryptocurrency", "token", "tokens",
+    "downloads", "download", "views", "followers", "population", "exchange"}) | _WINDOW_WORDS
 
 _COUNTING_RE = re.compile(r"\bhow many\b|\bnumber of\b|\bcounts? of\b|\btotal\b|\bhow much total\b")
 _AREAS: tuple[tuple[str, re.Pattern], ...] = tuple((name, re.compile(rx)) for name, rx in (
