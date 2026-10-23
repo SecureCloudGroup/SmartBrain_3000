@@ -8446,7 +8446,7 @@ def _fetch_http_page_polite(source: dict, item_id: str, secrets_store, *,
     # F4: forward the HTTP header's charset to the jail so a page with no BOM
     # and no <meta charset> still decodes correctly ("Content-Type:
     # text/html; charset=ISO-8859-1" on real latin-1 bytes).
-    charset = netguard._declared_charset(str(got.get("content_type") or ""))
+    charset = netguard.declared_charset(str(got.get("content_type") or ""))
     try:
         extracted = jailrun.run_extractor(bytes(body), url_hint=url,
                                            declared_charset=charset)

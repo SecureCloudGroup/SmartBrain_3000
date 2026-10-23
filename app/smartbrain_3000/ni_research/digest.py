@@ -198,7 +198,8 @@ def table_digest(url: str, tables: list[dict], feeds: list[str], entities: list[
     """The fenced digest of a web page: its data tables only (index, what it sits under, column keys, row count, a
     few capped sample rows) and the feed links and JSON-LD types it announces. The page's prose is not in it and is
     not read anywhere. ``tables`` are ``ni_table.read`` tables (``table`` is the index a draft names). Every string
-    goes through ``clean_text`` and the whole is fenced like any sample."""
+    goes through ``clean_text`` and the whole is fenced like any sample. At most ``MAX_TABLE_DIGEST_CHARS`` (3,200)
+    characters, the worst case about 800 tokens."""
     assert isinstance(url, str), "url required"
     assert isinstance(tables, list), "tables required"
     biggest = sorted(range(len(tables)), key=lambda i: -len(tables[i]["rows"]))[:MAX_SHOWN_TABLES]

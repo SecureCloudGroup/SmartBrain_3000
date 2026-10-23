@@ -412,7 +412,9 @@ class Session:
                    "kind": getattr(exc, "kind", None), "status": getattr(exc, "status", None)}
             self.data["fetches"].append({"key": key, "ok": False, "error": err})
             raise
-        self.data["fetches"].append({"key": key, "ok": True, "value": value})
+        # a cassette is JSON text: the raw ``content`` bytes of a text fetch are not recorded (replay reads ``text``)
+        kept = {k: v for k, v in value.items() if not isinstance(v, (bytes, bytearray))} if isinstance(value, dict) else value
+        self.data["fetches"].append({"key": key, "ok": True, "value": kept})
         return value
 
 

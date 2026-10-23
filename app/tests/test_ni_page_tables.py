@@ -46,8 +46,10 @@ class Pages:
     """A scripted fetch layer serving HTML: ``safe_fetch_json`` refuses it as JSON, ``safe_fetch_text`` serves it as
     text (the sniff path), ``safe_fetch_page`` serves its bytes (the table path). Calls are recorded."""
 
-    def __init__(self, monkeypatch, bodies: dict, fail: dict | None = None) -> None:
-        self.bodies, self.fail, self.calls = bodies, fail or {}, []
+    def __init__(self, monkeypatch, bodies: dict, fail: dict | None = None, raw: dict | None = None) -> None:
+        """``raw`` maps an address to ``(bytes, content_type)``: served byte for byte on both paths, the way a real
+        server does (the sniff path's ``text`` is decoded by the header alone, as ``safe_fetch_text`` does)."""
+        self.bodies, self.fail, self.calls, self.raw = bodies, fail or {}, [], raw or {}
         monkeypatch.setattr(netguard, "safe_fetch_json", self.json)
         monkeypatch.setattr(netguard, "safe_fetch_text", self.text)
         monkeypatch.setattr(netguard, "safe_fetch_page", self.page)
@@ -64,10 +66,17 @@ class Pages:
 
     def text(self, url, fmt, headers=None, allow_redirects=True):
         body = self._serve("text", url, allow_redirects, headers)
+        if url in self.raw:
+            content, ctype = self.raw[url]
+            return {"final_url": url, "status": 200, "content_type": ctype, "content": content,
+                    "text": netguard.decode_body(content, ctype)}
         return {"final_url": url, "status": 200, "content_type": "text/html; charset=utf-8", "text": body}
 
     def page(self, url, headers=None, allow_redirects=True, deadline_seconds=None):
         body = self._serve("page", url, allow_redirects, headers)
+        if url in self.raw:
+            content, ctype = self.raw[url]
+            return {"final_url": url, "status": 200, "content_type": ctype, "content": content}
         return {"final_url": url, "status": 200, "content_type": "text/html; charset=utf-8", "content": body.encode()}
 
 
@@ -96,9 +105,9 @@ def table_draft(url: str = URL, index: int = 0, paths: dict | None = None, **ove
     return spec
 
 
-def web_ctx(monkeypatch, bodies: dict | None = None, **over):
-    """A ctx whose search handed over ``URL`` (a legal origin), with the fake net serving ``bodies``."""
-    pages = Pages(monkeypatch, bodies or {URL: RIVERS})
+def web_ctx(monkeypatch, bodies: dict | None = None, raw: dict | None = None, **over):
+    """A ctx whose search handed over ``URL`` (a legal origin), with the fake net serving ``bodies`` (or ``raw`` bytes)."""
+    pages = Pages(monkeypatch, bodies or {URL: RIVERS}, raw=raw)
     ctx = _ctx(None, allowed_origins=frozenset({"library", "search", "preview"}), **over)
     ctx.question.update(kind="status", subject="river levels", limit=None)
     ctx.request = "river levels"
@@ -114,6 +123,16 @@ def test_the_jail_reads_th_headers_the_caption_the_heading_and_skips_hidden_cell
     assert tables[0]["caption"] == "Gauge levels, feet" and tables[0]["heading"] == "Current levels"
     assert tables[1]["heading"] == "Seven day outlook", "a grid with no <th> row promotes its first row"
     assert all("api key" not in str(t) for t in tables), "a hidden table's text is never a cell"
+
+
+def test_a_row_opened_while_hidden_adds_no_row_at_all() -> None:
+    hidden = ('<tr style="display:none"><td></td><td></td></tr><tr hidden><td>template</td><td>0</td></tr>'
+              '<tbody hidden><tr><td>x</td><td>y</td></tr></tbody>')
+    html = table_html(["Station", "Stage"], LEVELS).replace("</tr><tr><td>Kansas", "</tr>" + hidden + "<tr><td>Kansas", 1)
+    assert hidden in html
+    raw = jail_extract.extract(html.encode(), "https://x.example/p")["tables"]
+    assert [r[0] for r in raw[0]["rows"]] == ["Kansas City", "Hermann", "St. Charles"], "no empty or blanked row"
+    assert ni_table.read_all(raw)[0]["rows"][0][0] == "Kansas City"
 
 
 @pytest.mark.parametrize("raw", [None, 5, "x", [], {}, {"rows": "no"}, {"rows": []}, {"headers": ["a", "b"], "rows": []},
@@ -188,6 +207,11 @@ def test_a_table_that_is_gone_renamed_or_unclear_is_an_honest_failure_never_anot
     with pytest.raises(ni_table.TableGone) as unclear:
         ni_table.locate(both, loc)
     assert unclear.value.kind == ni_table.AMBIGUOUS, "two equal fits and nothing to tell them apart"
+    rival = jail(table_html(["Station", "Stage (ft)"], LEVELS, heading="Old") + table_html(["Station", "Stage (ft)"], LEVELS, heading="Older"))
+    sealed = ni_table.locator(jail(table_html(["Station", "Stage (ft)"], LEVELS, heading="Current"))[0])
+    with pytest.raises(ni_table.TableGone) as none_fit:
+        ni_table.locate(rival, sealed)
+    assert none_fit.value.kind == ni_table.AMBIGUOUS, "several fit and the sealed context names none: unclear, not gone"
     named = ni_table.locator(jail(table_html(["Station", "Stage (ft)"], LEVELS, heading="Current"))[0])
     pair = jail(table_html(["Station", "Stage (ft)"], LEVELS, heading="Old") + table_html(["Station", "Stage (ft)"], LEVELS, heading="Current"))
     assert ni_table.locate(pair, named)[0] == 1, "what the table sits under tells twins apart"
@@ -545,3 +569,48 @@ def test_a_page_table_card_replays_from_the_cassette_labelled_a_page_and_waits_f
     assert ne.score_all(gold, [run])[0][0]["cls"] == "right"
     off = ne.replay_all(gold, _EVAL / "cassettes" / "ci", research_web="off")[0]
     assert off["outcome"] != "awaiting-yes", "the same cassette with the web off cannot reach the page"
+
+
+# --- one decode rule: research and refresh read the same text ------------------------------------------------------------------
+
+LATIN1 = ('<html><head><meta charset="iso-8859-1"><title>Pegel</title></head><body><h2>Pegel und W\xe4rme</h2><table>'
+          '<tr><th>Ort</th><th>H\xf6he (m)</th></tr><tr><td>Z\xfcrich</td><td>408</td></tr>'
+          '<tr><td>Bern</td><td>540</td></tr></table></body></html>').encode("latin-1")
+
+
+@pytest.mark.parametrize(("raw", "ctype"), [
+    (LATIN1, "text/html"),                                      # meta charset only, no header charset: the jail's rule
+    (LATIN1, "text/html; charset=iso-8859-1"),                  # header and meta agree
+    (LATIN1.decode("latin-1").replace("iso-8859-1", "utf-8").encode("utf-8"), "text/html; charset=utf-8"),
+    (LATIN1.decode("latin-1").replace("iso-8859-1", "utf-8").encode("utf-8"), "text/html")],
+    ids=["latin1-meta-only", "latin1-meta-and-header", "utf8-header", "utf8-meta-only"])
+def test_research_and_refresh_read_a_page_by_the_same_decode_rule(monkeypatch, raw, ctype) -> None:
+    """A class, not a page: whatever the bytes, the header and the markup say, the table a research read sees is the
+    table a refresh sees, the sealed locator locates on the refreshed page, and a kept value is the real one."""
+    ctx, pages = web_ctx(monkeypatch, raw={URL: (raw, ctype)})
+    ctx.question.update(subject="Pegel")
+    sample = tools.fetch_sample(ctx, URL)
+    assert sample["ok"], sample
+    researched = ni_fetch.page_tables(raw, URL, charset=netguard.declared_charset(ctype))["tables"]
+    refreshed = ni_fetch.fetch_page_tables(URL, allow_redirects=False)["tables"]
+    assert pages.calls[0]["kind"] == "json" and pages.calls[1]["kind"] == "text", "research took the sniff path"
+    assert researched == refreshed and refreshed[0]["headers"] == ["Ort", "Höhe (m)"]
+    stored = next(iter(ctx.samples.values()))["parsed"]["tables"]
+    assert stored == refreshed, "what research kept is what refresh reads"
+    assert "\ufffd" not in json.dumps(stored, ensure_ascii=False)
+    tried = tools.try_recipe(ctx, table_draft(paths={"place": "rows[0].ort"}))
+    assert tried["ok"] and tried["preview"]["place"] == "Zürich", tried
+    got = tools.propose_card(ctx, table_draft(paths={"place": "rows[0].ort"}))
+    assert got["ok"], got
+    locator = got["proposal"]["spec"]["source"]["table"]
+    assert locator["headers"] == ["ort", "höhe (m)"]
+    rows = ni._fetch_http_table(URL, locator, None)
+    assert rows["rows"][0]["ort"] == "Zürich"
+
+
+def test_a_recorded_page_without_bytes_is_read_as_utf_8(monkeypatch) -> None:
+    """The eval cassette keeps text only: the sniff path falls back to its UTF-8 encoding."""
+    page = ni_fetch.HtmlPage(RIVERS)
+    assert page.body == RIVERS.encode("utf-8") and page.charset == "utf-8"
+    kept = ni_fetch.HtmlPage("x", b"\xe9", "text/html; charset=ISO-8859-1")
+    assert kept.body == b"\xe9" and kept.charset == "iso-8859-1"

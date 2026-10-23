@@ -23,7 +23,8 @@ to know when a release changes behavior.
   value and says so; it never reads a different table and never follows a redirect off the address you kept. Sites
   are still read only where robots.txt allows, and only at addresses a search or the Library returned. The researcher's
   prompt and `fetch_sample` description changed to say so (the cached prompt prefix is re-pinned). A hidden cell's text
-  is no longer read as part of a page's table, and the page graph's tables now carry their caption and the heading
+  is no longer read as part of a page's table (page cards built before this too: a compiled selector that read a hidden
+  cell now gets ""), and the page graph's tables now carry their caption and the heading
   they sit under. New source format `table` for `http_json` sources (researched cards only), module `ni_table`, eval
   cassette `CI10`. Details: `docs/internal/ni-format.md` §40 and `docs/07-privacy-security.md`.
 - **An honest "declined" card.** When SmartBrain cannot answer an ask reliably it now says so: "I couldn't

@@ -93,7 +93,9 @@ def _fetch_and_digest(ctx: ResearchCtx, url: str, fmt: str | None, robots: bool 
                 parsed, seen = ni_fetch.sniff_fetch(url, allow_redirects=False, keep_page=True)
     except ni_fetch.HtmlPage as page:
         try:
-            read = ni_fetch.page_tables(page.text.encode("utf-8"), url, charset="utf-8")
+            # page_tables is pure (the page was fetched inside ``engaged`` above), so this read needs no polite span;
+            # the raw bytes go to the jail so it decodes the page by the same rule as a refresh
+            read = ni_fetch.page_tables(page.body, url, charset=page.charset)
         except FetchError:
             return error("not_data", "the page could not be read")
         return _page_sample(ctx, url, read)

@@ -435,7 +435,8 @@ class _GraphParser(HTMLParser):
         elif self._table is not None and tag == "caption" and not self._hidden:
             self._caption = []
         elif self._table is not None and tag == "tr":
-            self._row, self._header_row = [], False
+            # a row opened while hidden (a template or filter row) adds no row at all, not an all-empty one
+            self._row, self._header_row = (None if self._hidden else []), False
         elif self._table is not None and self._row is not None and tag in ("td", "th"):
             if len(self._row) < _MAX_TABLE_COLS:
                 self._cell, self._cell_is_header = [], (tag == "th")

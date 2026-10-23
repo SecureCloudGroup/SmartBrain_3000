@@ -107,7 +107,8 @@ _EIGHT_BIT = {"latin-1": "latin-1", "latin1": "latin-1", "iso-8859-1": "latin-1"
               "windows-1252": "cp1252", "cp1252": "cp1252"}
 
 
-def _declared_charset(content_type: str) -> str:
+def declared_charset(content_type: str) -> str:
+    """The ``charset=`` parameter of a Content-Type header, lower-cased; '' when it names none."""
     for part in (content_type or "").split(";")[1:]:
         name, _, value = part.strip().partition("=")
         if name.strip().lower() == "charset":
@@ -145,7 +146,7 @@ def decode_body(content: bytes, content_type: str = "") -> str:
     for bom, codec in _BOMS:
         if content.startswith(bom):
             return content[len(bom):].decode(codec, "replace")
-    declared = _declared_charset(content_type)
+    declared = declared_charset(content_type)
     if declared in _UTF16:
         order = _UTF16.get(declared) or _utf16_order(content)
         if order:
@@ -556,7 +557,7 @@ def safe_fetch(url: str) -> dict:
     """Fetch ``url`` behind the SSRF guard; return {final_url, status, text}."""
     got = _guarded_get(url, _ALLOWED_CT, _MAX_BYTES)
     return {"final_url": got["final_url"], "status": got["status"],
-            "text": decode_body(got["content"], got["content_type"])}
+            "text": decode_body(got["content"], got["content_type"]), "content": got["content"]}
 
 
 def safe_fetch_json(url: str, headers: dict | None = None,
@@ -686,7 +687,7 @@ _FORMAT_KIND: dict[str, str] = {
 
 def safe_fetch_text(url: str, fmt: str, headers: dict | None = None,
                     allow_redirects: bool = True) -> dict:
-    """Guarded GET returning ``{final_url, status, content_type, text}`` for a
+    """Guarded GET returning ``{final_url, status, content_type, text, content}`` for a
     non-JSON textual NI source (``format`` ∈ {csv, feed, xml, text}).
 
     Same SSRF guard + streamed byte cap as ``safe_fetch_json``; the content-type

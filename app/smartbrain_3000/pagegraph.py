@@ -79,7 +79,7 @@ def fetch_page_graph(url: str, *, fetcher=None) -> dict:
         raise netguard.FetchError("no bytes in page response")
     # F4: forward the HTTP header's charset so a page with no BOM and no
     # <meta charset> still decodes correctly.
-    charset = netguard._declared_charset(str(got.get("content_type") or "")) \
+    charset = netguard.declared_charset(str(got.get("content_type") or "")) \
         if isinstance(got, dict) else ""
     extracted = jailrun.run_extractor(bytes(body), url_hint=url,
                                        declared_charset=charset)

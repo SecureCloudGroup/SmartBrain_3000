@@ -30,13 +30,29 @@ class ParseError(netguard.FetchError):
 
 
 class HtmlPage(netguard.FetchError):
-    """A sniffed fetch found an ordinary web page. ``text`` is the body already fetched (so a caller that reads page
-    tables does not fetch it a second time); every other caller sees the same ``not_text`` refusal as before."""
+    """A sniffed fetch found an ordinary web page, already fetched (so a caller that reads page tables does not fetch
+    it a second time); every other caller sees the same ``not_text`` refusal as before. It carries the raw ``content``
+    bytes and the ``content_type`` header, so the jail decodes the page by its one rule, exactly as a refresh does;
+    ``text`` (decoded by the header alone) is for sniffing only. A recorded fetch (the eval cassette) holds text and no
+    bytes: ``body`` is then the text as UTF-8 and ``charset`` says so."""
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, content: bytes | None = None, content_type: str = "") -> None:
         assert isinstance(text, str), "the page text"
+        assert content is None or isinstance(content, (bytes, bytearray)), "the page bytes"
+        assert isinstance(content_type, str), "the content type"
         super().__init__("an HTML page", kind="not_text")
         self.text = text
+        self.content = bytes(content) if content is not None else None
+        self.content_type = content_type
+
+    @property
+    def body(self) -> bytes:
+        return self.content if self.content is not None else self.text.encode("utf-8")
+
+    @property
+    def charset(self) -> str:
+        """The header charset to hand the jail ('' when none); UTF-8 for re-encoded recorded text."""
+        return netguard.declared_charset(self.content_type) if self.content is not None else "utf-8"
 
 
 def _get(url: str, fmt: str, headers: dict | None, allow_redirects: bool, port: int | None = None) -> dict:
@@ -124,7 +140,8 @@ def _sniffed_textual(url: str, allow_redirects: bool = True, port: int | None = 
     ct = str(got.get("content_type") or "")
     head = text[:SNIFF_HEAD_BYTES].lstrip().lower()
     if "html" in ct.lower() or head.startswith(("<!doctype html", "<html")):
-        raise HtmlPage(text)
+        raw = got.get("content")
+        raise HtmlPage(text, raw if isinstance(raw, (bytes, bytearray)) else None, ct)
     sniffed = formats.sniff_format(ct, text[:SNIFF_HEAD_BYTES])
     if sniffed == "json":
         # a server that lied about its content-type but served JSON: decode the bytes already held
@@ -164,7 +181,7 @@ def fetch_page_tables(url: str, *, allow_redirects: bool = True, port: int | Non
         body = got.get("content") if isinstance(got, dict) else None
         if not isinstance(body, (bytes, bytearray)):
             raise netguard.FetchError("no bytes in page response", kind="not_table")
-        return page_tables(bytes(body), url, charset=netguard._declared_charset(str(got.get("content_type") or "")))
+        return page_tables(bytes(body), url, charset=netguard.declared_charset(str(got.get("content_type") or "")))
 
 
 def fetch_table(url: str, locator: dict, *, allow_redirects: bool = True, port: int | None = None) -> dict:

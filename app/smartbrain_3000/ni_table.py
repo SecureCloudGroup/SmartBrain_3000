@@ -174,10 +174,11 @@ def locate(tables: list[dict], loc: dict) -> tuple[int, dict]:
     pages = [(i, t, [norm(h) for h in t["headers"] if norm(h)]) for i, t in enumerate(tables[:MAX_TABLES])]
     for tier in (lambda have: have == sealed, lambda have: _in_order(sealed, have)):  # exact, then still-holds
         found = [(i, t) for i, t, have in pages if tier(have)]
-        if len(found) > 1 and loc.get("context"):
+        fit = len(found)
+        if fit > 1 and loc.get("context"):
             found = [(i, t) for i, t in found if context(t) == loc["context"]]
         if len(found) == 1:
             return found[0]
-        if len(found) > 1:
-            raise TableGone(AMBIGUOUS, f"{len(found)} tables on the page fit the sealed columns equally")
+        if fit > 1:  # several fit and the sealed context does not single one out: ambiguous, not gone
+            raise TableGone(AMBIGUOUS, f"{fit} tables on the page fit the sealed columns equally")
     raise TableGone(GONE, "no table on the page has the sealed columns")
