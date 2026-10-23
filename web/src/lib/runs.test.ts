@@ -50,6 +50,7 @@ describe("runStatusLabel", () => {
     expect(runStatusLabel("repair_research_started")).toBe("Looking for a replacement source");
     expect(runStatusLabel("repair_research_proposed")).toBe("Found a replacement source for your approval");
     expect(runStatusLabel("repair_research_declined")).toBe("No safe replacement found");
+    expect(runStatusLabel("repair_research_fault")).toBe("Couldn't finish looking for a replacement; will try again later");
   });
 
   it("passes unknown statuses through", () => {
