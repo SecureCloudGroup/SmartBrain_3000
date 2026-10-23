@@ -6,6 +6,7 @@ cached prefix on purpose and trips ``test_ni_research_tools``'s pinned hash.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 
 from . import tools
@@ -87,7 +88,8 @@ def run_tool(ctx: ResearchCtx, name: str, args: object) -> dict:
         return error("invalid_args", f"{name} takes exactly {prop}")
     if name not in _MEMO_TOOLS:
         return fn(ctx, args[prop])
-    key = (name, json.dumps(args[prop], sort_keys=True, default=str)[:4000], tuple(ctx.samples))
+    dump = json.dumps(args[prop], sort_keys=True, default=str)   # the WHOLE canonical text, digested: never a prefix
+    key = (name, hashlib.sha256(dump.encode("utf-8", "replace")).hexdigest(), tuple(ctx.samples))
     prior = ctx.memo.get(key)
     if prior is not None:   # the same call on the same samples answers the same: no search, no turn (a few times)
         if ctx.replays >= MAX_REPLAYS:

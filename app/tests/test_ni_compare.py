@@ -700,3 +700,37 @@ def test_search_names_is_input_capped_and_linear() -> None:
     assert ni_compare.search_names("Nvidia", "a " * 100_000 + "Nvidia", ["AMD"]) is False   # past the cap: not read
     assert ni_compare.mentions({"k": ["a " * 100_000 + "Nvidia"] * 50}, "Nvidia") is False
     assert time.perf_counter() - start < 1.0
+
+
+def test_a_shared_response_vouches_for_a_thing_whose_asked_name_carries_trailing_words(monkeypatch) -> None:
+    shared = f"{_SEARCH_HOST}/caps.json"
+    body = {"caps": {"Tesla": {"cap": 800.5}, "Ford": {"cap": 45.25}}}
+    ctx, _ = _web_ctx(monkeypatch, "Tesla versus Ford market cap", {"Tesla Ford market cap json": [shared]}, {shared: body})
+    tools.web_search(ctx, "Tesla Ford market cap json")
+    tools.fetch_sample(ctx, shared)
+    out = tools.propose_compare(ctx, {"metric": "Cap", "things": [
+        {"name": "Tesla", "url": shared, "path": "caps.Tesla.cap"},
+        {"name": "Ford market cap", "url": shared, "path": "caps.Ford.cap"}]})
+    assert out.get("ok"), out
+
+
+def test_a_response_that_names_only_the_trailing_words_does_not_vouch_for_the_thing() -> None:
+    names = ["Tesla", "Ford market cap"]
+    assert ni_compare.mentions({"caps": {"Ford": 1}}, names[1], names[:1])
+    assert not ni_compare.mentions({"caps": {"Tesla": 1, "market cap": 2}}, names[1], names[:1]), "the shared words are not Ford"
+    assert ni_compare.mentions({"k": "Ford market cap, billions"}, names[1], names[:1])
+
+
+def test_a_run_of_a_name_that_follows_the_words_the_things_share_names_it() -> None:
+    ask = ["New York Yankees", "New York Rangers"]
+    assert ni_compare.named_in(ask, "Yankees stats json") == ["New York Yankees"]
+    assert ni_compare.named_in(ask, "Rangers stats json") == ["New York Rangers"]
+    assert ni_compare.named_in(ask, "New York stats json") == []
+    assert ni_compare.named_in(ask, "new york yankees stats json") == ["New York Yankees"]
+
+
+def test_a_two_letter_stub_names_a_thing_only_when_the_text_writes_it_in_capitals() -> None:
+    ask = ["NYC", "LA air quality"]
+    assert ni_compare.named_in(ask, "LA pollution index json") == ["LA air quality"]
+    assert ni_compare.named_in(ask, "bola la liga json") == []
+    assert ni_compare.named_in(["US GDP growth", "UK GDP growth"], "give us the data") == []

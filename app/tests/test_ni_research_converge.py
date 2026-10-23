@@ -331,3 +331,57 @@ def test_the_libraryless_net_is_never_touched_by_a_landing_check(monkeypatch) ->
     before = len(net.calls)
     assert ni_research_flow._can_land(ctx, "item-1", ctx.request, got["proposal"]) is None
     assert len(net.calls) == before == 1
+
+
+# --- review of PR 541: the call memory keys the whole draft; a pass on the last call is proposed; a failed pass is not retried ---
+
+def test_two_drafts_that_differ_only_after_4000_characters_are_not_the_same_call(monkeypatch) -> None:
+    ctx, _ = listed(monkeypatch)
+    assert tools.library_search(ctx, "q")["ok"] and tools.fetch_sample(ctx, URL)["ok"]
+    good = _mutated(goal="show it " + "x" * 4200)
+    broken = copy.deepcopy(good)
+    broken["pipeline"] = [{"op": "extract", "paths": {"title": "metadata.nothere"}}]
+    assert json.dumps(good, sort_keys=True)[:4000] == json.dumps(broken, sort_keys=True)[:4000], "they agree on 4,000 characters"
+    first = schemas.run_tool(ctx, "try_recipe", {"draft_spec": good})
+    second = schemas.run_tool(ctx, "try_recipe", {"draft_spec": broken})
+    assert first["verdict"] == "pass" and "repeat" not in second
+    assert second["error"] == "pipeline_failed", "the broken draft is run, not answered with the earlier pass"
+    assert schemas.run_tool(ctx, "try_recipe", {"draft_spec": good}).get("repeat"), "the same draft is still a repeat"
+
+
+@pytest.mark.parametrize("max_turns", [3, 4, 5, 6])
+def test_a_draft_that_passes_on_the_last_tool_call_is_still_proposed(monkeypatch, max_turns) -> None:
+    ctx, _ = listed(monkeypatch, max_turns=max_turns)
+    pad = [reply(call("resolve_entity", text=f"place {i}")) for i in range(max_turns - 3)]
+    out = loop.run_research(ctx, Script(*pad, *_passed(), *_idle()))
+    assert out.status == "proposed" and out.proposal is not None, out.reasons
+    assert ctx.turns == max_turns, "the pass was the last tool call"
+    assert ctx.trace[-1]["arg"] == "loop draft" and ctx.trace[-1]["outcome"] == "ok", "the trace says the loop proposed"
+
+
+def test_the_loops_own_proposal_costs_no_turn_but_a_models_does(monkeypatch) -> None:
+    ctx, _ = listed(monkeypatch, max_turns=3)
+    schemas.run_tool(ctx, "library_search", {"query": "q"})
+    schemas.run_tool(ctx, "fetch_sample", {"url": URL})
+    assert schemas.run_tool(ctx, "try_recipe", {"draft_spec": DRAFT})["verdict"] == "pass"
+    assert ctx.turns == 3 and tools.propose_card(ctx, DRAFT)["error"] == "budget_exhausted"
+    assert loop._propose_passed(ctx, None)[0]["ok"] and ctx.turns == 3 and not ctx.own_proposal
+
+
+def test_a_pass_the_model_proposed_and_landing_refused_is_not_proposed_again(monkeypatch) -> None:
+    ctx, _ = listed(monkeypatch)
+    seen: list[object] = []
+
+    def refuse(proposal):
+        seen.append(proposal)
+        return "the scene does not bind"
+    out = loop.run_research(ctx, Script(*_passed(), reply(call("propose_card", draft_spec=DRAFT)), *_idle()), accept=refuse)
+    assert len(seen) == 1, "the futile second landing check is not made"
+    assert out.status == "declined" and ctx.passed["tried"] is True
+    assert out.ending != "research_declined_checks" or "twice" not in " ".join(out.reasons), out.reasons
+
+
+def test_a_failed_automatic_proposal_after_a_nudge_joins_the_nudge_turn() -> None:
+    turns = [{"role": "assistant", "content": "hm"}, {"role": "user", "content": "Reply with a tool call"}]
+    loop._say(turns, "it failed")
+    assert [t["role"] for t in turns] == ["assistant", "user"] and turns[-1]["content"].endswith("it failed")

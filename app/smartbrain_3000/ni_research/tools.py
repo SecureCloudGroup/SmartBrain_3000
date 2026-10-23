@@ -110,6 +110,7 @@ def _already_fetched(ctx: ResearchCtx, url: str) -> dict | None:
         if out is not None:
             return out
     ctx.replays += 1
+    ctx.note("fetch_sample", url, "repeat (answered from memory)")   # the sealed trace shows the model's repeats
     if kept is not None and kept.get("digest"):
         return {"ok": True, "url": url, "format": kept["format"], "digest": kept["digest"], "cached": True,
                 "fetches_left": ctx.max_fetches - ctx.fetches}
@@ -559,12 +560,23 @@ def _tier(origin: str, fmt: str) -> str:
 
 
 def propose_card(ctx: ResearchCtx, draft_spec: object) -> dict:
-    """The terminal tool: re-run the draft and, when every check passes, seal the proposal (recipe, tier, trace)."""
+    """The terminal tool: re-run the draft and, when every check passes, seal the proposal (recipe, tier, trace).
+    A proposal of the held pass that fails leaves it no longer waiting (it cannot land as it is)."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
     assert ctx.max_turns > 0, "a turn budget"
     out = ctx.spend("propose_card")
     if out is not None:
         return out
+    got = _propose(ctx, draft_spec)
+    if not got["ok"]:
+        ctx.mark_tried(draft_spec)
+    return got
+
+
+def _propose(ctx: ResearchCtx, draft_spec: object) -> dict:
+    """``propose_card`` after the budget: run, seal, land."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert ctx.max_turns > 0, "a turn budget"
     got = _run(ctx, draft_spec)
     if got["ok"] and (any(not c["ok"] for c in got["checks"]) or got["lands"]):
         reasons = [f"{c['check']}: {c['reason']}" for c in got["checks"] if not c["ok"]]
@@ -578,7 +590,7 @@ def propose_card(ctx: ResearchCtx, draft_spec: object) -> dict:
     if origin is None:
         return _done(ctx, "propose_card", "draft", error("provenance", why))
     url = spec["source"]["url"]
-    ctx.note("propose_card", "draft", "ok")
+    ctx.note("propose_card", "loop draft" if ctx.own_proposal else "draft", "ok")   # an audit can tell who proposed
     scope = (ctx.urls.get(key) or {}).get("scope")
     source = {"kind": "page" if got["format"] == _TABLE
               else {"library": "library", "search": "search"}.get(origin or "", "endpoint"),
@@ -649,7 +661,8 @@ def _compare_address(ctx: ResearchCtx, name: str, wanted: list[str], url: str) -
             return None
         # a search that named several asked things may hand over one response that serves them all (a table of
         # rates, one page of forecasts): the address then stands for each thing only when its sample names that thing
-        if len(named) > 1 and name in named and ni_compare.mentions(ctx.samples[normal_url(url)]["parsed"], name):
+        if len(named) > 1 and name in named and ni_compare.mentions(ctx.samples[normal_url(url)]["parsed"], name,
+                                                                             [w for w in wanted if w != name]):
             return None
     seen = "; ".join(one_line(q, 60) for q in queries[:3]) or "none"
     return error("wrong_thing", f"the address for {name} must come from a search whose query names {name} and no "

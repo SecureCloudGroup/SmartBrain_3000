@@ -87,13 +87,13 @@ def _spans(want: list[str], have: list[str]) -> list[tuple[int, int]]:
     if not joined:
         return out
     for i in range(len(have)):  # bounded by the capped text
-        acc = ""
+        pos = 0   # how much of ``joined`` the words from i have covered (a running length: no growing string)
         for j in range(i, len(have)):
-            acc += have[j]
-            if acc == joined:
-                out.append((i, j + 1))
+            if not joined.startswith(have[j], pos):
                 break
-            if len(acc) >= len(joined) or not joined.startswith(acc):
+            pos += len(have[j])
+            if pos == len(joined):
+                out.append((i, j + 1))
                 break
     return out
 
@@ -104,23 +104,33 @@ def _find(want: list[str], have: list[str]) -> tuple[int, int] | None:
     return found[0] if found else None
 
 
-def _head(entity: str, others: list[str], have: list[str]) -> tuple[int, int] | None:
-    """A name that carries trailing words of the ask's own ("Ford market cap") is also named by its leading part
-    ("Ford"), when that part is longer than a stub (or an all-caps token like "LA") and none of its words belongs to
-    another asked thing. The longest leading part found wins."""
-    want = _words(entity)
+_CAPS_RE = re.compile(r"[A-Za-z0-9]+")
+MAX_RUN_WORDS = 12   # the words of a name the leading/trailing-part search reads (a name is at most MAX_NAME characters)
+
+
+def _head(entity: str, others: list[str], have: list[str], text: str = "") -> tuple[int, int] | None:
+    """A name that carries words of the ask's own ("Ford market cap") is also named by a part of it: its leading part
+    ("Ford"), or the run that follows the words every other asked thing shares with it ("New York Yankees" against "New
+    York Mets" is "Yankees"). The part must be longer than a stub and none of its words may belong to another asked
+    thing. A two-letter all-caps stub ("LA") stands for the name only when ``text`` also writes it in capitals, as the
+    ask did; a name typed in lower case has no stub. The longest part found wins."""
+    want = _words(entity)[:MAX_RUN_WORDS]
     raw = entity[:MAX_SCAN].split()
     if len(want) < 2 or not raw:
         return None
     taken = {w for o in others for w in _words(o)}
-    stub = raw[0].isalpha() and raw[0].isupper() and len(raw[0]) >= 2
-    for k in range(len(want) - 1, 0, -1):  # bounded: the words of a name
-        part = want[:k]
-        if any(w in taken for w in part) or (len("".join(part)) < MIN_HEAD and not (k == 1 and stub)):
-            continue
-        hit = _find(part, have)
-        if hit is not None:
-            return hit
+    caps = {t for t in _CAPS_RE.findall(text[:MAX_SCAN]) if t.isupper()}
+    stub = raw[0].isalpha() and raw[0].isupper() and len(raw[0]) >= 2 and raw[0] in caps
+    for size in range(len(want) - 1, 0, -1):  # bounded: the words of a name
+        for at in range(len(want) - size + 1):
+            part = want[at:at + size]
+            if any(w in taken for w in part) or (at > 0 and want[at - 1] not in taken):
+                continue   # a run owned by another thing, or not following the words the things share
+            if len("".join(part)) < MIN_HEAD and not (at == 0 and size == 1 and stub):
+                continue
+            hit = _find(part, have)
+            if hit is not None:
+                return hit
     return None
 
 
@@ -134,7 +144,7 @@ def search_names(entity: str, text: str, others: list[str] | tuple[str, ...] = (
     if not want or not have:
         return False
     rest = [o for o in others if o != entity]
-    mine = _spans(want, have) or ([h] if (h := _head(entity, rest, have)) else [])
+    mine = _spans(want, have) or ([h] if (h := _head(entity, rest, have, text)) else [])
     longer = [_spans(w, have) for o in rest if len(w := _words(o)) > len(want) and _find(want, w) is not None]
     for span in mine:  # one place in the text that no longer asked thing's name covers is enough
         if not any(c[0] <= span[0] and span[1] <= c[1] for spans in longer for c in spans):
@@ -148,22 +158,22 @@ def named_in(entities: list[str] | tuple[str, ...], text: str) -> list[str]:
     return [e for e in entities if search_names(e, text, [o for o in entities if o != e])]
 
 
-def mentions(parsed: object, entity: str) -> bool:
-    """True when the parsed sample names ``entity`` in a key or a text value (bounded walk): the evidence that a
-    response which several things share is about this one."""
+def mentions(parsed: object, entity: str, others: list[str] | tuple[str, ...] = ()) -> bool:
+    """True when the parsed sample names ``entity`` in a key or a text value (bounded walk), by the rule
+    ``search_names`` applies to a query (``others``: the other asked things): the evidence that a response which
+    several things share is about this one."""
     assert isinstance(entity, str), "entity must be a string"
-    want = _words(entity)
     stack: list[tuple[object, int]] = [(parsed, 0)]
     for _ in range(4000):  # bounded: nodes visited
         if not stack:
             return False
         node, depth = stack.pop()
         if isinstance(node, str):
-            if _find(want, _words(node)) is not None:
+            if search_names(entity, node, others):
                 return True
         elif isinstance(node, dict) and depth < 8:
             for k, v in list(node.items())[:200]:
-                if isinstance(k, str) and _find(want, _words(k)) is not None:
+                if isinstance(k, str) and search_names(entity, k, others):
                     return True
                 stack.append((v, depth + 1))
         elif isinstance(node, list) and depth < 8:

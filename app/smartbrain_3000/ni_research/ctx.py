@@ -110,6 +110,7 @@ class ResearchCtx:
     failed_fetches: dict = field(default_factory=dict)   # normal url -> the error a fetch of it gave (never fetched twice)
     memo: dict = field(default_factory=dict)        # (tool, args) -> the result of an identical earlier call
     replays: int = 0
+    own_proposal: bool = False                      # True only while the loop itself proposes the held pass (no model call: no turn)
 
     def __post_init__(self) -> None:
         assert self.max_turns > 0, "a turn budget"
@@ -125,6 +126,8 @@ class ResearchCtx:
         """Spend one turn (and a ``search`` when named); a typed budget error when any budget is out."""
         assert tool in ni_recipe.TOOLS, "a known tool"
         assert kind in (None, "search"), "a known budget"
+        if tool in PROPOSE_TOOLS and self.own_proposal:   # the loop's own proposal of a held pass runs no model call: it costs no turn
+            return None
         ready = self.passed is not None and not self.passed.get("tried")   # a draft that passed is waiting to be proposed
         if ready and tool in PROPOSE_TOOLS:   # proposing runs no model, fetch or search: it may use the last of the time and tokens
             if self.turns >= self.max_turns:
@@ -142,6 +145,12 @@ class ResearchCtx:
         self.turns += 1
         self.searches += kind == "search"
         return None
+
+    def mark_tried(self, draft: object) -> None:
+        """A proposal of the held pass failed: it is not waiting any more (proposing it again could only fail again)."""
+        assert isinstance(self.trace, list), "a trace"
+        if self.passed is not None and draft == self.passed["draft"]:
+            self.passed["tried"] = True
 
     def spend_fetch(self) -> dict | None:
         """Count one network fetch (the turn was spent on entry); a typed error when the 8 are used."""

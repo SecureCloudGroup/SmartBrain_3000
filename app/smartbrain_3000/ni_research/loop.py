@@ -227,7 +227,8 @@ NEXT = {
 PROPOSE_TOOLS = ("propose_card", "propose_compare")   # the tools that end a run with a proposal
 
 
-def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None, tool: str = "propose_card") -> dict:
+def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None, tool: str = "propose_card",
+                     draft: object = None) -> dict:
     """A propose tool's result after the caller's own landing check (a proposal that cannot land is a verify failure)."""
     assert ctx.max_turns > 0, "a turn budget"
     assert isinstance(result, dict), "a result"
@@ -237,6 +238,7 @@ def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None, to
     if not why:
         return result
     ctx.note(tool, "draft", f"cannot land: {why}")
+    ctx.mark_tried(draft)   # the held pass that cannot land is not proposed again
     return {**error("verify_failed", why), "reasons": [one_line(why, 200)]}
 
 
@@ -278,8 +280,8 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
             fails, why = fails + 1, reasons
             if fails >= MAX_VERIFY_FAILS:
                 return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks")
-            turns.append({"role": "user", "content": one_line("Your draft that passed was proposed for you because the "
-                          "budget is nearly used up, and failed: " + "; ".join(reasons), 600)})
+            _say(turns, one_line("Your draft that passed was proposed for you because the "
+                                 "budget is nearly used up, and failed: " + "; ".join(reasons), 600))
             stop = _budget_stop(ctx)
         if stop:
             return _decline(ctx, out, [stop, *why])
@@ -306,7 +308,8 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
             result = (error("invalid_args", "arguments must be a JSON object") if call["args"] is None
                       else schemas.run_tool(ctx, call["name"], call["args"]))
             if call["name"] in PROPOSE_TOOLS:
-                result = _proposal_result(ctx, result, accept, call["name"])
+                given = call["args"].get("draft_spec") if isinstance(call["args"], dict) else None
+                result = _proposal_result(ctx, result, accept, call["name"], given)
                 if result.get("ok"):
                     out.status, out.proposal, out.reasons = "proposed", result["proposal"], []
                     return out
@@ -322,6 +325,16 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
             turns.append({"role": "tool", "tool_call_id": call["id"],
                           "content": prompt.result_text(error("too_many_calls", f"{MAX_CALLS_PER_TURN} per reply"))})
     return _decline(ctx, out, ["the research ran out of steps", *why])
+
+
+def _say(turns: list, text: str) -> None:
+    """Add a user turn; right after another user turn (a nudge) it joins that one, so the transcript alternates."""
+    assert isinstance(turns, list), "turns"
+    assert isinstance(text, str), "text"
+    if turns and turns[-1].get("role") == "user":
+        turns[-1] = {"role": "user", "content": f"{turns[-1]['content']}\n{text}"}
+    else:
+        turns.append({"role": "user", "content": text})
 
 
 def _nudge(ctx: ResearchCtx, why: list) -> str:
@@ -343,9 +356,14 @@ def _propose_passed(ctx: ResearchCtx, accept: AcceptFn | None) -> tuple[dict, li
     the caller's landing check): ``(result, reasons if it failed)``. A draft is proposed this way once."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
     assert ctx.passed is not None, "a draft that passed"
-    proposed = tools.propose_card(ctx, ctx.passed["draft"])   # first: a waiting draft may use the last of the time and tokens
+    draft = ctx.passed["draft"]
+    ctx.own_proposal = True   # no model call runs here, so it costs no turn: a pass on the last tool call is still proposed
+    try:
+        proposed = tools.propose_card(ctx, draft)   # first: a waiting draft may use the last of the time and tokens
+    finally:
+        ctx.own_proposal = False
     ctx.passed["tried"] = True
-    done = _proposal_result(ctx, proposed, accept, "propose_card")
+    done = _proposal_result(ctx, proposed, accept, "propose_card", draft)
     reasons = [] if done.get("ok") else [one_line(r, 200) for r in done.get("reasons") or [done.get("detail") or done.get("error")]]
     return done, reasons
 
