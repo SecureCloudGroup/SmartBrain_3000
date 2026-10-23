@@ -42,6 +42,26 @@ def test_a_v1_declared_card_loads_and_renders(client, lib, monkeypatch) -> None:
     assert set(row["actions"]) <= ni_master.ACTION_KINDS and "delete" in row["actions"]
 
 
+def test_a_card_from_before_the_built_from_marker_loads_runs_and_exports(client, lib, monkeypatch) -> None:  # noqa: F811
+    """Cards built before the 2026-10-04 ruling carry no ``_built_from`` at all: every reader treats it as absent."""
+    from smartbrain_3000 import netguard
+
+    item_id = _as_v1_card(client, lib, monkeypatch)
+    store = client.app.state.ni
+    spec = copy.deepcopy(store.get_item(item_id)["spec"])
+    spec.pop("_built_from")
+    store.update_spec(item_id, spec, origin="agent", preserve_attestations=True)
+    item = store.get_item(item_id)
+    assert "_built_from" not in item["spec"] and not nimod.awaits_yes(item)
+    row = _row(client, item_id)
+    assert row["awaiting_yes"] is None and set(row["actions"]) <= ni_master.ACTION_KINDS
+    monkeypatch.setattr(netguard, "safe_fetch_json",
+                        lambda url, headers=None, allow_redirects=True: copy.deepcopy(OPEN_METEO))
+    assert client.post(f"/api/ni/items/{item_id}/run").json()["status"] == "ok"
+    template = ni_routes._build_export_template(store, store.get_item(item_id), client.app.state.secret_store)
+    nimod.validate_spec(copy.deepcopy(template["spec_template"]))
+
+
 def test_a_v1_declared_card_refreshes(client, lib, monkeypatch) -> None:  # noqa: F811
     from smartbrain_3000 import netguard
 
@@ -75,3 +95,26 @@ def test_a_v1_flow_parked_on_the_source_pick_serves_actions_and_polls(client, mo
     poll = client.get(f"/api/ni/items/{item_id}/flow")
     assert poll.status_code == 200
     assert client.post(f"/api/ni/items/{item_id}/flow/cancel").status_code in (200, 409)
+
+
+def test_a_paste_matching_a_v1_parked_row_that_refuses_declines_and_never_searches(lib, monkeypatch) -> None:  # noqa: F811
+    """S10 review M3: a stored v1 pause still holds its tapped rows. A paste of one that then refuses ends on the
+    declined card; the retired web stage (search plus page pre-reads) never runs."""
+    from test_ni_auto_pick import _store
+
+    store = _store()
+    searched: list[str] = []
+
+    class _Search:
+        def search(self, query: str, limit: int = 10) -> dict:
+            searched.append(query)
+            return {"results": []}
+
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", lambda: _Search())
+    item_id = ni_flow.create_shell_item(store, "old ask from v1")
+    ni_flow._flow_write(store, item_id, {
+        **ni_flow._make_record("old ask from v1", "source"), "error": ni_flow.AWAITING_SOURCE_PICK,
+        "_ranked_library": [{"source_id": "open-meteo-forecast", "url": WEATHER_URL, "title": "t"}]})
+    out = ni_flow._move_on(store, item_id, WEATHER_URL, "refused SmartBrain's request")
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "source_cant_answer"
+    assert searched == []

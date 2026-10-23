@@ -170,7 +170,8 @@ def test_f6_source_mismatch_refuses_before_the_mapping_path_when_answers_dont_fi
                                        lambda _u: copy.deepcopy(sample["sample"]))
     finally:
         monkey.undo()
-    assert out["state"] in {"unsupported", "source"}, out
+    assert out["state"] in {"unsupported", "source", "declined"}, out  # refused (the one row ends declined)
+    assert "didn't fit" in " | ".join(out["notes"]) or out["state"] == "unsupported", out["notes"]
 
 
 # ---- F7: a naming word the user said that no part of the source takes refuses --------------------

@@ -307,29 +307,14 @@ def test_no_with_nothing_left_searches_again_without_it(monkeypatch, _no_threade
     assert _no_threaded_worker and _no_threaded_worker[-1]["id"] == item_id
     record = ni_flow._flow_read(store, item_id)
     assert record["state"] == "intent" and _PAGE_URL in record["_declined"]
-    # the re-located pick never offers the declined address again — Library or web
-    monkeypatch.setattr(ni_flow, "_library_candidates", lambda request, intent: [
-        {"url": _PAGE_URL, "title": "same"}, {"url": "https://other.example.org/x", "title": "o"}])
-    ni_flow._pause_source_pick(store, item_id, "daily tropical storms", _STORM_INTENT, lambda _p: "{}")
+    # the re-located auto-pick never tries the declined address again (research's landing refuses it too)
+    monkeypatch.setattr(ni_flow, "_library_candidates", lambda request, intent, **_k: [
+        {"url": _PAGE_URL, "title": "same", "answers": True},
+        {"url": "https://other.example.org/x", "title": "o", "answers": True}])
+    monkeypatch.setattr(ni_flow, "_auto_continue", lambda s, i, *a: ni_flow._flow_read(s, i))
+    ni_flow._auto_pick(store, item_id, "daily tropical storms", _STORM_INTENT, lambda _p: "{}", lambda _u: {})
     assert [r["url"] for r in ni_flow._flow_read(store, item_id)["_ranked_library"]] == [
         "https://other.example.org/x"]
-
-
-def test_no_drops_the_declined_web_row_from_a_fresh_search(monkeypatch) -> None:
-    store, _conn, _key = _store()
-    item_id = _page_card(monkeypatch, store)
-    store.record_validation(item_id, False)
-    ni_flow.decline_reading(store, item_id)
-
-    class _Search:
-        pass
-
-    monkeypatch.setattr(ni_flow, "_resolve_search_service", lambda: _Search())
-    monkeypatch.setattr(ni_flow, "_s2_search_candidates", lambda service, request, intent: copy.deepcopy(_ROWS))
-    monkeypatch.setattr(ni_flow, "_s2_evaluate", lambda web, intent, request: web)
-    ni_flow._pause_with_web(store, item_id, "daily tropical storms", _STORM_INTENT, lambda _p: "{}")
-    assert [r["url"] for r in ni_flow._flow_read(store, item_id)["_ranked_search"]] == [
-        "https://storms.example.org/now"]
 
 
 # --- routes: the board shows what the user judges; YES / NO -------------------------------------

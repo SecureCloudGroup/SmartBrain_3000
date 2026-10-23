@@ -170,10 +170,11 @@ not. Being precise about the line matters more than claiming everything:
   sent. Sources you add yourself stay sealed on your machine.
 - **Your suggestions, to the SmartBrain Library.** SmartBrain picks a Library
   source for a new card itself, reading it once for the preview; nothing about that
-  pick is sent to the Library. When you paste the address of a Library source
-  yourself, the app sends the Library a vote in the background: that source's id,
-  "yes", and the app version. It never sends your request, the filled-in address, a
-  place, or a key. A source you add yourself is sent only if you tick **Also suggest
+  pick, your **Keep**, or a link you paste is sent to the Library. The one vote left
+  is from a card an earlier version left waiting on its old source picker: pasting
+  the address of a Library source it listed sends a vote in the background (that
+  source's id, "yes", and the app version), never your request, the filled-in
+  address, a place, or a key. A source you add yourself is sent only if you tick **Also suggest
   it to the SmartBrain Library**, and then only its name, description, category and
   address pattern, with every value you filled in removed. Both go to
   `smartbrain.securecloudgroup.com`, which keeps no account, cookie, device id or IP

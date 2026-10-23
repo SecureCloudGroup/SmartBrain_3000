@@ -143,7 +143,7 @@ SUGGESTION_NEEDS = frozenset({"key", "contact"})
 # The retired built-in recipe catalog paused at ``confirm_source``; a record
 # still sitting there after an upgrade re-lands the pick pause (Library first).
 _RETIRED_CONFIRM_STATE = "confirm_source"
-_RETIRED_NOTE = "the built-in source list was retired — pick a source below"
+_RETIRED_NOTE = "the built-in source list was retired — paste a link to the data below"
 # M1 (audit 2026-09-13): §29 door-closure marker sealed into the spec at
 # creation. is_flow_or_recipe_born reads this FIRST, journal is a fallback for
 # pre-M1 items whose seal predates the key.
@@ -3961,11 +3961,10 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
                        do_fetch: Callable[[str], object]) -> dict:
     """External-data branch: locate → sampling → mapping → assembly → handoff.
 
-    A ``known_url`` (the user named or tapped it) is the consent: sample it
-    directly. Otherwise the source-pick pause offers SmartBrain Library
-    sources first (a tap builds only from one that declares its answers), links
-    to pages that may help when none does, and paste-a-URL always — the user's
-    tap or paste is the consent for the first fetch.
+    A ``known_url`` (the user named or pasted it) is the consent: sample it
+    directly. Otherwise the auto-pick tries the SmartBrain Library sources that
+    declare their answers, then research, then ends on the declined card with
+    the pages that may help as links and the paste box one tap away.
     """
     assert isinstance(intent, dict), "intent required"
     if known_url:
@@ -4026,7 +4025,7 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
     """Try the sealed buildable rows in order until one builds, one needs access, or none is left.
 
     Each try is one ``_sample_and_map``: it either lands the card (every existing post-fetch check is the
-    gate) or moves on, dropping the row — and runs the web search only once no buildable row is left."""
+    gate) or moves on, dropping the row — and hands the ask to research only once no buildable row is left."""
     assert store is not None and item_id, "store + id required"
     assert isinstance(intent, dict) and callable(do_fetch), "intent + fetcher required"
     rec: dict = {}
@@ -4190,7 +4189,6 @@ def _is_web_page(exc: BaseException) -> bool:
 _SEARCH_PROVIDER: Callable[[], object] | None = None
 
 _S2_MAX_ROWS = 10          # hygiene cap before ranking
-_S2_SEAL_ROWS = 3          # candidates sealed on the pause record
 _S2_EVAL_FETCHES = 4       # E-lite: top-K pages fetched for evidence (≤1/host)
 
 
@@ -4231,7 +4229,7 @@ def _library_hint(intent: dict | None) -> dict:
 def _library_candidates(request: str, intent: dict | None = None, *, limit: int | None = None) -> list[dict]:
     """Library sources whose parameters all fill from the user's words, as sealable rows. The intent's
     frame rides as the hint (C1). No row (locate found no source about the ask, or the Library failed)
-    → the web stage runs. Each row says whether its source declares its answers (ruling 2026-10-05).
+    → research, then the declined card. Each row says whether its source declares its answers (ruling 2026-10-05).
     ``limit`` (v2 auto-pick only) deepens the list; None keeps the Library's own default."""
     lib = _resolve_library()
     if lib is None:
@@ -4771,8 +4769,8 @@ def _realign_url_to_now(store: ni.NIStore, item_id: str, live: dict, url: str,
     assert isinstance(now, datetime), "now must be a datetime"
     clock_params = live.get("_library_clock_params")
     template = str(live.get("_library_url_template") or "")
-    if not template or not isinstance(clock_params, dict) or not clock_params:
-        return url
+    if not template or not isinstance(clock_params, dict) or not clock_params or live.get("_library_url") != url:
+        return url  # only the sealed Library pick's own address walks the clock; any other address is read as given
     probe = {"params": _clock_spec_params(clock_params), "source": {"url": template}}
     rebuilt = _f1_render_url_at(probe, now)
     if not rebuilt or rebuilt == url:
@@ -5161,42 +5159,6 @@ def _page_wrong_outlet(url: str, request: str, intent: dict) -> str:
     return outlets[0]
 
 
-def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
-                       intent: dict, call_model: Callable[[str], str],
-                       rows: list[dict] | None = None, web: bool = True) -> dict:
-    """The ONE source-pick pause. Layer 1 is the SmartBrain Library: sources
-    whose parameters all fill from the user's words seal on the record. Ruling
-    2026-10-05 ("Library cards; web as links"): only a source that declares its
-    answers builds a card; one that doesn't is offered as a link to its page.
-    When no Library source declares answers for the ask, S2 searches the user's
-    own words, E-lite scores what the result pages contain, the model ranks the
-    corpus, and ≤3 web pages seal — as links, next to the Library's. Nothing
-    found, providers unwired, or total failure → the plain pause (paste a URL),
-    never a failed flow. ``web=False`` (v2 auto-pick): the user's consent was for a Library source, so no
-    search runs and no result page is read (a reopened pick only: the auto-pick ends on the declined card).
-    """
-    library = _without_declined(store, item_id,
-                                _library_candidates(request, intent) if rows is None else rows)
-    if _buildable(library):
-        _transition(store, item_id, "source",
-                    error=AWAITING_SOURCE_PICK,
-                    note="paused: sources from the SmartBrain Library are on the card",
-                    _ranked_library=library, _ranked_search=None)
-        return _flow_read(store, item_id) or {}
-    found = _pause_with_web(store, item_id, request, intent, call_model, links=library) if web else None
-    if found is not None:
-        return found
-    _transition(store, item_id, "source",
-                error=AWAITING_SOURCE_PICK,
-                note=_NO_ANSWERING_SOURCE + (" — pages that may help are on the card" if library else
-                                             " — paste a link to the data on the card"),
-                _ranked_library=library or None, _ranked_search=None)
-    return _flow_read(store, item_id) or {}
-
-
-_NO_ANSWERING_SOURCE = "paused: no SmartBrain Library source answers this yet"
-
-
 def _buildable(rows: list | None) -> list[dict]:
     """The pick rows a tap builds a card from: Library rows whose source declares its answers (ruling
     2026-10-05). A row sealed before the ruling carries no mark and counts — the build itself still moves
@@ -5217,44 +5179,12 @@ def link_row_for(record: dict, url: str) -> dict | None:
 
 
 def mark_pasted(store: ni.NIStore, item_id: str, url: str) -> None:
-    """The user pasted ``url`` on the pick card: it is theirs to build from (a page card waits for their
-    YES, §33) even when the card also offered it as a link."""
+    """The user named ``url`` themselves (typed with the ask, pasted on the card, or approved in chat): it is theirs
+    to build from (a page card waits for their YES, §33) even when the card also offered it as a link, and it is the
+    one address a Retry reads again (``_fresh_record``). The engine's own addresses are never written here."""
     assert store is not None and item_id and url, "args required"
     record = _flow_read(store, item_id) or {}
     _flow_write(store, item_id, {**record, "_pasted": url})
-
-
-def _pause_with_web(store: ni.NIStore, item_id: str, request: str, intent: dict,
-                    call_model: Callable[[str], str], drop_why: str | None = None,
-                    links: list | None = None) -> dict | None:
-    """S2: search the user's own words, read the result pages, seal ≤3 readable pages. None when
-    search is unwired or finds nothing. Ruling 2026-10-05: the pages are offered as LINKS (title +
-    host; nothing read off them is shown), next to ``links`` — the Library's sources without
-    declared answers.
-
-    fix9-zone (2026-10-04): ``drop_why`` names the reason the previously tapped Library row was
-    dropped — it rides into the pause note so a silent-drop ("the Library has no source for this")
-    never buries why we moved on. Every move-on must say why."""
-    service = _resolve_search_service()
-    if service is not None:
-        web = _without_declined(store, item_id, _s2_search_candidates(service, request, intent))
-        if web:
-            web = _s2_evaluate(web, intent, request)
-            read = [r for r in web if r.get("fitness") is not None]
-            web = read or web  # offer pages we actually read; unread ones only when none could be read
-            order = rank_web_rows(web, request, intent, call_model)
-            if order:
-                web = [web[i] for i in order if 0 <= i < len(web)]
-            sealed = [{"title": r["title"], "host": r["host"], "url": r["url"]}
-                      for r in web[:_S2_SEAL_ROWS]]
-            prefix = f"the previous source {drop_why}; " if drop_why else ""
-            _transition(store, item_id, "source",
-                        error=AWAITING_SOURCE_PICK,
-                        note=(_NO_ANSWERING_SOURCE.replace("paused: ", "paused: " + prefix)
-                              + " — pages that may help are on the card")[:_MAX_NOTE],
-                        _ranked_search=sealed, _ranked_library=links or None)
-            return _flow_read(store, item_id) or {}
-    return None
 
 
 def _run_remap(store: ni.NIStore, item_id: str, record: dict,
@@ -5482,8 +5412,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         try:
             url = resolve_lookup({"url": url, "lookup": live["_library_lookup"]}, do_fetch)
         except Exception as exc:
-            moved = _move_on(store, item_id, pick_url, "couldn't finish its address", request, intent,
-                             call_model)
+            moved = _move_on(store, item_id, pick_url, "couldn't finish its address")
             return moved if moved is not None else \
                 _fail(store, item_id, "fetch", f"lookup failed: {type(exc).__name__}")
         record = _flow_read(store, item_id) or {}
@@ -5508,7 +5437,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             # C12: a Library row promised its data; a page back is a broken contract, never a page
             # card (ruling 2026-10-05: a tapped Library row builds only from its declared answers)
             why = "returned a web page, not its data" if web_page else "did not return its data"
-            moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
+            moved = _move_on(store, item_id, pick_url, why)
             return moved if moved is not None else \
                 _fail(store, item_id, "fetch", f"the source {why}")
         if not_json and (not remap or own_page):
@@ -5523,8 +5452,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             # host (services.arcgis.com, s3.amazonaws.com) still has readable siblings.
             kind = getattr(exc, "kind", None)
             host_wide = exc.status == 429 or kind in ("challenge", "rate_limited")
-            refused = _move_on(store, item_id, pick_url, "refused SmartBrain's request", request, intent,
-                               call_model, host_wide=host_wide)
+            refused = _move_on(store, item_id, pick_url, "refused SmartBrain's request", host_wide=host_wide)
             if refused is not None:
                 return refused
         if _plain_page_403(exc) and not picked and (not remap or own_page):
@@ -5538,8 +5466,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # row — move on like a refusal does, web search only when the dropped row was a Library row.
         # ``_move_on`` returns None for a pasted link / Fix / remap (no row to drop) → fail honestly.
         if not remap:
-            moved = _move_on(store, item_id, pick_url, "couldn't be fetched", request, intent,
-                             call_model, research=picked)
+            moved = _move_on(store, item_id, pick_url, "couldn't be fetched")
             if moved is not None:
                 return moved
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
@@ -5560,7 +5487,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     if answered is None and picked:
         why = ("didn't fit its declared answers" if _library_answers(str(live.get("_library_source") or ""))
                else "doesn't declare its answers")
-        moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
+        moved = _move_on(store, item_id, pick_url, why)
         return moved if moved is not None else _end(
             store, item_id, "source_cant_answer", f"{live.get('_library_provider') or 'the source'} {why}")
     if answered is not None and answered.get("nothing"):
@@ -5569,7 +5496,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # guess over an empty response (live 2026-09-29: TheSportsDB had no Dodgers games). One that
         # can't show the asked window or measure has nothing either: never its headline instead.
         why = answered.get("why") or "has nothing for this right now"
-        moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
+        moved = _move_on(store, item_id, pick_url, why)
         return moved if moved is not None else _end(
             store, item_id, "source_cant_answer", f"{live.get('_library_provider') or 'the source'} {why}")
     if answered is not None:
@@ -5587,7 +5514,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         if reasons:
             # C8: it can't answer this ask — the next source, the web, or an honest gap; never a handoff
             why = "doesn't answer this (" + "; ".join(reasons)[:140] + ")"
-            moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
+            moved = _move_on(store, item_id, pick_url, why)
             return moved if moved is not None else _end(
                 store, item_id, "source_cant_answer", f"{live.get('_library_provider') or 'the source'} {why}")
         note = "built from the Library's declared answers: " + ", ".join(answered["labels"])
@@ -5621,8 +5548,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # a source the mapping can't read for this ask hands over to the next row of the pick, as a
         # refusal does (live 2026-10-04: one web row's mapping error ended "pollen count in Atlanta"
         # FAILED with two rows left); a pasted link or a Fix still fails honestly
-        moved = None if remap else _move_on(store, item_id, pick_url, "couldn't be read for this ask", request,
-                                             intent, call_model, research=picked)
+        moved = None if remap else _move_on(store, item_id, pick_url, "couldn't be read for this ask")
         return moved if moved is not None else _fail(store, item_id, stage, message)
 
     try:
@@ -5735,8 +5661,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                                            built.get("preview_payload") or {})
     if said_wants and len(gap_wants) >= len(said_wants):
         why = "won't include " + ", ".join(gap_wants)[:140]
-        moved = None if remap else _move_on(store, item_id, pick_url, why, request,
-                                              intent, call_model, research=picked)
+        moved = None if remap else _move_on(store, item_id, pick_url, why)
         if moved is not None:
             return moved
         return _end(
@@ -5748,8 +5673,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     # source gets a shot; a pasted link / Fix fails honestly.
     if place and _rows_contradict_place(built.get("preview_payload"), place):
         why = f"doesn't report for {place}"
-        moved = None if remap else _move_on(store, item_id, pick_url, why, request,
-                                             intent, call_model, research=picked)
+        moved = None if remap else _move_on(store, item_id, pick_url, why)
         if moved is not None:
             return moved
         return _end(
@@ -6037,14 +5961,14 @@ def _page_reasons(graph: dict, preview: dict, intent: dict,
 
 def _page_refused(store: ni.NIStore, item_id: str, url: str, reason: str, request: str, intent: dict,
                   call_model: Callable[[str], str], remap: bool) -> dict:
-    """A page that can't answer the ask: the next page of the pick (never a re-search that offers it
-    again); a pasted link, or a Fix, ends honestly."""
+    """A page that can't answer the ask, said with the reason: dropped like any source (``_move_on``); a pasted link
+    the record holds no row for, or a Fix, fails honestly."""
     why = f"didn't show what you asked ({reason[:120]})"
     if not remap:
-        moved = _move_on(store, item_id, url, why, request, intent, call_model, research=False)
+        moved = _move_on(store, item_id, url, why)
         if moved is not None:
             return moved
-    return _fail(store, item_id, "assembly", f"the page {why} — pick another source")
+    return _fail(store, item_id, "assembly", f"the page {why}")
 
 
 # ---- Round 20 (B3a): the page-browser ladder at creation and Fix --------------------------
@@ -6090,8 +6014,7 @@ def _page_read(store: ni.NIStore, item_id: str, request: str, intent: dict, url:
         # R5-12 (2026-10-04): a page fetch failure hands over to the next row of the pick,
         # same posture as _sample_and_map's non-401/403/429 branch; a pasted link / Fix /
         # remap still fails honestly (``_move_on`` returns None for them).
-        moved = None if remap else _move_on(store, item_id, url, "couldn't be fetched",
-                                            request, intent, call_model)
+        moved = None if remap else _move_on(store, item_id, url, "couldn't be fetched")
         why = exc.kind if isinstance(exc, ni.NIError) else type(exc).__name__
         return None, None, (moved if moved is not None else
                             _fail(store, item_id, "fetch", f"page fetch failed: {why}")), False
@@ -7130,23 +7053,39 @@ def start_remap(store: ni.NIStore, item_id: str, request: str, url: str) -> bool
     return start_flow_worker(store, item_id, source_url=url)
 
 
-def reseed_for_retry(store: ni.NIStore, item_id: str, record: dict,
-                     request_text: str, keep_url: bool) -> bool:
-    """Retry: RE-SEED the flow slot with the sealed request (clear-then-spawn crashed
-    the worker), carry the card's own answers, and spawn the worker. Returns started."""
-    assert store is not None and item_id, "store + id required"
-    assert isinstance(record, dict) and request_text, "record + request required"
-    source_url = record.get("source_url")
-    fresh = _make_record(
-        request_text, "intent",
-        source_url=source_url if keep_url else None,
-        notes=["retrying the build with the same request"])
-    for key in ("_declined", "_model_consent", "_model_consent_web", "_use_local"):  # the card's own answers ride along
+# What a fresh start from the sealed request keeps: the card's own answers (the addresses the user said No to, the
+# model consent and its scope, the local-model choice). Never a seal a previous build wrote: a Library pick, its clock
+# template, a tried row, the engine's own last address. Retry, No and Paste a link all start here (S10 review B1/M2).
+_CARD_ANSWERS = ("_declined", "_model_consent", "_model_consent_web", "_use_local")
+
+
+def _fresh_record(record: dict, request: str, state: str, note: str, *, keep_named: bool = False,
+                  error: str | None = None) -> dict:
+    """A new flow record for the card's sealed ``request``: its own answers ride along, nothing a previous build
+    sealed does. ``keep_named``: the address the user named themselves (``_pasted``, written only at intake and by a
+    paste) rides too, as the one address the run reads without the auto-pick. A paused record keeps the intent."""
+    assert isinstance(record, dict) and isinstance(note, str), "record + note"
+    assert isinstance(request, str) and state in FLOW_STATES, "request + a flow state"
+    named = record.get("_pasted") if keep_named and isinstance(record.get("_pasted"), str) else None
+    intent = record.get("intent") if state != "intent" and isinstance(record.get("intent"), dict) else None
+    fresh = _make_record(request, state, source_url=named, intent=intent, error=error, notes=[note[:_MAX_NOTE]])
+    for key in _CARD_ANSWERS:  # bounded: four keys
         if record.get(key) is not None:
             fresh[key] = record[key]
+    if named:
+        fresh["_pasted"] = named
+    return fresh
+
+
+def reseed_for_retry(store: ni.NIStore, item_id: str, record: dict, request_text: str) -> bool:
+    """Retry: RE-SEED the flow slot with the sealed request (clear-then-spawn crashed the worker) and spawn the
+    worker. The same thing again: the user's own answers and the address they named, if any; never the address the
+    engine last tried (a decline's last Library row is not the user's link). Returns started."""
+    assert store is not None and item_id, "store + id required"
+    assert isinstance(record, dict) and request_text, "record + request required"
+    fresh = _fresh_record(record, request_text, "intent", "retrying the build with the same request", keep_named=True)
     _flow_write(store, item_id, fresh, revive=True)
-    return start_flow_worker(
-        store, item_id, source_url=source_url if keep_url else None)
+    return start_flow_worker(store, item_id, source_url=fresh.get("source_url"))
 
 
 def supply_date(store: ni.NIStore, item_id: str, value: str) -> bool:
@@ -7189,7 +7128,7 @@ def apply_pick(store: ni.NIStore, item_id: str, url: str, record: dict, *,
     start the worker. Returns ``(library_row, missing, started)``."""
     assert store is not None and item_id and url, "store + id + url required"
     assert isinstance(record, dict), "record required"
-    if pasted and link_row_for(record, url) is not None:
+    if pasted:
         mark_pasted(store, item_id, url)
     # R6 + textual formats: a tap on a Library candidate is a Yes AND (when the row
     # named a non-JSON format) seals ``_format`` on the flow record so sampling +
@@ -7242,34 +7181,21 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
             rest = [r for r in rest if (urlparse(str(r.get("url") or "")).hostname or "").lower() != host]
         other = "_ranked_search" if slot == "_ranked_library" else "_ranked_library"
         return _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
-                           note=f"{gone.get('provider') or gone.get('host')} {why} — "
-                                + ("pick another source" if slot == "_ranked_library" and _buildable(rest)
-                                   else "paste a link to the data"),
+                           note=f"{gone.get('provider') or gone.get('host')} {why}",
                            **{slot: rest or None, other: None}, _access=None, _format=None)
     return None
 
 
-def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, request: str, intent: dict,
-             call_model: Callable[[str], str], *, research: bool = True,
-             host_wide: bool = False) -> dict | None:
-    """The tapped source can't serve this ask: back to the pick without it, with the honest reason;
-    when no source is left, the web stage searches the user's words (``research``). None when the URL
-    wasn't a row of the pick (a pasted link) — the caller ends honestly instead.
-
-    fix9-zone (2026-10-04): a Library source dropped by code and no other library rows left used to
-    land on a generic "the Library has no source for this" web pause — the honest why from the
-    repick disappeared. ``_pause_with_web`` now reads the why so every move-on says why.
-
-    Ruling 2026-10-05: "no source left" means no Library source that declares its answers — the
-    Library's link rows stay on the card next to the web pages the search finds."""
+def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, *, host_wide: bool = False) -> dict | None:
+    """The source being tried can't serve this ask: drop it, with the honest reason. The auto-pick then tries its
+    next row (the caller's loop). Any other row (a pasted address that matched a row the record held, or a stored
+    v1 record's tapped row) was the one source the user named: the declined card, never a web search or a pick
+    nothing on the card can tap (S10 review M3). None when the URL wasn't a row (a pasted link): the caller ends
+    honestly instead."""
     moved = _repick_without(store, item_id, url, why=why, host_wide=host_wide)
-    if moved is None or not research or _buildable(moved.get("_ranked_library")) or moved.get("_ranked_search"):
+    if moved is None or moved.get("_auto_picked"):
         return moved
-    if moved.get("_auto_picked"):
-        return moved  # v2 auto-pick exhausted the Library: stop on its links; no search, no page read before Keep
-    web = _pause_with_web(store, item_id, request, intent, call_model, drop_why=why,
-                          links=moved.get("_ranked_library"))
-    return web if web is not None else moved
+    return _end(store, item_id, "source_cant_answer", f"{_host_hint(url) or 'that source'} {why}")
 
 
 # ---- NO to a reading (ruling 2026-10-04: "hold open paths for a YES") ------------------------
@@ -7299,33 +7225,33 @@ def decline_reading(store: ni.NIStore, item_id: str) -> dict:
     named = [url, str(record.get("_library_url") or ""), str(record.get("_pick_url") or "")]
     declined = [u for u in record.get("_declined") or [] if isinstance(u, str) and u not in named]
     declined = (declined + [u for u in named if u])[-_MAX_DECLINED:]
-    _flow_write(store, item_id, {**record, "_declined": declined})
     # "No" never parks on a pick; it re-runs from the user's words and auto-picks the next source
     request = str(record.get("request") or item["spec"].get("goal") or "")
-    fresh = _make_record(request, "intent", notes=["you said no to that reading — finding another source"])
-    for key in ("_declined", "_model_consent", "_model_consent_web", "_use_local"):  # the card's own answers ride along
-        current = (_flow_read(store, item_id) or {}).get(key)
-        if current is not None:
-            fresh[key] = current
+    fresh = _fresh_record({**record, "_declined": declined}, request, "intent",
+                          "you said no to that reading — finding another source")
     _flow_write(store, item_id, fresh, revive=True)
     start_flow_worker(store, item_id)
     return {"kind": "relocate"}
 
 
 def reenter_source_pick(store: ni.NIStore, item_id: str, note: str) -> dict:
-    """G1: land (or re-land) the ``source`` pick pause — a decline or a failed
-    shell is a fork, not a death. The card offers the Library's sources for the
-    sealed request (a local lookup, no egress) plus paste-a-URL.
-    """
+    """G1: land (or re-land) the stop card: a decline or a failed shell is a fork, not a death. A fresh record for
+    the sealed request (``_fresh_record``: no seal of the build that stopped rides into the paste) with the paste
+    box, and the decline's links as read-only pages. Nothing is looked up or fetched; a stopped (cancelled) flow
+    is left as it is."""
     assert store is not None and item_id and isinstance(note, str), "args required"
     record = _flow_read(store, item_id) or _make_record("", "intent")
-    request = str(record.get("request") or "")
-    intent = record.get("intent") if isinstance(record.get("intent"), dict) else None
-    return _transition(store, item_id, "source",
-                        error=AWAITING_SOURCE_PICK, note=note[:_MAX_NOTE],
-                        request=request,
-                        _ranked_library=_library_candidates(request, intent) or None,
-                        _ranked_search=None)
+    if record.get("_cancel"):
+        return record  # v2 Cancel: the user stopped it; only Retry restarts it
+    seal = record.get("_decline_card") if record.get("state") == "declined" else None
+    links = [{"title": str(r.get("title") or ""), "host": str(r.get("host") or ""), "url": str(r.get("url") or "")}
+             for r in (seal or {}).get("links") or [] if isinstance(r, dict) and r.get("url")][:ni_master.DECLINE_LINKS]
+    fresh = _fresh_record(record, str(record.get("request") or ""), "source", note, error=AWAITING_SOURCE_PICK)
+    if links:
+        fresh["_ranked_search"] = links  # shown as pages that may help; pasting one builds as the user's own link
+    ni_master.ledger_append(fresh, "source", "entered", decision=note[:_MAX_NOTE])
+    _flow_write(store, item_id, fresh)
+    return _flow_read(store, item_id) or fresh
 
 
 _SOURCE_CHANGE_RE = re.compile(
@@ -7339,7 +7265,8 @@ def begin_refine(store: ni.NIStore, item: dict, note: str) -> dict:
 
     Routing (code rules, closed):
     - a cadence note ("every 10 minutes") updates the interval directly;
-    - a source-change note re-enters the source pick (new consent, as ever);
+    - a source-change note relocates like No (the source is declined, the auto-pick
+      runs again, and the new card is held for Keep);
     - everything else re-enters sampling on the item's OWN frozen source with
       the note sealed on the record — the rebuild's °F/threshold authoring
       reads it and the P8 judge verifies the result against it.
@@ -7361,8 +7288,8 @@ def begin_refine(store: ni.NIStore, item: dict, note: str) -> dict:
                       f"cadence set to every {int(cadence)}m from your note")
         return {"kind": "cadence", "interval_minutes": int(cadence)}
     if _SOURCE_CHANGE_RE.search(text):
-        reenter_source_pick(store, item["id"],
-                             "your note asked for a different source — pick below")
+        # the same relocate as No: the card's source is declined and the auto-pick runs again from its words
+        decline_reading(store, item["id"])
         _try_journal(store, item["id"], "c2_wrong",
                       f"refine note (new source wanted): {text}")
         return {"kind": "source_change"}

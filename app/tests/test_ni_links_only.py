@@ -19,7 +19,7 @@ from test_ni_answers import WEATHER_URL, _picked, lib  # noqa: F401  (lib is a f
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ni as nimod
-from smartbrain_3000 import ni_flow
+from smartbrain_3000 import ni_flow, ni_master
 from smartbrain_3000.secrets import gen_master_key
 
 
@@ -62,7 +62,7 @@ class _Lib:
     def __init__(self, cands: list[dict], records: dict[str, dict]) -> None:
         self.cands, self.records = cands, records
 
-    def candidates(self, request: str, hint: dict | None = None) -> tuple[list[dict], list[str]]:
+    def candidates(self, request: str, hint: dict | None = None, limit: int = 3) -> tuple[list[dict], list[str]]:
         return copy.deepcopy(self.cands), []
 
     def answers(self, source_id: str) -> list[dict]:
@@ -95,11 +95,27 @@ def _dataset_lib() -> _Lib:
                                              template=_DATASET_API)})
 
 
-def _pause(store: nimod.NIStore, request: str = "river level in Boise") -> str:
+_INTENT = {"kind": "external_data", "subject": "river level", "wants": ["river level"]}
+
+
+def _parked(store: nimod.NIStore, request: str = "river level in Boise", *, web: list | None = None) -> str:
+    """A card at the source pause as a stored v1 pick holds it: the Library's rows as locate marks them (a row
+    without declared answers is a link to its page) and the web pages a search found, nothing read off them."""
     item_id = ni_flow.create_shell_item(store, request)
-    ni_flow._pause_source_pick(store, item_id, request, {"kind": "external_data", "subject": "river level"},
-                               call_model=lambda _p: "{}")
+    ni_flow._flow_write(store, item_id, {
+        **ni_flow._make_record(request, "source", intent=_INTENT), "error": ni_flow.AWAITING_SOURCE_PICK,
+        "_ranked_library": ni_flow._library_candidates(request, _INTENT) or None,
+        "_ranked_search": copy.deepcopy(web) if web else None})
     return item_id
+
+
+def _auto(store: nimod.NIStore, monkeypatch, request: str = "river level in Boise") -> tuple[str, dict]:
+    """The v2 auto-pick for ``request`` with research off: what it seals, or how the card ends."""
+    from smartbrain_3000 import ni_research_flow
+    monkeypatch.setattr(ni_research_flow, "fallback", lambda *a, **k: None)
+    item_id = ni_flow.create_shell_item(store, request)
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(request, "source", intent=_INTENT))
+    return item_id, ni_flow._auto_pick(store, item_id, request, _INTENT, _never, _never)
 
 
 # --- the rows: which build, which are links --------------------------------------------------------
@@ -126,24 +142,14 @@ def test_a_library_source_without_declared_answers_is_a_link_to_its_page(monkeyp
         ("terms", False, "https://example.org")]  # "none" has no page a person reads: left off
 
 
-def test_no_answering_source_offers_the_dataset_and_the_web_pages_as_links(monkeypatch) -> None:
+def test_no_answering_source_declines_with_the_datasets_page_as_a_link_and_never_searches(monkeypatch) -> None:
     search = _Search(_WEB)
     _wire(monkeypatch, _dataset_lib(), search)
-    store = _store()
-    item_id = _pause(store)
-    record = ni_flow._flow_read(store, item_id)
-    assert record["error"] == ni_flow.AWAITING_SOURCE_PICK and search.queries  # the web was searched
-    assert "no SmartBrain Library source answers this yet" in record["notes"][-1]
-    assert [set(r) for r in record["_ranked_search"]] == [{"title", "host", "url"}] * 2  # nothing read off a page
-    sugs = ni_flow.board_flow_field(store, item_id)["suggestions"]
-    assert sugs == [
-        {"kind": "link", "found": "dataset", "title": "harvested-gauges name", "host": "data.example.gov",
-         "url": _DATASET_PAGE},  # its page, never its API address
-        {"kind": "link", "found": "page", "title": "River levels today", "host": "rivers.example.org",
-         "url": "https://rivers.example.org/now"},
-        {"kind": "link", "found": "page", "title": "Gauge map", "host": "gauges.example.net",
-         "url": "https://gauges.example.net/map"}]
-    assert _DATASET_API not in json.dumps(sugs)
+    _item_id, out = _auto(_store(), monkeypatch)
+    assert out["state"] == "declined" and search.queries == []  # research off: the web is never searched
+    assert out["_decline_card"]["links"] == [
+        {"title": "harvested-gauges name", "url": _DATASET_PAGE, "host": "data.example.gov"}]  # its page
+    assert _DATASET_API not in json.dumps(out["_decline_card"])  # never its API address
 
 
 def test_two_datasets_of_one_provider_list_its_page_once(monkeypatch) -> None:
@@ -153,31 +159,30 @@ def test_two_datasets_of_one_provider_list_its_page_once(monkeypatch) -> None:
                       {"a": _record("a", docs="https://example-agency.gov/terms", home=home),
                        "b": _record("b", docs="https://example-agency.gov/legal", home=home)})
     _wire(monkeypatch, lib_double, None)
-    store = _store()
-    item_id = _pause(store)
-    assert [s["url"] for s in ni_flow.board_flow_field(store, item_id)["suggestions"]] == [home]
+    _item_id, out = _auto(_store(), monkeypatch)
+    assert [link["url"] for link in out["_decline_card"]["links"]] == [home]
 
 
-def test_a_declared_source_is_offered_to_tap_and_the_web_is_never_searched(monkeypatch) -> None:
+def test_a_declared_source_is_tried_first_and_the_web_is_never_searched(monkeypatch) -> None:
     lib_double = _Lib([_cand("harvested-gauges", _DATASET_API), _cand("gauge-api", _DECLARED_URL)],
                       {**_dataset_lib().records, "gauge-api": _record("gauge-api", answers=[_ANSWER])})
     search = _Search(_WEB)
     _wire(monkeypatch, lib_double, search)
-    store = _store()
-    item_id = _pause(store)
+    monkeypatch.setattr(ni_flow, "_auto_continue", lambda store, item_id, *a: ni_flow._flow_read(store, item_id))
+    _item_id, out = _auto(_store(), monkeypatch)
     assert search.queries == []
-    sugs = ni_flow.board_flow_field(store, item_id)["suggestions"]
-    assert [(s["kind"], s["url"]) for s in sugs] == [("library", _DECLARED_URL), ("link", _DATASET_PAGE)]
+    assert [(r["answers"], r["url"]) for r in out["_ranked_library"]] == [(True, _DECLARED_URL), (False, _DATASET_API)]
 
 
-def test_nothing_found_is_an_honest_pause_with_paste_a_link(monkeypatch) -> None:
+def test_nothing_found_declines_honestly_and_offers_paste_a_link(monkeypatch) -> None:
     _wire(monkeypatch, None, None)
     store = _store()
-    item_id = _pause(store)
-    record = ni_flow._flow_read(store, item_id)
-    assert record["state"] == "source" and record["error"] == ni_flow.AWAITING_SOURCE_PICK
-    assert record["notes"][-1] == ("paused: no SmartBrain Library source answers this yet — paste a link to "
-                                   "the data on the card")
+    item_id, out = _auto(store, monkeypatch)
+    assert out["state"] == "declined" and out["_decline_card"]["links"] == []
+    assert "pick_source" in ni_master.actions_for("declined", out, shell=True, awaiting_yes=False,
+                                                  item_state="draft", has_payload=False)
+    paste = ni_flow.reenter_source_pick(store, item_id, "you reopened the card to paste a link to the data")
+    assert paste["state"] == "source" and paste["error"] == ni_flow.AWAITING_SOURCE_PICK
     assert ni_flow.board_flow_field(store, item_id)["suggestions"] == []
 
 
@@ -190,7 +195,7 @@ def _never(*_a, **_k):
 def test_the_flow_never_builds_from_a_link_row(monkeypatch) -> None:
     _wire(monkeypatch, _dataset_lib(), _Search(_WEB))
     store = _store()
-    item_id = _pause(store)
+    item_id = _parked(store, web=_WEB)
     for url in (_WEB[0]["url"], _DATASET_PAGE, _DATASET_API):  # a web page, a dataset's page, its address
         out = ni_flow.run_flow(store, item_id, gateway_call=_never, fetcher=_never, ni_route_model="m",
                                source_url=url)
@@ -213,7 +218,7 @@ def test_declared_answers_that_dont_fit_move_on_never_mapping(lib, monkeypatch) 
     rows = [{"source_id": "open-meteo-forecast", "url": WEATHER_URL, "title": "Open-Meteo", "answers": True},
             {"source_id": "other", "url": "https://other.example.org/w", "title": "Other", "answers": True}]
     record = ni_flow._flow_read(store, item_id)
-    ni_flow._flow_write(store, item_id, {**record, "_ranked_library": rows})
+    ni_flow._flow_write(store, item_id, {**record, "_ranked_library": rows, "_auto_picked": True})
     monkeypatch.setattr(ni_flow, "build_from_answers",
                         lambda *a, **k: (_ for _ in ()).throw(ValueError("a cell is missing from every row")))
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", {"kind": "external_data", "wants": ["temperature"]},
@@ -241,10 +246,7 @@ def _route_pause(client: TestClient, monkeypatch) -> tuple[str, list[dict]]:
                       {**_dataset_lib().records, "gauge-api": _record("gauge-api", answers=[_ANSWER])})
     _wire(monkeypatch, lib_double, None)
     store = client.app.state.ni
-    item_id = _pause(store)
-    # and the web pages a search found (the pause offers both when no declared source fits)
-    record = ni_flow._flow_read(store, item_id)
-    ni_flow._flow_write(store, item_id, {**record, "_ranked_search": copy.deepcopy(_WEB)})
+    item_id = _parked(store, web=_WEB)  # a stored v1 pause: a declared row, a dataset link and two web pages
     started: list[dict] = []
     monkeypatch.setattr(ni_flow, "start_flow_worker",
                         lambda s, i, **kw: started.append({"id": i, **kw}) or True)

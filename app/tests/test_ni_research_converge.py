@@ -333,6 +333,17 @@ def test_the_libraryless_net_is_never_touched_by_a_landing_check(monkeypatch) ->
     assert len(net.calls) == before == 1
 
 
+def test_a_source_the_user_said_no_to_on_this_card_never_lands_again(monkeypatch) -> None:
+    """S10: the retired web stage dropped a declined page from its fresh search. Research finds pages its own way (a
+    search, a page's link), so the landing is the one place that refuses a declined source, however it was found."""
+    ctx, _ = _sampled(monkeypatch)
+    got = tools.propose_card(ctx, DRAFT)
+    declined = ni_research_flow._declined_of({"_declined": [URL + "#top", "not an address", 7]})
+    why = ni_research_flow._can_land(ctx, "item-1", ctx.request, got["proposal"], declined)
+    assert why and "said no" in why
+    assert ni_research_flow._can_land(ctx, "item-1", ctx.request, got["proposal"], frozenset()) is None
+
+
 # --- review of PR 541: the call memory keys the whole draft; a pass on the last call is proposed; a failed pass is not retried ---
 
 def test_two_drafts_that_differ_only_after_4000_characters_are_not_the_same_call(monkeypatch) -> None:

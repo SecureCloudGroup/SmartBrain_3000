@@ -779,17 +779,23 @@ give_access, answer_date, allow_model, use_local, fill_param, add_credential, re
 reopen kind and question a terminal card names maps to its action (`_REOPEN_ACTIONS`, `_QUESTION_ACTIONS`), so a way
 out the card offers is always a button on its row.
 
-- **Retry** (`POST /flow/retry`) re-runs a terminal shell's sealed request with the same sealed answers
-  (`_declined`, `_model_consent`, `_use_local`); a fetch-class failure drops the failed URL. 409 while a
-  worker still runs, for a finished card, and for a non-terminal flow.
+- **Retry** (`POST /flow/retry`) re-runs a terminal shell's sealed request from a fresh record
+  (`ni_flow._fresh_record`): the card's own answers (`_declined`, `_model_consent`, `_model_consent_web`,
+  `_use_local`) and the address the user named themselves (`_pasted`, written only at intake, by a paste or by
+  an approved chat call) ride along; nothing a previous build sealed does, so the engine's last address is never
+  read as the user's. 409 while a worker still runs, for a finished card, and for a non-terminal flow. No and
+  Paste a link start from the same fresh record.
 - **Cancel** (`POST /flow/cancel`) stops a running flow; 409 when nothing is building.
 - **Paste a link** (`pick_source`, `POST /flow/reopen`): a declined or fetch-failed shell re-enters the source
-  pause, where the user pastes a link to the data (`/flow/pick-source` below). Shells only: a finished card
+  pause from a fresh record (no Library seal of the stopped build rides into the paste; the decline's links are
+  shown as pages), where the user pastes a link to the data (`/flow/pick-source` below). Nothing is looked up or
+  fetched by the reopen. Shells only: a finished card
   reopens via Fix, and its terminal surface never names `pick_source`. 409 when the row does not offer it.
 - **Fix** (`POST /flow/fix`, `begin_remap`) re-enters sampling on the item's own frozen source (http_json and
   page cards; unfilled params refuse). **Refine** (`POST /refine`) routes a note by code: a cadence phrase sets
-  the interval; a source-change phrase re-enters the source pick; anything else re-samples the frozen source
-  with the note sealed on the record for the rebuild and the verify.
+  the interval; a source-change phrase relocates exactly as **Try another source** does (`decline_reading`: the
+  card's source joins `_declined`, the flow re-runs from the words, the new card is held for Keep); anything else
+  re-samples the frozen source with the note sealed on the record for the rebuild and the verify.
 - **Answer** (`POST /flow/answer`): `supply_date` (YYYY-MM-DD, sealed as `_supplied`, the user's date being the
   truth) and `model_consent`.
 - **Pick source** (`POST /flow/pick-source {url, pasted}`): the paste-a-link field of the stop card. A link row
@@ -928,8 +934,9 @@ a path other than a Library source's declared answers is held until the user kee
   then `live`. For a form card `presentation_id: pick|second` chooses the design before the verdict (§34).
 - **Try another source** is `ok=false` on a held card: a `c2_wrong` journal row, state `draft`, then
   `ni_flow.decline_reading`. The declined address (and the row's own pre-lookup address) joins `_declined` (at
-  most 10, never offered again on this card) and the flow re-runs from the user's words, so the auto-pick tries
-  the Library's other sources, then research, then ends on the declined card. The response carries `repick:
+  most 10, never offered again on this card: the auto-pick and research's Library hide it, and research's landing
+  refuses a proposal on it however the run found it) and the flow re-runs from the user's words, so the
+  auto-pick tries the Library's other sources, then research, then ends on the declined card. The response carries `repick:
   "relocate"` (or `"none"` when the re-run could not start). Never a dead end.
 - **Library-only reads, links only for the rest.** A Library source without declared answers, and a web page a
   search found, are never built from; they are offered as links (`kind: link`, `found: dataset|page`) on the
@@ -1285,7 +1292,7 @@ act.
 | `compare_refused_at_build` (a card showing fewer things than were asked) | `declined` | `compare_unbuildable` |
 | `source_cant_answer` (the one source the user pasted or Fix re-reads does not answer) | `declined` | `source_cant_answer` |
 | `ask_unsupported` (this kind of ask is not built) | `declined` | `ask_unsupported` |
-| `pick_has_untried_row` (the pick still offers a buildable row) | `source` + pick marker | none |
+| `paste_a_link` (the user reopened a decline: the paste box, the decline's links as pages) | `source` + pick marker | none |
 | `needs_key_or_email` | `awaiting_access` | none |
 | `model_consent_question` | `unsupported` + question | none |
 | `date_question` | `unsupported` + question | none |

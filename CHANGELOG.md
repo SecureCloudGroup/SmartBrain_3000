@@ -21,8 +21,12 @@ to know when a release changes behavior.
   stop the app). What goes away: the pick card that asked you to tap a Library source and the searched web
   pages it listed, and the pre-read of up to four search-result pages while a card is created (the cloud
   researcher still searches, with your consent). A card that couldn't be built offers **Try again** and **Paste
-  a link** (it reopens the card so you can paste a link to the data); every way out a stopped card names is now a
-  button the backend declares in its `actions` (`pick_source` is `POST .../flow/reopen`). `GET .../flow` and
+  a link** (it reopens the card so you can paste a link to the data); **Try again** re-runs your words, reading
+  again only a link you gave, never the last source the card tried. A Refine note asking for a different source
+  now works like **Try another source** (that source is set aside and the card looks again) instead of opening a
+  picker, and a source you said no to on a card is never built from again on that card, even when research finds
+  it on the web. Every way out a stopped card names is now a button the backend declares in its `actions`
+  (`pick_source` is `POST .../flow/reopen`). `GET .../flow` and
   `POST .../flow/cancel` no longer answer 404 for lack of the setting, and every board row now carries
   `actions`. Cards you already have are untouched: they refresh, edit, export and import as before.
   `tools/ni-eval.py --flow` is removed (any value is an error); the eval always runs the one flow.

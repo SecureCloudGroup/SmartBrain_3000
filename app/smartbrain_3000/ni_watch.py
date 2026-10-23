@@ -102,11 +102,14 @@ def resolve_finding(conn, finding_id: str) -> bool:
 # The watcher reads each card the way the board's own route builds it (``ni_routes._board_row``, the function
 # ``GET /api/ni/board`` maps over the store), never the internal flow slot, so it sees exactly what the user's
 # screen is given. A check is a row of ``ROW_CHECKS``: a code, a severity, a host-free title and a predicate over one
-# served row. Adding an audit is adding a row; the pass, the finding and its dedupe stay the same.
+# served row. Adding an audit is adding a row; the pass, the finding and its dedupe stay the same. Cost: one full row
+# build (snapshot decrypt, render and brief fields) per card per NI tick, bounded by ``ni._MAX_ITEMS``; a row that
+# fails to build is logged and skipped by the audit only, never by failure clustering.
 
 # flow actions that are a way forward for a stopped card (``delete`` is on every list and is not one)
 _WAY_ON_ACTIONS: frozenset[str] = frozenset({
     "retry", "fix", "refine", "give_access", "answer_date", "allow_model", "use_local", "add_credential", "fill_param",
+    "pick_source",
 })
 
 
@@ -196,7 +199,12 @@ def watch_create(store: ni.NIStore) -> dict:
     for item in items:  # bounded by ni._MAX_ITEMS
         try:
             record = ni_flow._flow_read(store, item["id"])
-            for _code, severity, title in audit_row(store, item, record):  # every card, as the board serves it
+            try:
+                failed = audit_row(store, item, record)  # every card, as the board serves it
+            except Exception as exc:  # a row that cannot be built skips the audit, not the clustering below
+                log.warning("ni_watch: skipped the served-row audit for %s: %s", item.get("id"), type(exc).__name__)
+                failed = []
+            for _code, severity, title in failed:
                 if file_finding(conn, "create", severity, title, item_id=item["id"]):
                     summary["filed"] += 1
                     summary["high"] += severity == "high"

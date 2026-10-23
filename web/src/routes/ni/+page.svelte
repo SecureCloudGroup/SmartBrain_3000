@@ -185,7 +185,7 @@
       refineFor = null;
       refineText = "";
       toast(out.kind === "cadence" ? "Update schedule changed."
-        : out.kind === "source_change" ? "Okay — pick a new source on the card."
+        : out.kind === "source_change" ? "Okay — looking for another source."
         : "Rebuilding the card from your note.");
       await load();
     } catch (err) {

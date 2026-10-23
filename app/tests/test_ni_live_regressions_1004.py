@@ -164,24 +164,21 @@ _WEB = [{"title": "Pollen Count | Atlanta Allergy", "host": "www.atlantaallergy.
     {"page": {"title": "text only", "note": "no number anywhere"}},  # mapping: no candidate of the wanted type
     {},  # derive: no candidate paths at all
 ])
-def test_a_mapping_misfit_hands_over_to_the_next_row(monkeypatch, sample) -> None:
-    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
+def test_a_mapping_misfit_on_a_listed_page_ends_declined_with_the_reason(monkeypatch, sample) -> None:
+    """The paste box lists a decline's pages as links; the one the user pasted is the source they named. A misfit
+    ends on the declined card saying why, never on another page nobody tapped and never a web search."""
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", lambda: pytest.fail("searched"))
     store = _store()
     item_id = ni_flow.create_shell_item(store, "pollen count in Atlanta")
     ni_flow._transition(store, item_id, "source", error=ni_flow.AWAITING_SOURCE_PICK, _ranked_search=list(_WEB))
+    ni_flow.mark_pasted(store, item_id, _WEB[0]["url"])
     intent = {"kind": "external_data", "subject": "pollen count", "cadence_minutes": 60,
               "wants": ["pollen_count"], "threshold": None, "place": "Atlanta", "display_hint": "value",
               "frame_kind": None, "window": None}
     out = ni_flow._sample_and_map(store, item_id, "pollen count in Atlanta", intent, _WEB[0]["url"],
                                   lambda _p: "{}", lambda _u: sample)
-    assert out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
-    assert [r["url"] for r in out["_ranked_search"]] == [_WEB[1]["url"]]
-    # ruling 2026-10-05: the web rows left are links, not sources to pick — the note says paste a link
-    assert "paste a link to the data" in out["notes"][-1]
-    # the last row: an honest pause, never a failed card
-    out = ni_flow._sample_and_map(store, item_id, "pollen count in Atlanta", intent, _WEB[1]["url"],
-                                  lambda _p: "{}", lambda _u: sample)
-    assert out["state"] == "source" and "paste a link" in out["notes"][-1]
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "source_cant_answer"
+    assert out["_decline_card"]["line"].startswith("www.atlantaallergy.com ")
 
 
 def test_a_mapping_misfit_on_a_pasted_link_still_fails_honestly(monkeypatch) -> None:

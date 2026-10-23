@@ -1748,14 +1748,19 @@ def test_g4a_refine_cadence_note_updates_interval_without_a_worker(monkeypatch) 
     assert fired == {}, "a cadence note never spawns a worker"
 
 
-def test_g4a_refine_source_change_note_reenters_the_pick(monkeypatch) -> None:
+def test_g4a_refine_source_change_note_relocates_like_no(monkeypatch) -> None:
+    """There is no pick to re-enter: "a different source" declines the card's source and the auto-pick runs again
+    from the card's words, exactly as No does."""
     store, _conn = _store()
     item = _refine_card(store)
-    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    started: list[dict] = []
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: started.append({"id": iid, **kw}) or True)
     out = ni_flow.begin_refine(store, item, "use a different source for this")
     assert out == {"kind": "source_change"}
     record = ni_flow._flow_read(store, item["id"])
-    assert record["state"] == "source"
+    assert record["state"] == "intent" and record["_declined"] == [item["spec"]["source"]["url"]]
+    assert record["request"] == "track the weather in Charleston" and not record.get("source_url")
+    assert started == [{"id": item["id"]}], "the worker starts from the words, with no address"
 
 
 def test_g4a_refine_content_note_seals_and_rebuilds(monkeypatch) -> None:

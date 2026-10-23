@@ -1090,6 +1090,8 @@ def intake(request: Request, body: IntakeIn) -> dict:
                                              allow_duplicate=body.allow_duplicate)
     except ValueError as exc:  # duplicate title — name the existing card
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    if source_url is not None:
+        ni_flow.mark_pasted(store, item_id, source_url)  # the user's own link: a Retry reads it again
     started = ni_flow.start_flow_worker(store, item_id, source_url=source_url)
     request.app.state.audit.append(
         "user", "ni_intake", "reviewed", "executed", True,
@@ -1127,21 +1129,12 @@ def retry_flow(request: Request, item_id: str) -> dict:
     request_text = str(record.get("request") or item["spec"].get("goal") or "")
     if not request_text:
         raise HTTPException(status_code=409, detail="flow record lost the request")
-    source_url = record.get("source_url")
-    # A failed SAMPLING url should not silently re-ride a retry that the user
-    # intends as a fresh start — but a user-named URL was their consent, so it
-    # stays. Heuristic: keep the URL only when the failure was NOT at fetch.
-    error = str(record.get("error") or "")
-    # Consent guard (claims audit 2026-09-21): a record that died at the
-    # retired catalog's confirm pause carries a URL the user NEVER approved —
-    # a retry must not promote it to a consented fetch.
-    died_unapproved = "confirm" in error or bool(record.get("_recipe_id"))
-    keep_url = isinstance(source_url, str) and bool(source_url) and \
-        not error.startswith("fetch") and not died_unapproved
+    # Only the address the user named themselves (``_pasted``) rides a retry; the engine's own last address (a
+    # declined auto-pick's row, a retired confirm's URL) is never promoted to a consented fetch (S10 review M2).
     # Claims audit 2026-09-21: clear-then-spawn CRASHED the worker ("no flow
     # record") — Retry never worked; the mocked route test was the mask.
     # RE-SEED the record with the sealed request instead of clearing it.
-    started = ni_flow.reseed_for_retry(store, item_id, record, request_text, keep_url)
+    started = ni_flow.reseed_for_retry(store, item_id, record, request_text)
     request.app.state.audit.append(
         "user", "ni_intake_retry", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),

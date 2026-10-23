@@ -134,7 +134,7 @@ ENDINGS: dict[str, tuple[str, str | None]] = {
     "source_cant_answer": ("declined", "source_cant_answer"),
     "ask_unsupported": ("declined", "ask_unsupported"),
     # -- stays: the user can act --
-    "pick_has_untried_row": ("source", None),            # a buildable Library row is still offered to tap
+    "paste_a_link": ("source", None),                    # the stop card's paste box (a decline the user reopened)
     "needs_key_or_email": ("awaiting_access", None),     # the picked source's key or contact email
     # (a built card that waits for a key or a value is not an ending: it is a draft card with its own gate)
     "model_consent_question": ("unsupported", None),     # build with a model outside this computer?

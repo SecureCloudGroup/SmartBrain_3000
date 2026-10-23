@@ -2214,6 +2214,8 @@ def _start_ni_flow(ctx: ToolContext, args: dict) -> dict:
     allow_duplicate = bool(args.get("allow_duplicate"))
     item_id = ni_flow.create_shell_item(ctx.ni, request,
                                           allow_duplicate=allow_duplicate)
+    if isinstance(source_url, str) and source_url:
+        ni_flow.mark_pasted(ctx.ni, item_id, source_url)  # approved with the call: the user's own link
     started = ni_flow.start_flow_worker(
         ctx.ni, item_id,
         source_url=source_url if isinstance(source_url, str) else None,
@@ -2252,6 +2254,7 @@ def _resume_ni_flow(ctx: ToolContext, args: dict) -> dict:
     if record is None:
         raise ValueError("no active flow on this item — call start_ni_flow first")
     source_url = str(args["source_url"])
+    ni_flow.mark_pasted(ctx.ni, item_id, source_url)  # approved with the call: the user's own link
     # One-door law (2026-09-14): the resume now WAITS for the flow to settle
     # (same bounded wait as start_ni_flow) and reports the real resulting
     # state + next_step, not a prediction of the worker's first transition.

@@ -1242,8 +1242,8 @@ def test_intake_validates_source_url_shape(client: TestClient) -> None:
 
 
 def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> None:
-    """Retry re-runs the SAME sealed request; a fetch-class failure drops the
-    URL (fresh source resolution), a running/healthy flow refuses."""
+    """Retry re-runs the SAME sealed request with only the address the user named (``_pasted``); the
+    engine's own last address never rides (S10 review M2); a running/healthy flow refuses."""
     from smartbrain_3000 import ni_flow
     _unlock(client)
     store = client.app.state.ni
@@ -1253,7 +1253,7 @@ def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> No
     iid = client.post("/api/ni/intake", json={"request": "retry me please"}).json()["id"]
     # Running flow (state intent) → 409.
     assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 409
-    # Terminal fetch failure → retry WITHOUT the url.
+    # The engine's own last address (a terminal fetch failure, or any other) → retry WITHOUT it.
     ni_flow._fail(store, iid, "fetch", "sample fetch failed: FetchError")
     record = ni_flow._flow_read(store, iid)
     record["source_url"] = "https://query1.finance.yahoo.com/bad"
@@ -1262,10 +1262,17 @@ def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> No
     r = client.post(f"/api/ni/items/{iid}/flow/retry")
     assert r.status_code == 200, r.text
     assert fired["id"] == iid and fired.get("source_url") is None
-    # Terminal non-fetch failure keeps the user's URL.
     ni_flow._fail(store, iid, "mapping", "mapping stage failed after retry")
     record = ni_flow._flow_read(store, iid)
-    record["source_url"] = "https://api.example.com/mine"
+    record["source_url"] = "https://api.example.com/engine-tried"
+    ni_flow._flow_write(store, iid, record)
+    fired.clear()
+    assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 200
+    assert fired.get("source_url") is None
+    # The address the user named keeps riding, whatever the failure.
+    ni_flow._fail(store, iid, "fetch", "sample fetch failed: FetchError")
+    record = ni_flow._flow_read(store, iid)
+    record.update(source_url="https://api.example.com/mine", _pasted="https://api.example.com/mine")
     ni_flow._flow_write(store, iid, record)
     fired.clear()
     assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 200

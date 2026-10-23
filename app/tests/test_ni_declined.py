@@ -72,7 +72,7 @@ def test_a_research_outcome_names_a_declining_ending() -> None:
     ctx = SimpleNamespace(urls={})  # only reached through _decline's assert on the ending
     out = loop.Outcome("declined", "cloud")
     with pytest.raises(AssertionError):
-        loop._decline(ctx, out, ["x"], "pick_has_untried_row")  # a stay is not a decline
+        loop._decline(ctx, out, ["x"], "paste_a_link")  # a stay is not a decline
 
 
 def test_a_decline_view_is_total_and_bounded() -> None:
@@ -155,11 +155,11 @@ def _drive_ask_unsupported(lib_fixture, monkeypatch):
     return ni_flow._handle_computed(store, item_id, "days until 2027-01-01", {"kind": "computed_only"})
 
 
-def _drive_pick_has_untried_row(lib_fixture, monkeypatch):
+def _drive_paste_a_link(lib_fixture, monkeypatch):
     store = _store()
     item_id = ni_flow.create_shell_item(store, _REQUEST)
-    row = {**_row("open-meteo-forecast", WEATHER_URL), "answers": True}
-    return ni_flow._pause_source_pick(store, item_id, _REQUEST, _INTENT, _model, rows=[row], web=False)
+    ni_flow._flow_write(store, item_id, {**_drive_no_source_research_off(lib_fixture, monkeypatch), "state": "declined"})
+    return ni_flow.reenter_source_pick(store, item_id, "you reopened the card to paste a link to the data")
 
 
 def _drive_needs_key_or_email(lib_fixture, monkeypatch):
@@ -434,6 +434,61 @@ def test_paste_a_link_refuses_a_running_shell_and_a_finished_card(client, lib, m
     store.update_spec(finished, spec, origin="user", preserve_attestations=True)
     r = client.post(f"/api/ni/items/{finished}/flow/reopen")
     assert r.status_code == 409 and "Fix" in r.json()["detail"]
+
+
+_STALE_PICK = {  # what a declined auto-pick leaves on its record: the last Library row it tried, with a clock template
+    "_library_source": "open-meteo-forecast", "_library_url": "https://api.open-meteo.com/v1/forecast?day=2026-10-22",
+    "_library_url_template": "https://api.open-meteo.com/v1/forecast?day={{param:day}}",
+    "_library_clock_params": {"day": {"kind": "date", "offset": 0}}, "_pick_url": "https://api.open-meteo.com/v1/forecast",
+    "_format": "json", "_access": {"url": "https://api.open-meteo.com/v1/forecast?day=2026-10-22"},
+    "source_url": "https://api.open-meteo.com/v1/forecast?day=2026-10-22", "_declined": ["https://no.example.org/x"],
+}
+
+
+def test_paste_a_link_after_a_decline_reads_the_pasted_link_not_the_last_tried_row(client, lib, monkeypatch) -> None:  # noqa: F811
+    """S10 review B1: reopen starts fresh from the sealed request; no seal of the build that stopped rides into the
+    paste, so the worker reads exactly the link the user pasted."""
+    store = client.app.state.ni
+    item_id = _declined_shell(client, lib, monkeypatch)
+    ni_flow._flow_write(store, item_id, {**ni_flow._flow_read(store, item_id), **_STALE_PICK})
+    assert client.post(f"/api/ni/items/{item_id}/flow/reopen").status_code == 200
+    record = ni_flow._flow_read(store, item_id)
+    assert not {k for k in record if k.startswith("_library") or k in ("_pick_url", "_format", "_access", "source_url")}
+    assert record["_declined"] == ["https://no.example.org/x"], "the card's own answers ride along"
+    started: list[str | None] = []
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, i, **kw: started.append(kw.get("source_url")) or True)
+    pasted = "https://query1.finance.example.com/v8/finance/chart/AAPL"
+    r = client.post(f"/api/ni/items/{item_id}/flow/pick-source", json={"url": pasted, "pasted": True})
+    assert r.status_code == 200 and started == [pasted]
+    assert ni_flow._flow_read(store, item_id)["_pasted"] == pasted
+
+
+def test_only_the_sealed_library_address_walks_the_clock() -> None:
+    """Defence in depth for B1: a record that still carries a clock template never rewrites another address."""
+    from datetime import UTC, datetime
+    live = dict(_STALE_PICK)
+    pasted = "https://query1.finance.example.com/v8/finance/chart/AAPL"
+    assert ni_flow._realign_url_to_now(_store(), "id", live, pasted, datetime.now(UTC)) == pasted
+    assert live["_library_url"] == _STALE_PICK["_library_url"], "nothing was rewritten"
+
+
+def test_retry_on_a_declined_shell_never_promotes_the_engines_last_address(client, lib, monkeypatch) -> None:  # noqa: F811
+    """S10 review M2: Retry re-runs the sealed request from the auto-pick; the last Library row the engine tried is not
+    the user's link. Only an address the user named (``_pasted``) rides a retry."""
+    store = client.app.state.ni
+    item_id = _declined_shell(client, lib, monkeypatch)
+    ni_flow._flow_write(store, item_id, {**ni_flow._flow_read(store, item_id), **_STALE_PICK})
+    started: list[str | None] = []
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, i, **kw: started.append(kw.get("source_url")) or True)
+    assert client.post(f"/api/ni/items/{item_id}/flow/retry").status_code == 200
+    record = ni_flow._flow_read(store, item_id)
+    assert started == [None] and "source_url" not in record and record["state"] == "intent"
+    assert not {k for k in record if k.startswith("_library") or k in ("_pick_url", "_access")}
+    assert record["_declined"] == ["https://no.example.org/x"]
+    named = "https://data.example.org/levels.json"
+    ni_flow._flow_write(store, item_id, {**record, "state": "declined", "_pasted": named, "source_url": named})
+    assert client.post(f"/api/ni/items/{item_id}/flow/retry").status_code == 200
+    assert started[-1] == named and ni_flow._flow_read(store, item_id)["_pasted"] == named
 
 
 def test_every_way_out_a_terminal_card_names_is_an_action_on_its_row() -> None:
