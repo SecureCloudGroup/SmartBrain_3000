@@ -103,6 +103,12 @@ ENTRY_POINTS = {
     "ni_compare.names": lambda text: ni_compare.names("Nvidia", text),
     "ni_compare.shown": lambda text: ni_compare.shown(["Nvidia", "AMD"], {"rows": [{"name": text, "value": 3}] * 400}),
     "ni_compare.reasons": lambda text: ni_compare.reasons(["Nvidia", text[:80]], {"rows": [{"name": text, "value": 3}] * 400}),
+    "ni_compare.search_names": lambda text: ni_compare.search_names("Ford market cap", text, ["Tesla", "Ford"]),
+    "ni_compare.search_names_entity": lambda text: ni_compare.search_names(text, "Ford Motor stock", ["Tesla", text[:60]]),
+    "ni_compare.named_in": lambda text: ni_compare.named_in(["Tesla", "Ford market cap", text[:80]], text),
+    "ni_compare.mentions": lambda text: ni_compare.mentions({text[:50]: [text] * 200, "rows": [{"n": text}] * 200}, "Nvidia"),
+    "digest.rank_search_rows": lambda text: digest.rank_search_rows(
+        [{"url": "https://" + text[:100] + "/" + text[100:250] + "?" + text[250:300], "title": text, "snippet": text}] * 8),
     "digest.clean_text": digest.clean_text,
     "digest.digest": lambda text: digest.digest("https://x.example.org/a", "json", {"field": text, "list": [text]}),
     "digest.clean_search_rows": lambda text: digest.clean_search_rows(

@@ -114,14 +114,9 @@ def _window_of(request: str, intent: dict) -> str | None:
 
 def _stamp(spec: dict, request: str) -> dict:
     """The researcher's spec with the code-owned fields: the goal is the user's words and the interval comes
-    from the question's cadence (never the model's)."""
+    from the question's cadence (never the model's). One rule, shared with the check the researcher runs."""
     assert isinstance(spec, dict), "spec required"
-    out = copy.deepcopy(spec)
-    out["goal"] = request[:ni._MAX_GOAL]
-    out["interval_minutes"] = ni_recipe.cadence_minutes(out)
-    out.setdefault("repair_policy", {"l1": True, "l2_frontier": False})
-    assert out["interval_minutes"] is not None, "the question carries a cadence"
-    return out
+    return tools.stamp(spec, request)
 
 
 def _preview_of(ctx: ResearchCtx, spec: dict) -> dict:
@@ -139,19 +134,18 @@ def _preview_of(ctx: ResearchCtx, spec: dict) -> dict:
 
 def _can_land(ctx: ResearchCtx, item_id: str, request: str, proposal: dict) -> str | None:
     """Why this proposal cannot become a card (the whole spec validates and the scene binds the real outputs),
-    else None. A failure goes back to the model as a failed proposal."""
+    else None. A failure goes back to the model as a failed proposal. The same rule ``try_recipe`` and
+    ``propose_card`` already ran on the sample (``tools.landing_reason``); here it runs on the sealed proposal, with
+    the card's real id, as the backstop."""
     assert isinstance(request, str) and item_id, "args required"
     assert isinstance(proposal, dict), "a proposal"
     try:
         spec = _stamp(proposal["spec"], request)
         ni.validate_spec(spec)
         preview = _preview_of(ctx, spec)
-        ni.bind_scene(spec["scene"], preview, history=ni._seed_history(spec),
-                      image_ref=ni._preview_image_ref(spec, item_id),
-                      form_ctx=ni._form_bind_context(spec, ctx.now), alternatives=True)
     except (ni.NIError, ValueError, KeyError, AssertionError) as exc:
         return f"the card cannot be shown: {one_line(exc, 150)}"
-    return ni_compare.refusal(spec, preview)   # S7: the build check every path runs, so the model can fix it
+    return tools.landing_reason(ctx, spec, preview, item_id)
 
 
 def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, proposal: dict, out: loop.Outcome) -> dict:

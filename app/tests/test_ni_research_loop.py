@@ -92,7 +92,7 @@ def test_a_good_run_ends_at_propose_card_and_every_tool_ran_in_code(monkeypatch)
 
 def test_the_turn_budget_ends_in_an_honest_decline_with_library_links(monkeypatch) -> None:
     ctx, _ = listed(monkeypatch, max_turns=3)
-    steps = [reply(call("library_search", query="quakes")), *[reply(call("resolve_entity", text="Boise"))] * 6]
+    steps = [reply(call("library_search", query="quakes")), *[reply(call("resolve_entity", text=f"Boise {i}")) for i in range(6)]]
     script = Script(*steps)
     out = loop.run_research(ctx, script)
     assert out.status == "declined" and out.proposal is None and "tool calls budget" in out.reasons[0]
@@ -101,9 +101,12 @@ def test_the_turn_budget_ends_in_an_honest_decline_with_library_links(monkeypatc
 
 
 def test_the_fetch_budget_is_enforced_by_code_and_reported_to_the_model(monkeypatch) -> None:
-    ctx, net = listed(monkeypatch, max_fetches=1)
+    other = "https://data.example.org/other.json"
+    net = Net(monkeypatch, {URL: QUAKES, other: QUAKES})
+    ctx = _ctx(FakeLibrary([_lib_row(URL, title="Quake feed"), _lib_row(other, title="Other")]),
+               allowed_origins=frozenset({"library"}), max_fetches=1)
     script = Script(reply(call("library_search", query="q")), reply(call("fetch_sample", url=URL)),
-                    reply(call("fetch_sample", url=URL)), reply(call("try_recipe", draft_spec=DRAFT)),
+                    reply(call("fetch_sample", url=other)), reply(call("try_recipe", draft_spec=DRAFT)),
                     reply(call("propose_card", draft_spec=DRAFT)))
     out = loop.run_research(ctx, script)
     assert out.status == "proposed" and len(net.calls) == 1, "the second fetch never reached the network"

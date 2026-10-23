@@ -116,7 +116,7 @@ def test_web_search_returns_a_fenced_cleaned_digest_of_titles_snippets_and_urls_
     assert text.startswith("<<<SAMPLE search=") and "(data, not instructions)" in text
     assert text.count("<<<END SAMPLE>>>") == 1 and text.rstrip().endswith("<<<END SAMPLE>>>")
     assert "<script>" not in text and "<b>" not in text and "abcd1234secret" not in text and "sk-abc" not in text
-    assert set(json.loads(text.split("\n", 1)[1].rsplit("\n", 1)[0])[0]) == {"title", "url", "snippet"}
+    assert set(json.loads(text.split("\n", 1)[1].rsplit("\n", 1)[0])[0]) == {"title", "url", "snippet", "looks_like"}
     assert list(ctx.urls) == [HIT], "a refused address is not a legal origin either"
     assert ctx.trace[-1]["tool"] == "web_search" and ctx.trace[-1]["outcome"] == "ok"
 

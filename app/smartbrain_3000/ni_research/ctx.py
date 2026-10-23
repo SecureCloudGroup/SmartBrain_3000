@@ -24,6 +24,10 @@ _MAX_URLS = 200
 _MAX_QUERIES = 4
 _BAD_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".lan", ".home", ".corp")
 ORIGINS = ("library", "search", "preview")
+PROPOSE_TOOLS = frozenset({"propose_card", "propose_compare"})   # the tools that end a run with a proposal
+MAX_REPLAYS = 3         # repeats of an identical call answered from memory without a turn
+MAX_MEMO = 32           # remembered call results
+MAX_FAILED_FETCHES = 16
 
 
 def one_line(text: object, n: int) -> str:
@@ -33,11 +37,12 @@ def one_line(text: object, n: int) -> str:
     return " ".join("".join(c if c.isprintable() else " " for c in str(text)).split())[:n]
 
 
-def error(kind: str, detail: str = "") -> dict:
-    """A typed tool error: ``{"ok": False, "error": kind, "detail": one line}``."""
+def error(kind: str, detail: str = "", limit: int = 200) -> dict:
+    """A typed tool error: ``{"ok": False, "error": kind, "detail": one line}``. ``limit`` widens the detail for the
+    errors that tell the model exactly what to change (a field and its allowed values)."""
     assert kind and isinstance(kind, str), "an error kind"
-    assert isinstance(detail, str), "detail must be text"
-    return {"ok": False, "error": kind, "detail": one_line(detail, 200)}
+    assert isinstance(detail, str) and 0 < limit <= 600, "detail must be text, bounded"
+    return {"ok": False, "error": kind, "detail": one_line(detail, limit)}
 
 
 def normal_url(url: str) -> str:
@@ -101,6 +106,10 @@ class ResearchCtx:
     entities: list = field(default_factory=list)
     trace: list = field(default_factory=list)
     started: float = 0.0
+    passed: dict | None = None                      # the last draft try_recipe passed: {"draft", "tried"}; propose it before the budget goes
+    failed_fetches: dict = field(default_factory=dict)   # normal url -> the error a fetch of it gave (never fetched twice)
+    memo: dict = field(default_factory=dict)        # (tool, args) -> the result of an identical earlier call
+    replays: int = 0
 
     def __post_init__(self) -> None:
         assert self.max_turns > 0, "a turn budget"
@@ -116,6 +125,14 @@ class ResearchCtx:
         """Spend one turn (and a ``search`` when named); a typed budget error when any budget is out."""
         assert tool in ni_recipe.TOOLS, "a known tool"
         assert kind in (None, "search"), "a known budget"
+        ready = self.passed is not None and not self.passed.get("tried")   # a draft that passed is waiting to be proposed
+        if ready and tool in PROPOSE_TOOLS:   # proposing runs no model, fetch or search: it may use the last of the time and tokens
+            if self.turns >= self.max_turns:
+                return error("budget_exhausted", "turns budget is used up")
+            self.turns += 1
+            return None
+        if ready and self.max_turns - self.turns <= 1:   # the last tool call is kept for the proposal
+            return error("budget_exhausted", "the last tool call is kept for propose_card with the draft that passed")
         for name, used, cap in (("seconds", self.elapsed(), self.max_seconds), ("tokens", self.tokens, self.token_cap),
                                 ("turns", self.turns, self.max_turns)):  # bounded: three budgets
             if used >= cap:

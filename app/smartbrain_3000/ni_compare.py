@@ -62,6 +62,115 @@ def names(entity: str, text: str) -> bool:
     return any(have[i:i + len(want)] == want for i in range(len(have) - len(want) + 1))
 
 
+MAX_SCAN = 2000    # the characters of a query, name or sample string the provenance matcher reads (input cap)
+MIN_HEAD = 4       # the shortest leading part of a name that may stand for it (a short all-caps token also may)
+
+
+def _stem(token: str) -> str:
+    """A word without a plural or possessive ``s`` ("Lakers" and "Laker's" read the same)."""
+    return token[:-1] if len(token) > 3 and token.endswith("s") and not token.endswith("ss") else token
+
+
+def _words(text: str) -> list[str]:
+    """The normalised words of ``text`` (case, possessives and plurals folded), input-capped: one linear pass."""
+    assert isinstance(text, str), "text must be a string"
+    flat = text[:MAX_SCAN].replace("'s", " ").replace("\u2019s", " ")
+    return [_stem(w) for w in _fold(flat)]
+
+
+def _spans(want: list[str], have: list[str]) -> list[tuple[int, int]]:
+    """Every span of ``have`` that reads as ``want`` on word boundaries, where the words may be joined or split
+    ("iPhone 15" is "iphone15"; "Salt Lake" is "saltlake"); ``[]`` when it is not there."""
+    assert isinstance(want, list) and isinstance(have, list), "word lists"
+    joined = "".join(want)
+    out: list[tuple[int, int]] = []
+    if not joined:
+        return out
+    for i in range(len(have)):  # bounded by the capped text
+        acc = ""
+        for j in range(i, len(have)):
+            acc += have[j]
+            if acc == joined:
+                out.append((i, j + 1))
+                break
+            if len(acc) >= len(joined) or not joined.startswith(acc):
+                break
+    return out
+
+
+def _find(want: list[str], have: list[str]) -> tuple[int, int] | None:
+    """The first span ``_spans`` finds, else None."""
+    found = _spans(want, have)
+    return found[0] if found else None
+
+
+def _head(entity: str, others: list[str], have: list[str]) -> tuple[int, int] | None:
+    """A name that carries trailing words of the ask's own ("Ford market cap") is also named by its leading part
+    ("Ford"), when that part is longer than a stub (or an all-caps token like "LA") and none of its words belongs to
+    another asked thing. The longest leading part found wins."""
+    want = _words(entity)
+    raw = entity[:MAX_SCAN].split()
+    if len(want) < 2 or not raw:
+        return None
+    taken = {w for o in others for w in _words(o)}
+    stub = raw[0].isalpha() and raw[0].isupper() and len(raw[0]) >= 2
+    for k in range(len(want) - 1, 0, -1):  # bounded: the words of a name
+        part = want[:k]
+        if any(w in taken for w in part) or (len("".join(part)) < MIN_HEAD and not (k == 1 and stub)):
+            continue
+        hit = _find(part, have)
+        if hit is not None:
+            return hit
+    return None
+
+
+def search_names(entity: str, text: str, others: list[str] | tuple[str, ...] = ()) -> bool:
+    """True when ``text`` (a search query, a name a model wrote) names ``entity`` among the asked things ``others``:
+    whole words with case, spacing, plurals and possessives folded, or its leading part when the name carries the ask's
+    trailing words. A name that sits inside a longer asked thing's name that ``text`` also names ("Denver" in "Denver
+    Broncos") is not named on its own. Pure and input-capped; no word lists."""
+    assert isinstance(entity, str) and isinstance(text, str), "strings required"
+    have, want = _words(text), _words(entity)
+    if not want or not have:
+        return False
+    rest = [o for o in others if o != entity]
+    mine = _spans(want, have) or ([h] if (h := _head(entity, rest, have)) else [])
+    longer = [_spans(w, have) for o in rest if len(w := _words(o)) > len(want) and _find(want, w) is not None]
+    for span in mine:  # one place in the text that no longer asked thing's name covers is enough
+        if not any(c[0] <= span[0] and span[1] <= c[1] for spans in longer for c in spans):
+            return True
+    return False
+
+
+def named_in(entities: list[str] | tuple[str, ...], text: str) -> list[str]:
+    """The asked things ``text`` names (``search_names``), in the ask's order."""
+    assert isinstance(text, str), "text must be a string"
+    return [e for e in entities if search_names(e, text, [o for o in entities if o != e])]
+
+
+def mentions(parsed: object, entity: str) -> bool:
+    """True when the parsed sample names ``entity`` in a key or a text value (bounded walk): the evidence that a
+    response which several things share is about this one."""
+    assert isinstance(entity, str), "entity must be a string"
+    want = _words(entity)
+    stack: list[tuple[object, int]] = [(parsed, 0)]
+    for _ in range(4000):  # bounded: nodes visited
+        if not stack:
+            return False
+        node, depth = stack.pop()
+        if isinstance(node, str):
+            if _find(want, _words(node)) is not None:
+                return True
+        elif isinstance(node, dict) and depth < 8:
+            for k, v in list(node.items())[:200]:
+                if isinstance(k, str) and _find(want, _words(k)) is not None:
+                    return True
+                stack.append((v, depth + 1))
+        elif isinstance(node, list) and depth < 8:
+            stack.extend((v, depth + 1) for v in node[:200])
+    return False
+
+
 def _original(request: str, lowered: str) -> str:
     """``lowered`` as the user typed it in ``request`` (the first whole-word occurrence), else title-cased."""
     assert isinstance(request, str) and isinstance(lowered, str), "strings required"

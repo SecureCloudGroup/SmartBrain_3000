@@ -550,3 +550,153 @@ def test_metric_for_skips_a_measure_the_source_does_not_report() -> None:
     assert got is None and why
     got, why = ni_compare_flow.metric_for("compare EUR and GBP rate tomorrow", ("EUR", "GBP"), answers)
     assert got is None and why
+
+
+# ---- fix round after gate 2: provenance names things the way the ask and a search do ------------------------------
+
+from smartbrain_3000.ni_research import loop as _loop
+from smartbrain_3000.ni_research import schemas as _schemas
+
+_WEB = frozenset({"library", "search", "preview"})
+_SEARCH_HOST = "https://quotes.example.net"
+
+
+def _web_ctx(monkeypatch, request: str, results: dict, bodies: dict):
+    """A ctx for a compare ask whose web_search answers per query (``results``: a word in the query -> urls)."""
+    Net(monkeypatch, bodies)
+
+    def search(query: str, limit: int) -> dict:
+        for word, urls in results.items():
+            if word.lower() == query.lower():
+                return {"results": [{"title": f"{word} data", "url": u, "snippet": "json"} for u in urls]}
+        return {"results": []}
+    ctx = _ctx(None, allowed_origins=_WEB, searcher=search)
+    names = ni_compare.asked(request)
+    ctx.question.update(kind="compare", entities=list(names), compare_count=len(names), places=[])
+    ctx.request = request
+    return ctx, names
+
+
+def _compare(ctx, pairs, path="quote.price"):
+    return tools.propose_compare(ctx, {"metric": "Value", "things": [
+        {"name": n, "url": u, "path": path} for n, u in pairs]})
+
+
+# asks whose parsed things carry the ask's own trailing words, nest, or differ from a search's spelling
+SPELLINGS = [
+    ("Tesla versus Ford market cap", ["Tesla", "Ford market cap"], ["tesla market cap api", "Ford stock quote json"]),
+    ("NYC vs LA air quality right now", ["NYC", "LA air quality"], ["nyc air quality json", "LA pollution index json"]),
+    ("compare iPhone 15 and Pixel 8 prices", ["iPhone 15", "Pixel 8"], ["iphone15 price feed", "pixel 8 price json"]),
+    ("Lakers vs Celtics standings", ["Lakers", "Celtics"], ["Laker's standings json", "celtic standings api"]),
+    ("compare Denver and Denver Broncos stats", ["Denver", "Denver Broncos"], ["Denver weather json", "Denver Broncos stats api"]),
+]
+
+
+@pytest.mark.parametrize(("request_", "things", "queries"), SPELLINGS, ids=[s[0] for s in SPELLINGS])
+def test_a_two_thing_compare_built_from_search_results_succeeds(monkeypatch, request_, things, queries) -> None:
+    urls = [f"{_SEARCH_HOST}/q/{i}.json" for i in range(len(things))]
+    ctx, names = _web_ctx(monkeypatch, request_, {q: [u] for q, u in zip(queries, urls, strict=True)},
+                          {u: {"quote": {"price": 10.5 + i}} for i, u in enumerate(urls)})
+    assert list(names) == things
+    for q, u in zip(queries, urls, strict=True):
+        assert tools.web_search(ctx, q)["ok"]
+        assert tools.fetch_sample(ctx, u)["ok"]
+    out = _compare(ctx, list(zip(things, urls, strict=True)))
+    assert out.get("ok"), out
+    sealed = ni_compare.sealed(out["proposal"]["spec"])
+    assert [e["name"] for e in sealed] == things, "the rows carry the ask's names, not the model's or a search's"
+
+
+@pytest.mark.parametrize(("request_", "things", "queries"), SPELLINGS, ids=[s[0] for s in SPELLINGS])
+def test_the_other_things_address_is_still_refused_whatever_the_spelling(monkeypatch, request_, things, queries) -> None:
+    urls = [f"{_SEARCH_HOST}/q/{i}.json" for i in range(len(things))]
+    ctx, _ = _web_ctx(monkeypatch, request_, {q: [u] for q, u in zip(queries, urls, strict=True)},
+                      {u: {"quote": {"price": 10.5 + i}} for i, u in enumerate(urls)})
+    for q, u in zip(queries, urls, strict=True):
+        tools.web_search(ctx, q)
+        tools.fetch_sample(ctx, u)
+    swapped = list(zip(things, reversed(urls), strict=True))
+    out = _compare(ctx, swapped)
+    assert not out.get("ok") and out["error"] == "wrong_thing", out
+    assert things[0].split()[0] in out["detail"] and "alone" in out["detail"], "the error says what to search"
+
+
+def test_a_search_for_no_asked_thing_cannot_vouch_for_one(monkeypatch) -> None:
+    urls = [f"{_SEARCH_HOST}/q/{i}.json" for i in range(2)]
+    ctx, _ = _web_ctx(monkeypatch, "compare Nvidia and AMD stock prices", {"stocks json": urls},
+                      {u: {"quote": {"price": 1 + i}} for i, u in enumerate(urls)})
+    tools.web_search(ctx, "stocks json")
+    for u in urls:
+        tools.fetch_sample(ctx, u)
+    out = _compare(ctx, [("Nvidia", urls[0]), ("AMD", urls[1])])
+    assert not out.get("ok") and out["error"] == "wrong_thing"
+
+
+def test_one_search_naming_both_things_vouches_for_a_response_that_names_each(monkeypatch) -> None:
+    shared = f"{_SEARCH_HOST}/rates.json"
+    body = {"rates": {"Nvidia": {"price": 131.5}, "AMD": {"price": 150.25}}}
+    ctx, _ = _web_ctx(monkeypatch, "compare Nvidia and AMD stock prices", {"Nvidia AMD stock prices json": [shared]}, {shared: body})
+    tools.web_search(ctx, "Nvidia AMD stock prices json")
+    tools.fetch_sample(ctx, shared)
+    out = tools.propose_compare(ctx, {"metric": "Price", "things": [
+        {"name": "Nvidia", "url": shared, "path": "rates.Nvidia.price"},
+        {"name": "AMD", "url": shared, "path": "rates.AMD.price"}]})
+    assert out.get("ok"), out
+    assert [e["name"] for e in ni_compare.sealed(out["proposal"]["spec"])] == ["Nvidia", "AMD"]
+
+
+def test_one_search_naming_both_things_cannot_vouch_for_a_response_that_names_only_one(monkeypatch) -> None:
+    shared = f"{_SEARCH_HOST}/one.json"
+    body = {"rates": {"Nvidia": {"price": 131.5}, "Other": {"price": 150.25}}}
+    ctx, _ = _web_ctx(monkeypatch, "compare Nvidia and AMD stock prices", {"Nvidia AMD stock prices json": [shared]}, {shared: body})
+    tools.web_search(ctx, "Nvidia AMD stock prices json")
+    tools.fetch_sample(ctx, shared)
+    out = tools.propose_compare(ctx, {"metric": "Price", "things": [
+        {"name": "Nvidia", "url": shared, "path": "rates.Nvidia.price"},
+        {"name": "AMD", "url": shared, "path": "rates.Other.price"}]})
+    assert not out.get("ok") and out["error"] == "wrong_thing" and "AMD" in out["detail"]
+
+
+def test_a_scripted_model_builds_a_compare_through_the_loop_from_two_searches(monkeypatch) -> None:
+    from test_ni_research_loop import Script, call, reply
+    urls = [f"{_SEARCH_HOST}/q/{i}.json" for i in range(2)]
+    ctx, _ = _web_ctx(monkeypatch, "Tesla versus Ford market cap", {"Tesla market cap json": [urls[0]], "Ford market cap json": [urls[1]]},
+                      {u: {"quote": {"price": 10.5 + i}} for i, u in enumerate(urls)})
+    script = Script(reply(call("web_search", query="Tesla market cap json")), reply(call("web_search", query="Ford market cap json")),
+                    reply(call("fetch_sample", url=urls[0])), reply(call("fetch_sample", url=urls[1])),
+                    reply(call("propose_compare", compare={"metric": "Market cap", "things": [
+                        {"name": "Tesla", "url": urls[0], "path": "quote.price"},
+                        {"name": "Ford", "url": urls[1], "path": "quote.price"}]})))
+    out = _loop.run_research(ctx, script)
+    assert out.status == "proposed", out.reasons
+    assert _schemas and out.proposal["tier"] in ("verified_endpoint", "page_reading")
+
+
+@pytest.mark.parametrize(("entity", "text", "others", "expect"), [
+    ("Salt Lake City", "SaltLakeCity weather", ["Denver"], True),
+    ("Salt Lake City", "Salt Lake weather", ["Denver"], True),       # a leading part, no other asked thing owns it
+    ("Salt Lake City", "weather in Denver", ["Denver"], False),
+    ("Lakers", "the Laker's roster", ["Celtics"], True),
+    ("Ford market cap", "Ford stock", ["Tesla"], True),
+    ("Ford market cap", "market cap of Tesla", ["Tesla"], False),     # its trailing words alone name nothing
+    ("The Beatles", "the weather in Queen", ["Queen"], False),       # a stub of a name does not vouch
+    ("Denver", "Denver Broncos stats", ["Denver Broncos"], False),    # inside a longer asked thing
+    ("Denver Broncos", "Denver Broncos stats", ["Denver"], True),
+    ("Denver", "Denver weather and Denver Broncos", ["Denver Broncos"], True),   # it stands alone once
+    ("AMD", "", ["Nvidia"], False),
+])
+def test_search_names_matches_whole_normalised_names_never_a_stub(entity, text, others, expect) -> None:
+    assert ni_compare.search_names(entity, text, others) is expect
+
+
+def test_named_in_lists_the_asked_things_a_text_names_in_the_asks_order() -> None:
+    assert ni_compare.named_in(["Tesla", "Ford market cap"], "ford stock vs tesla") == ["Tesla", "Ford market cap"]
+    assert ni_compare.named_in(["Tesla", "Ford market cap"], "Honda") == []
+
+
+def test_search_names_is_input_capped_and_linear() -> None:
+    import time
+    start = time.perf_counter()
+    assert ni_compare.search_names("Nvidia", "a " * 100_000 + "Nvidia", ["AMD"]) is False   # past the cap: not read
+    assert ni_compare.mentions({"k": ["a " * 100_000 + "Nvidia"] * 50}, "Nvidia") is False
+    assert time.perf_counter() - start < 1.0

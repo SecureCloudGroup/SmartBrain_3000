@@ -436,7 +436,7 @@ def test_a_model_that_never_stops_searching_pages_ends_on_budget_with_an_honest_
     ctx.max_fetches = 2
     steps = [reply(call("web_search", query="river levels")), *[reply(call("fetch_sample", url=URL))] * 40]   # outlasts every budget
     out = loop.run_research(ctx, Script(*steps))
-    assert out.status == "declined" and ctx.fetches == 2
+    assert out.status == "declined" and ctx.fetches == 1, "the page is read once; repeats are answered from the kept sample"
 
 
 # --- the engine: a kept card refreshes from the page, and says so when the table is gone ----------------------------------------
@@ -598,9 +598,9 @@ def test_research_and_refresh_read_a_page_by_the_same_decode_rule(monkeypatch, r
     stored = next(iter(ctx.samples.values()))["parsed"]["tables"]
     assert stored == refreshed, "what research kept is what refresh reads"
     assert "\ufffd" not in json.dumps(stored, ensure_ascii=False)
-    tried = tools.try_recipe(ctx, table_draft(paths={"place": "rows[0].ort"}))
-    assert tried["ok"] and tried["preview"]["place"] == "Zürich", tried
-    got = tools.propose_card(ctx, table_draft(paths={"place": "rows[0].ort"}))
+    tried = tools.try_recipe(ctx, table_draft(paths={"top": "rows[0].ort"}))
+    assert tried["ok"] and tried["preview"]["top"] == "Zürich", tried
+    got = tools.propose_card(ctx, table_draft(paths={"top": "rows[0].ort"}))
     assert got["ok"], got
     locator = got["proposal"]["spec"]["source"]["table"]
     assert locator["headers"] == ["ort", "höhe (m)"]
