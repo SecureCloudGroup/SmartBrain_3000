@@ -3983,16 +3983,20 @@ terminal flow state, `declined` (v2 only; `ni_flow` v1 keeps `unsupported`). The
 sealed `_decline_card`, `{reason, line, links}`; the card renders it, and the flow field repeats it as `decline`.
 
 **The rule is one table.** `ni_master.ENDINGS` maps every v2 ending that is not a card to `(flow state, decline
-code or None)`; `ni_flow._end(store, item_id, ending, reason, links=None)` is the only writer of a decline and
-reads the table, so a caller names the ending and never picks the state. An ending declines when nothing the user
-can do on this card would change the answer; it keeps its own state when the user can still act.
+code or None)`; `ni_flow._end(store, item_id, ending, reason, links=None)` is the only writer of a decline. A
+caller names the ending and never picks the state or the code: `_end` reads both from the table, and it asserts the
+named row declines. The five rows that stay (`pick_has_untried_row`, `needs_key_or_email`, `model_consent_question`,
+`date_question`, `fault`) are named by the table but not enforced by `_end`: the drivers in
+`tests/test_ni_declined.py` hold them (one per row, each checked to land in the state the table names). An ending
+declines when nothing the user can do on this card would change the answer; it keeps its own state when the user
+can still act.
 
 | ending (`ENDINGS` key) | lands in | code |
 |---|---|---|
 | `research_declined_checks` (the verifier refused the card twice, or the local model could not pass the checks) | `declined` | `verify_refused` |
-| `research_declined_budget` (budget or steps spent, the model stopped or was unavailable) | `declined` | `research_gave_up` |
+| `research_declined_budget` (budget or steps spent, or the model stopped without proposing a card) | `declined` | `research_gave_up` |
 | `research_declined_no_source` (the closed-world tier found no Library source) | `declined` | `no_answering_source` |
-| `no_source_research_off` (no Library source declares an answer, research off, unconsented or unavailable) | `declined` | `no_answering_source` |
+| `no_source_research_off` (no Library source declares an answer; research off, unconsented or with no model route) | `declined` | `no_answering_source` |
 | `no_source_rows_exhausted` (every row the auto-pick tried failed or did not fit, research gave nothing) | `declined` | `no_answering_source` |
 | `compare_unbuildable` (no source reads the things side by side, more than four, or research declined a compare) | `declined` | `compare_unbuildable` |
 | `compare_refused_at_build` (a card that shows fewer things than were asked, on any build path) | `declined` | `compare_unbuildable` |
@@ -4002,7 +4006,16 @@ can do on this card would change the answer; it keeps its own state when the use
 | `needs_key_or_email` (the picked source's key or contact email) | `awaiting_access` | none |
 | `model_consent_question` (build with a model outside this computer?) | `unsupported` + question | none |
 | `date_question` ("when is it?") | `unsupported` + question | none |
-| `fault` (fetch, mapping, assembly: a retry runs it again) | `failed` | none |
+| `fault` (fetch, mapping, assembly, or the researcher failing to run: a retry runs it again) | `failed` | none |
+
+**A research fault is not a verdict.** `loop.Outcome.status` is `proposed`, `declined` (a verdict: budget spent, the
+model stopped without proposing, the checks failed twice, no source) or `fault`. A run that could not finish (the
+model route raised, a reply or a tool raised inside `_bounded`, on the cloud and the local tier alike) ends `fault`
+through `loop._fault`, never `_decline`. `ni_research_flow.fallback` maps a fault to `ni_flow._fail(..., "research",
+...)` (state `failed`, Retry), so every caller (the v2 auto-pick, `_auto_continue`, the compare flow) gets the failed
+card and none a declined one. Re-research (`reresearch`) records a fault as `repair_research_fault`: not a decline,
+so no back-off streak; the attempt marker still holds the day's wait. The eval reads the failed state as `error`,
+so an outage cannot earn the decline credit.
 
 A built card that waits for a key or a value (`awaiting_credential`, `awaiting_params`) is a draft with its own
 gate, not an ending. `tests/test_ni_declined.py` drives every row through the real flow.
@@ -4018,6 +4031,10 @@ is the only filter; anything else is dropped, never shown). They come from what 
 Library and search results (`Outcome.links`; a Library row's page when it has one), or the pick's link rows (a
 Library source without declared answers: its page; the web pages a search found). The card lists them read-only;
 none builds a card.
+
+**What the line can carry.** The decline line is built only from code copy, the intent's `place` and `wants` as the
+intent model read the ask, and Library-declared labels. It carries no fetched text: the researcher passes no line
+(the default only), and a link title is the only fetched string, shown as text in a link list, never in the line.
 
 **Wire shape.** The flow field of a declined card is `{state: "declined", error, reason (= the line), decline:
 {reason, headline, line, links}, reopen: ["retry", "pick_source"], actions}`. `FlowDecline`, `DeclineLink` and

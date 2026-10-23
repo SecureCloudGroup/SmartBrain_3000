@@ -38,7 +38,9 @@ from test_ni_research_loop import (  # noqa: F401  (_v2 is an autouse fixture)
     _v2,
     _wrap,
     call,
+    listed,
     reply,
+    stalls,
     text_reply,
 )
 from test_ni_research_tools import _draft
@@ -110,7 +112,7 @@ def _drive_research_declined_checks(lib_fixture, monkeypatch):
 
 
 def _drive_research_declined_budget(lib_fixture, monkeypatch):
-    return _research_flow(monkeypatch, lib_fixture, Script(reply(call("library_search", query="q"))))
+    return _research_flow(monkeypatch, lib_fixture, stalls())
 
 
 def _drive_research_declined_no_source(lib_fixture, monkeypatch):
@@ -222,8 +224,64 @@ def test_a_decline_takes_its_links_from_the_pages_the_run_saw(lib, monkeypatch) 
     assert out["_decline_card"]["reason"] == "research_gave_up"
 
 
+# ---- a fault is not a verdict (M1): the researcher's ways to fail end the card failed, never declined ------------
+
+def _boom_tool(monkeypatch):
+    def boom(*a, **k):
+        raise RecursionError("anything a tool can raise")
+
+    monkeypatch.setattr(loop.schemas, "run_tool", boom)
+
+
+def _chat_down(*_a, **_k):
+    raise ConnectionError("the gateway is down")
+
+
+# each: (how the run is made to fault, run on the local tier, an ask)
+_FAULTS = {
+    "cloud chat seam raises": (lambda mp: Script(), False, _ASK),
+    "cloud chat seam raises on a later turn": (lambda mp: Script(reply(call("library_search", query="q"))), False, _ASK),
+    "an exception inside _bounded": (lambda mp: (_boom_tool(mp), Script(reply(call("library_search", query="q"))))[1], False, _ASK),
+    "local chat seam raises": (lambda mp: Script(), True, _ASK),
+    "a compare whose model route is down": (lambda mp: Script(), False, "compare Nvidia and AMD stock prices"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_FAULTS))
+def test_a_research_fault_ends_failed_and_retryable_never_declined(name, lib, monkeypatch) -> None:  # noqa: F811
+    make, local, ask = _FAULTS[name]
+    out = _research_flow(monkeypatch, lib, make(monkeypatch), ask=ask, local=local)
+    assert out["state"] == "failed", (name, out["state"], out.get("error"))
+    assert out["error"].startswith("research:"), "the class is research, not a decline code"
+    assert "_decline_card" not in out and out["state"] in ni_master.TERMINAL_STATES
+    assert ni_master.reason_for("failed", out["error"]) == ni_master._REASONS["research"]
+    assert "ran out of steps" not in str(out), "a fault never speaks as the budget verdict"
+
+
+def test_a_fault_outcome_is_not_a_verdict(monkeypatch) -> None:
+    ctx = SimpleNamespace(urls={})
+    out = loop._fault(loop.Outcome("declined", "cloud"), ["the research model was unavailable (ConnectionError)"])
+    assert (out.status, out.ending, out.links, out.proposal) == ("fault", "fault", [], None)
+    assert ni_master.ENDINGS[out.ending] == ("failed", None), "the fault row is a retry, not a decline"
+    with pytest.raises(AssertionError):
+        loop._decline(ctx, out, ["x"], "fault")  # a fault cannot be passed off as a decline
+
+
+@pytest.mark.parametrize("runner", [loop.run_research, loop.run_closed_world])
+@pytest.mark.parametrize("chat", [_chat_down, Script()])
+def test_a_model_route_that_fails_is_a_fault_on_both_tiers(runner, chat, monkeypatch) -> None:
+    ctx, _ = listed(monkeypatch)
+    out = runner(ctx, chat)
+    assert out.status == "fault" and out.ending == "fault" and out.proposal is None and out.links == []
+
+
+def test_a_spent_budget_is_still_a_verdict_and_declines(lib, monkeypatch) -> None:  # noqa: F811
+    out = _drive_research_declined_budget(lib, monkeypatch)
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up"
+
+
 def test_a_compare_the_researcher_could_not_build_says_so(lib, monkeypatch) -> None:  # noqa: F811
-    out = _research_flow(monkeypatch, lib, Script(reply(call("library_search", query="q"))),
+    out = _research_flow(monkeypatch, lib, stalls(),
                          ask="compare Nvidia and AMD stock prices")
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "compare_unbuildable"
 

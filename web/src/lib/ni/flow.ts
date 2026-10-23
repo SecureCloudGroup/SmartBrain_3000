@@ -17,7 +17,7 @@ import { ACTION_KINDS } from "$lib/ni/types.gen";
 export const TERMINAL_FLOW_STATES: ReadonlySet<string> = new Set(["failed", "unsupported", "declined"]);
 
 /** What a declined card says first when the backend's own headline is missing (it always sends one). */
-export const DECLINED_HEADLINE = "I couldn’t build a reliable card for this";
+export const DECLINED_HEADLINE = "I couldn't build a reliable card for this";
 
 // Marker the backend sets on flow.error when a `source` state is parked pending the
 // user picking between candidate sources (a resume_ni_flow approval will be parked

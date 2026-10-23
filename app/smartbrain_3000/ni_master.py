@@ -100,7 +100,7 @@ ACTION_KINDS: frozenset[str] = frozenset({
 # decline, which code. ``ni_flow._end`` reads this table; nothing else decides.
 DECLINE_REASONS: frozenset[str] = frozenset({
     "no_answering_source",   # no source we can read declares an answer for this ask (and research found none)
-    "research_gave_up",      # the researcher ran and ended without a card: budget, steps, or no usable model
+    "research_gave_up",      # the researcher ran and ended without a card: the budget or the steps ran out, or the model stopped, with no card
     "verify_refused",        # a card was built and the verifier refused it twice
     "compare_unbuildable",   # a compare of named things that no source reads side by side
     "source_cant_answer",    # the one source the user named (or Fix re-reads) does not answer this ask
@@ -295,6 +295,7 @@ _REASONS: dict[str, str] = {
     "declined": "You declined the suggested source.",
     "computed-only": "This needs a specific date, written as YYYY-MM-DD.",
     "intent": "The request couldn't be understood well enough to build from.",
+    "research": "The research couldn't finish (the model was unavailable) — retry runs it again.",
     # Claims audit 2026-09-21: classes the flow actually writes that the map
     # missed — the card showed the blind sentence for each of these.
     "assembly": "The card couldn't be assembled from the mapped fields.",

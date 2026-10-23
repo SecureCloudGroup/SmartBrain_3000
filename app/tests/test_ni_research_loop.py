@@ -64,6 +64,12 @@ def good_run() -> list[dict]:
             reply(call("try_recipe", draft_spec=DRAFT)), reply(call("propose_card", draft_spec=DRAFT))]
 
 
+def stalls() -> Script:
+    """A model that never proposes: a search, then three replies without a tool call end the run in a verdict (not a fault)."""
+    return Script(reply(call("library_search", query="q")), text_reply("still looking"), text_reply("still looking"),
+                  text_reply("still looking"))
+
+
 def listed(monkeypatch, body=QUAKES, **ctx_over):
     net = Net(monkeypatch, {URL: body})
     ctx_over.setdefault("allowed_origins", frozenset({"library"}))  # what the flow runs with
@@ -117,13 +123,13 @@ def test_the_token_and_time_budgets_end_the_run(monkeypatch) -> None:
     assert out2.status == "declined" and "time budget" in out2.reasons[0]
 
 
-def test_a_model_that_stops_calling_tools_or_fails_declines_honestly(monkeypatch) -> None:
+def test_a_model_that_stops_calling_tools_declines_and_one_that_fails_is_a_fault(monkeypatch) -> None:
     ctx, _ = listed(monkeypatch)
     out = loop.run_research(ctx, Script(text_reply("I think it is 5"), text_reply("really"), text_reply("yes")))
     assert out.status == "declined" and "stopped without proposing" in out.reasons[0]
     ctx2, _ = listed(monkeypatch)
     out2 = loop.run_research(ctx2, Script())
-    assert out2.status == "declined" and "unavailable (RuntimeError)" in out2.reasons[0]
+    assert out2.status == "fault" and out2.ending == "fault" and "unavailable (RuntimeError)" in out2.reasons[0]
 
 
 def test_two_failed_proposals_end_in_a_decline_with_the_verifier_reasons(monkeypatch) -> None:
@@ -405,7 +411,7 @@ def test_an_unhandleable_model_reply_ends_in_a_decline_never_a_crash(monkeypatch
     nested = {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [
         {"id": "c0", "type": "function", "function": {"name": "library_search", "arguments": "[" * 50000}}]}}]}
     ctx2, _ = listed(monkeypatch)
-    out2 = loop.run_research(ctx2, Script(nested, nested, nested, nested))
+    out2 = loop.run_research(ctx2, Script(*[nested] * 60))
     assert out2.status == "declined"
     odd = reply(call("library_search", query="q"), used={"prompt_tokens": "lots", "completion_tokens": {}})
     ctx3, _ = listed(monkeypatch)
@@ -418,7 +424,7 @@ def test_an_unhandleable_model_reply_ends_in_a_decline_never_a_crash(monkeypatch
     monkeypatch.setattr(loop.schemas, "run_tool", boom)
     ctx4, _ = listed(monkeypatch)
     out4 = loop.run_research(ctx4, Script(*good_run()))
-    assert out4.status == "declined" and "could not be handled (RecursionError)" in out4.reasons[0]
+    assert out4.status == "fault" and "could not be handled (RecursionError)" in out4.reasons[0]
     assert out4.usage["calls"] == 1, "the usage counted before the failure is kept"
 
 
@@ -429,7 +435,7 @@ def test_model_json_depth_is_checked_outside_strings() -> None:
 
 
 def test_a_decline_stops_honestly_with_the_reasons_and_builds_nothing(lib, monkeypatch) -> None:  # noqa: F811
-    store, item_id, out, _ = _flow(monkeypatch, _wrap(lib), seam=Script(reply(call("library_search", query="q"))),
+    store, item_id, out, _ = _flow(monkeypatch, _wrap(lib), seam=stalls(),
                                    cloud="anthropic/x", consented=True)
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up"
     assert store.get_item(item_id)["spec"].get("_shell") is True

@@ -5,6 +5,8 @@ Two shapes share one ``Outcome``: ``run_research`` (the cloud tool loop) and ``r
 model picks a ranked Library row and fills a recipe from its sample; no loop, never the web). Both end at a
 ``propose_card`` success (``proposed``) or in an honest ``declined`` with reasons and up to three links:
 budget exhaustion, a model that stopped calling tools, or ``propose_card`` failing its checks twice.
+A run that could not finish (the model route failed, a reply or a tool raised) is neither: it ends ``fault``, a
+fault the caller retries, never a verdict about the ask.
 """
 from __future__ import annotations
 
@@ -36,7 +38,7 @@ _STRUCTURED = frozenset({"json", "csv", "feed", "xml"})
 class Outcome:
     """How a run ended. ``proposal`` is ``propose_card``'s sealed proposal (spec, tier, preview)."""
 
-    status: str                      # proposed | declined
+    status: str                      # proposed | declined (a verdict) | fault (the run could not finish: retry)
     mode: str                        # cloud | local
     proposal: dict | None = None
     reasons: list = field(default_factory=list)
@@ -55,10 +57,34 @@ def _links(ctx: ResearchCtx) -> list[dict]:
     return rows[:MAX_LINKS]
 
 
+class ModelUnavailable(Exception):
+    """The model route failed (a chat seam raised): a fault of the run, never a verdict on the ask."""
+
+
+def _ask_model(chat: ChatFn, messages: list, tool_defs: list | None) -> dict:
+    """One model call; any failure of the route is ``ModelUnavailable`` (the run ends ``fault``)."""
+    assert callable(chat), "a chat seam"
+    assert isinstance(messages, list), "messages"
+    try:
+        return chat(messages, tool_defs)
+    except Exception as exc:  # the route failed: a fault, not a decline
+        log.warning("ni_research: model call failed: %s", type(exc).__name__)
+        raise ModelUnavailable(f"the research model was unavailable ({type(exc).__name__})") from exc
+
+
+def _fault(out: Outcome, reasons: list) -> Outcome:
+    """End the run as a fault: no card, no verdict, no links; the flow fails the card (Retry runs it again)."""
+    assert isinstance(reasons, list), "reasons are a list"
+    assert isinstance(out, Outcome), "an outcome"
+    out.status, out.ending, out.proposal, out.links = "fault", "fault", None, []
+    out.reasons = [one_line(r, 200) for r in reasons if r][:MAX_REASONS] or ["the research could not finish"]
+    return out
+
+
 def _decline(ctx: ResearchCtx, out: Outcome, reasons: list, ending: str = "research_declined_budget") -> Outcome:
     assert isinstance(reasons, list), "reasons are a list"
     assert out.status in ("declined", "proposed"), "a status"
-    assert ni_master.ENDINGS[ending][0] == "declined", "an ending that declines"
+    assert ni_master.ENDINGS[ending][0] == "declined", "an ending that declines (a fault is ``_fault``)"
     out.ending = ending
     out.status = "declined"
     out.proposal = None
@@ -180,15 +206,18 @@ def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None, to
 
 
 def _bounded(run, ctx: ResearchCtx, out: Outcome) -> Outcome:
-    """The one boundary around a research run: whatever a model reply or a tool does, the run ends in an honest
-    decline (with the usage counted so far), never a crash that seals the card failed."""
+    """The one boundary around a research run: whatever a model reply or a tool does, the run ends (with the usage
+    counted so far) in a ``fault`` the flow turns into a retryable failure, never a raise out of the researcher and
+    never a decline: nothing ran out, so it is not a verdict."""
     assert callable(run), "a run"
     assert isinstance(out, Outcome), "an outcome"
     try:
         return run(out)
-    except Exception as exc:  # the boundary: any failure is a decline
+    except ModelUnavailable as exc:  # the route failed (already logged)
+        return _fault(out, [str(exc)])
+    except Exception as exc:  # the boundary: any failure is a fault
         log.warning("ni_research: run stopped: %s", type(exc).__name__)
-        return _decline(ctx, out, [f"the model reply could not be handled ({type(exc).__name__})"])
+        return _fault(out, [f"the model reply could not be handled ({type(exc).__name__})"])
 
 
 def run_research(ctx: ResearchCtx, chat: ChatFn, *, place: str = "", accept: AcceptFn | None = None) -> Outcome:
@@ -208,11 +237,7 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
         stop = _budget_stop(ctx)
         if stop:
             return _decline(ctx, out, [stop, *why])
-        try:
-            response = chat(prompt.build_messages(base, turns), prompt.openai_tools("search" in ctx.allowed_origins))
-        except Exception as exc:  # the model route failed: an honest decline, never a crash
-            log.warning("ni_research: model call failed: %s", type(exc).__name__)
-            return _decline(ctx, out, [f"the research model was unavailable ({type(exc).__name__})", *why])
+        response = _ask_model(chat, prompt.build_messages(base, turns), prompt.openai_tools("search" in ctx.allowed_origins))
         _count(ctx, out, response)
         msg, calls = _message(response), _calls(_message(response))
         if not calls:
@@ -265,14 +290,10 @@ def _json_object(text: str) -> dict | None:
 
 
 def _reply(chat: ChatFn, messages: list, ctx: ResearchCtx, out: Outcome) -> str:
-    """One tool-less local completion as text ('' when the call fails)."""
+    """One tool-less local completion as text ('' for an empty reply). A failed call is ``ModelUnavailable``: a fault."""
     assert isinstance(messages, list) and messages, "messages required"
     assert callable(chat), "a chat seam"
-    try:
-        response = chat(messages, None)
-    except Exception as exc:
-        log.warning("ni_research: local model call failed: %s", type(exc).__name__)
-        return ""
+    response = _ask_model(chat, messages, None)
     _count(ctx, out, response)
     return gateway.completion_text(response)
 

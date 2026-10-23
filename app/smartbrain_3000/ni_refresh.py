@@ -25,6 +25,7 @@ RECHECKED = frozenset({"place", "window", "threshold", "compare", "empty"})
 RUN_STARTED = "repair_research_started"
 RUN_PROPOSED = "repair_research_proposed"
 RUN_DECLINED = "repair_research_declined"
+RUN_FAULT = "repair_research_fault"   # the run could not finish: not a decline, so no streak and no longer wait
 RESEARCH_EVERY = timedelta(hours=24)
 DECLINE_CAP_DAYS = 7  # after a decline in a streak: wait 1 day, then 2, 4, ... never more than this
 # the process-wide ceiling: background re-researches per UTC day, all cards together (0 = off)

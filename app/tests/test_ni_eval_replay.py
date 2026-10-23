@@ -373,6 +373,15 @@ def test_only_a_declined_outcome_earns_the_decline_credit() -> None:
     assert ne.score_ask({"outcome": "crash"}, gold)["cls"] == "error"
 
 
+def test_a_research_fault_scores_error_never_right_or_declined() -> None:
+    """M1: the researcher's fault is the failed card, so a gateway outage cannot earn the decline credit."""
+    assert ne.flow_outcome({"state": "failed", "error": "research: the research model was unavailable"}) == "failed"
+    run = {"outcome": "failed"}
+    assert ne.score_ask(run, _gold(**DECLINE_GOLD))["cls"] == "error", "a fault on a decline gold is not right"
+    assert ne.score_ask(run, _gold())["cls"] == "error", "a fault on a card gold is an error, not a calm decline"
+    assert ne.score_ask(run, _gold(expected_outcome=None, forbidden_outcomes=["card"]))["cls"] == "error"
+
+
 def test_flow_outcome_names_a_declined_record_and_a_question() -> None:
     assert ne.flow_outcome({"state": "ready"}) == "live"
     assert ne.flow_outcome({"state": "declined"}) == "declined"

@@ -4025,8 +4025,8 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
         found = ni_research_flow.fallback(store, item_id, request, intent)
         if found is not None:
             return found
-        # research is off, unconsented or unavailable (a run that declined came back above as the declined card):
-        # nothing here answers this ask. The honest end is the declined card, with the Library's pages as links.
+        # research is off, unconsented or has no model route (a run that declined came back above as the declined
+        # card, one that faulted as the failed card): nothing here answers this ask. The honest end is the declined card, with the Library's pages as links.
         return _end(store, item_id, "no_source_research_off", "",
                     links=[{"title": r.get("title"), "url": r.get("page")} for r in rows if r.get("answers") is False])
     ordered = [r for r in buildable if not _row_needs_access(r)] + [r for r in buildable if _row_needs_access(r)]

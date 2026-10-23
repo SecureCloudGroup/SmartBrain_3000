@@ -24,6 +24,9 @@ to know when a release changes behavior.
   Only the new flow (`ni_flow = v2`) declines; the old flow is unchanged. The eval harness scores a decline
   as its own class: right when the ask's gold expects a decline, otherwise "declined", which is neither
   right nor wrong.
+  A research run that cannot finish (the model route is down, a reply cannot be handled) is a failure you can
+  retry, never a decline. The eval's CI4 now scores a question for you (waiting) the same under both flows;
+  that is a scorer change, not a flow change.
 - **Compare cards.** Ask to compare two to four things ("compare Nvidia and AMD stock prices", "weather in
   Denver vs Salt Lake City") and the card shows every one of them side by side, each with its own number,
   named in your words. Where SmartBrain cannot read all of them it says "can't compare these yet" and why,
