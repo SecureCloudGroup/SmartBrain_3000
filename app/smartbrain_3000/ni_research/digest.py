@@ -176,6 +176,62 @@ def clean_search_rows(rows: object, limit: int = MAX_SEARCH_ROWS) -> list[dict]:
     return out
 
 
+_DATA_EXTENSIONS = (".json", ".geojson", ".ndjson", ".jsonl", ".csv", ".tsv", ".xml", ".rss", ".atom")
+_DATA_WORDS = frozenset({"json", "geojson", "csv", "tsv", "xml", "rss", "atom", "feed", "feeds", "api", "ndjson"})
+_PAGE_EXTENSIONS = (".html", ".htm", ".php", ".asp", ".aspx", ".pdf")
+_MAX_SIGNAL_CHARS = 400
+
+
+def _words_of(text: str) -> list[str]:
+    """The lower-case alphanumeric words of ``text`` (the first few hundred characters): one linear scan, no pattern."""
+    assert isinstance(text, str), "text required"
+    words: list[str] = []
+    cur: list[str] = []
+    for ch in text[:_MAX_SIGNAL_CHARS].lower():  # bounded by the cap
+        if ch.isalnum():
+            cur.append(ch)
+        elif cur:
+            words.append("".join(cur))
+            cur = []
+    if cur:
+        words.append("".join(cur))
+    return words
+
+
+def data_score(row: dict) -> int:
+    """How much a search result's address looks like a data file or API rather than a web page, from the address
+    alone (its file extension, a format word in its path or query, an api or feed label) plus a weak hint from the
+    title and snippet. No host is known or listed; higher is more data-like."""
+    assert isinstance(row, dict), "a row"
+    url = str(row.get("url") or "")[:MAX_RESULT_URL]
+    head, _, query = url.partition("?")
+    rest = head.split("//", 1)[-1]
+    host, _, path = rest.partition("/")
+    score = 0
+    if path.lower().rstrip("/").endswith(_DATA_EXTENSIONS):
+        score += 4
+    elif path.lower().rstrip("/").endswith(_PAGE_EXTENSIONS):
+        score -= 1
+    if _DATA_WORDS.intersection(_words_of(path)):
+        score += 2
+    if _DATA_WORDS.intersection(_words_of(query)):
+        score += 2
+    if _DATA_WORDS.intersection(_words_of(host.split(":")[0].replace(".", " "))[:2]):   # api.example.org, feeds.example.org
+        score += 1
+    if _DATA_WORDS.intersection(_words_of(f"{row.get('title') or ''} {row.get('snippet') or ''}")):
+        score += 1
+    return score
+
+
+def rank_search_rows(rows: list[dict]) -> list[dict]:
+    """The rows with the data-like addresses first (stable: the search provider's order breaks ties), each marked
+    ``looks_like`` data or page so the model fetches the likelier source first."""
+    assert isinstance(rows, list), "rows required"
+    scored = [(data_score(r), i, r) for i, r in enumerate(rows)]
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    return [{**r, "looks_like": "data file or API" if sc >= 2 else "web page"} for sc, _i, r in scored]
+
+
 def search_digest(query: str, rows: list[dict]) -> str:
     """The fenced digest of one web search: titles, snippets and addresses only, as data the model reads."""
     assert isinstance(query, str), "query required"

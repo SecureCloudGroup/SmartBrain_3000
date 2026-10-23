@@ -30,6 +30,8 @@ MAX_LINKS = 3
 MAX_REASONS = 5
 MAX_LOCAL_ROWS = 2
 MAX_LOCAL_FILLS = 3
+RESERVE_TURNS = 2        # tool calls kept back: with a draft that passed in hand, the loop proposes it at this point
+RESERVE_SHARE = 0.85     # the share of the time or token budget after which a passing draft is proposed
 MAX_JSON_DEPTH = 64  # model JSON nested deeper is refused before decoding (a looping model can emit "[[[[...")
 _STRUCTURED = frozenset({"json", "csv", "feed", "xml"})
 
@@ -185,14 +187,48 @@ def _echo(msg: dict, calls: list[dict]) -> dict:
 def _left(ctx: ResearchCtx) -> dict:
     assert ctx.max_turns >= ctx.turns >= 0, "turns within budget"
     assert ctx.max_fetches >= 0, "a fetch cap"
-    return {"turns_left": ctx.max_turns - ctx.turns, "fetches_left": ctx.max_fetches - ctx.fetches,
+    left = {"turns_left": ctx.max_turns - ctx.turns, "fetches_left": ctx.max_fetches - ctx.fetches,
             "seconds_left": max(int(ctx.max_seconds - ctx.elapsed()), 0)}
+    if ctx.max_turns - ctx.turns <= RESERVE_TURNS + 1:   # a short line, in the result (never the cached prefix)
+        left["note"] = (f"{left['turns_left']} tool calls left: call propose_card with the draft that passed" if _ready(ctx)
+                        else f"{left['turns_left']} tool calls left: get a draft to verdict pass with try_recipe, then propose_card")
+    return left
+
+
+def _ready(ctx: ResearchCtx) -> bool:
+    """True while a draft that passed try_recipe has not been proposed by the loop itself."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    return ctx.passed is not None and not ctx.passed.get("tried")
+
+
+def _low(ctx: ResearchCtx) -> bool:
+    """True when the budget is nearly gone: the last tool calls, or most of the time or the model tokens."""
+    assert ctx.max_turns > 0, "a turn budget"
+    return (ctx.max_turns - ctx.turns <= RESERVE_TURNS or ctx.elapsed() >= RESERVE_SHARE * ctx.max_seconds
+            or ctx.tokens >= RESERVE_SHARE * ctx.token_cap)
+
+
+# what a failed tool call tells the model to do next: short, in the result, outside the cached prefix
+NEXT = {
+    "not_data": "that address has no data file or table and is not fetched again; pick a different search result "
+                "(a .json, .csv, .xml, feed or API address first)",
+    "fetch_failed": "that address failed and is not fetched again; pick a different result",
+    "robots": "that site asks automated readers to stay out; pick a different source",
+    "redirect": "that address redirects and redirects are not followed; pick a different result",
+    "invalid_spec": "change only the field named in detail to one of its allowed values, then try_recipe again",
+    "pipeline_failed": "a path or step did not apply to the sample; use only the keys the digest shows, then try_recipe again",
+    "no_sample": "fetch_sample that exact address first",
+    "provenance": "use an address exactly as library_search or web_search returned it",
+    "wrong_thing": "search for that thing alone (web_search or library_search) and use an address from that search",
+    "verify_failed": "fix the reasons listed, then try_recipe, then propose_card",
+}
 
 
 PROPOSE_TOOLS = ("propose_card", "propose_compare")   # the tools that end a run with a proposal
 
 
-def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None, tool: str = "propose_card") -> dict:
+def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None, tool: str = "propose_card",
+                     draft: object = None) -> dict:
     """A propose tool's result after the caller's own landing check (a proposal that cannot land is a verify failure)."""
     assert ctx.max_turns > 0, "a turn budget"
     assert isinstance(result, dict), "a result"
@@ -202,6 +238,7 @@ def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None, to
     if not why:
         return result
     ctx.note(tool, "draft", f"cannot land: {why}")
+    ctx.mark_tried(draft)   # the held pass that cannot land is not proposed again
     return {**error("verify_failed", why), "reasons": [one_line(why, 200)]}
 
 
@@ -235,24 +272,44 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
     fails, nudges, why = 0, 0, []
     for _ in range(ctx.max_turns + MAX_NUDGES + MAX_VERIFY_FAILS + 1):  # bounded: tool calls + nudges + retries
         stop = _budget_stop(ctx)
+        if _ready(ctx) and (stop or _low(ctx)):   # a passing draft is never left to the budget: propose it now
+            done, reasons = _propose_passed(ctx, accept)
+            if done.get("ok"):
+                out.status, out.proposal, out.reasons = "proposed", done["proposal"], []
+                return out
+            fails, why = fails + 1, reasons
+            if fails >= MAX_VERIFY_FAILS:
+                return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks")
+            _say(turns, one_line("Your draft that passed was proposed for you because the "
+                                 "budget is nearly used up, and failed: " + "; ".join(reasons), 600))
+            stop = _budget_stop(ctx)
         if stop:
             return _decline(ctx, out, [stop, *why])
         response = _ask_model(chat, prompt.build_messages(base, turns), prompt.openai_tools("search" in ctx.allowed_origins))
         _count(ctx, out, response)
         msg, calls = _message(response), _calls(_message(response))
         if not calls:
+            if _ready(ctx):   # it stopped holding a draft that passed: propose that rather than end without a card
+                done, reasons = _propose_passed(ctx, accept)
+                if done.get("ok"):
+                    out.status, out.proposal, out.reasons = "proposed", done["proposal"], []
+                    return out
+                fails, why = fails + 1, reasons
+                if fails >= MAX_VERIFY_FAILS:
+                    return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks")
             nudges += 1
             if nudges > MAX_NUDGES:
                 return _decline(ctx, out, ["the model stopped without proposing a card", *why])
             turns += [{"role": "assistant", "content": str(msg.get("content") or "")[:2000]},
-                      {"role": "user", "content": "Reply with a tool call (library_search first, or propose_card)."}]
+                      {"role": "user", "content": _nudge(ctx, why)}]
             continue
         turns.append(_echo(msg, calls[:MAX_CALLS_PER_TURN]))
         for n, call in enumerate(calls[:MAX_CALLS_PER_TURN]):  # bounded by the per-reply cap
             result = (error("invalid_args", "arguments must be a JSON object") if call["args"] is None
                       else schemas.run_tool(ctx, call["name"], call["args"]))
             if call["name"] in PROPOSE_TOOLS:
-                result = _proposal_result(ctx, result, accept, call["name"])
+                given = call["args"].get("draft_spec") if isinstance(call["args"], dict) else None
+                result = _proposal_result(ctx, result, accept, call["name"], given)
                 if result.get("ok"):
                     out.status, out.proposal, out.reasons = "proposed", result["proposal"], []
                     return out
@@ -261,12 +318,54 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
                     why = [one_line(r, 200) for r in result.get("reasons") or [result.get("detail")]]
                     if fails >= MAX_VERIFY_FAILS:
                         return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks")
-            shown = {**result, "budget": _left(ctx)} if n < MAX_CALLS_PER_TURN else result
+            hint = NEXT.get(str(result.get("error"))) if not result.get("ok") else None
+            shown = {**result, **({"next": hint} if hint else {}), "budget": _left(ctx)}
             turns.append({"role": "tool", "tool_call_id": call["id"], "content": prompt.result_text(shown)})
         for call in calls[MAX_CALLS_PER_TURN:]:  # a call beyond the cap still gets its (refusal) result
             turns.append({"role": "tool", "tool_call_id": call["id"],
                           "content": prompt.result_text(error("too_many_calls", f"{MAX_CALLS_PER_TURN} per reply"))})
     return _decline(ctx, out, ["the research ran out of steps", *why])
+
+
+def _say(turns: list, text: str) -> None:
+    """Add a user turn; right after another user turn (a nudge) it joins that one, so the transcript alternates."""
+    assert isinstance(turns, list), "turns"
+    assert isinstance(text, str), "text"
+    if turns and turns[-1].get("role") == "user":
+        turns[-1] = {"role": "user", "content": f"{turns[-1]['content']}\n{text}"}
+    else:
+        turns.append({"role": "user", "content": text})
+
+
+def _nudge(ctx: ResearchCtx, why: list) -> str:
+    """What to say to a model that replied without a tool call, from where the run stands."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert isinstance(why, list), "reasons"
+    if not ctx.urls:
+        step = "call library_search (then web_search if the Library has nothing)"
+    elif not ctx.samples:
+        step = "call fetch_sample on one of the addresses a search returned"
+    else:
+        step = "write a draft and call try_recipe; when it says pass, call propose_card with the same draft"
+    return one_line(f"Reply with a tool call, no prose. {_left(ctx)['turns_left']} tool calls left. Next: {step}."
+                    + (f" Last problem: {why[0]}" if why else ""), 500)
+
+
+def _propose_passed(ctx: ResearchCtx, accept: AcceptFn | None) -> tuple[dict, list]:
+    """Propose the draft that passed try_recipe, the same way the model's own propose_card would run (the tool, then
+    the caller's landing check): ``(result, reasons if it failed)``. A draft is proposed this way once."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert ctx.passed is not None, "a draft that passed"
+    draft = ctx.passed["draft"]
+    ctx.own_proposal = True   # no model call runs here, so it costs no turn: a pass on the last tool call is still proposed
+    try:
+        proposed = tools.propose_card(ctx, draft)   # first: a waiting draft may use the last of the time and tokens
+    finally:
+        ctx.own_proposal = False
+    ctx.passed["tried"] = True
+    done = _proposal_result(ctx, proposed, accept, "propose_card", draft)
+    reasons = [] if done.get("ok") else [one_line(r, 200) for r in done.get("reasons") or [done.get("detail") or done.get("error")]]
+    return done, reasons
 
 
 def _json_object(text: str) -> dict | None:

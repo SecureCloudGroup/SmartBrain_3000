@@ -6,10 +6,11 @@ cached prefix on purpose and trips ``test_ni_research_tools``'s pinned hash.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 
 from . import tools
-from .ctx import ResearchCtx, error
+from .ctx import MAX_MEMO, MAX_REPLAYS, ResearchCtx, error
 
 _DRAFT = {"type": "object",
           "description": "A card spec: source (one http_json URL you fetched), pipeline (extract then transform) and scene. "
@@ -64,6 +65,9 @@ _DISPATCH = {"fetch_sample": ("url", tools.fetch_sample), "library_search": ("qu
              "web_search": ("query", tools.web_search)}
 
 
+_MEMO_TOOLS = frozenset({"web_search", "library_search", "resolve_entity", "try_recipe"})   # deterministic on the ctx
+
+
 def tool_schemas() -> list[dict]:
     """The tool definitions, key-sorted and name-ordered, ready for the gateway."""
     assert TOOLS_JSON, "the canonical text"
@@ -82,4 +86,19 @@ def run_tool(ctx: ResearchCtx, name: str, args: object) -> dict:
     prop, fn = entry
     if not isinstance(args, dict) or set(args) != {prop}:
         return error("invalid_args", f"{name} takes exactly {prop}")
-    return fn(ctx, args[prop])
+    if name not in _MEMO_TOOLS:
+        return fn(ctx, args[prop])
+    dump = json.dumps(args[prop], sort_keys=True, default=str)   # the WHOLE canonical text, digested: never a prefix
+    key = (name, hashlib.sha256(dump.encode("utf-8", "replace")).hexdigest(), tuple(ctx.samples))
+    prior = ctx.memo.get(key)
+    if prior is not None:   # the same call on the same samples answers the same: no search, no turn (a few times)
+        if ctx.replays >= MAX_REPLAYS:
+            out = ctx.spend(name)
+            if out is not None:
+                return out
+        ctx.replays += 1
+        return {**prior, "repeat": "identical to an earlier call; the result is unchanged, so change something"}
+    got = fn(ctx, args[prop])
+    if got.get("error") not in ("budget_exhausted", "search_unavailable") and len(ctx.memo) < MAX_MEMO:
+        ctx.memo[key] = got
+    return got
