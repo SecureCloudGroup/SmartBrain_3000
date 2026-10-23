@@ -270,7 +270,7 @@ def test_when_the_one_library_source_refuses_the_card_declines_and_never_searche
     out = ni_flow._sample_and_map(store, item_id, "Yankees score", {"wants": ["score"]},
                                   "https://site.api.espn.com/x", lambda p: "{}", refused)
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "source_cant_answer"
-    assert "site.api.espn.com" in out["_decline_card"]["line"]
+    assert out["_decline_card"]["line"] == "site.api.espn.com refused SmartBrain's request"
 
 
 def test_a_card_with_nothing_to_show_is_not_built() -> None:

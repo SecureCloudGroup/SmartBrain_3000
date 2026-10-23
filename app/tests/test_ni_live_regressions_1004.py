@@ -178,7 +178,7 @@ def test_a_mapping_misfit_on_a_listed_page_ends_declined_with_the_reason(monkeyp
     out = ni_flow._sample_and_map(store, item_id, "pollen count in Atlanta", intent, _WEB[0]["url"],
                                   lambda _p: "{}", lambda _u: sample)
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "source_cant_answer"
-    assert out["_decline_card"]["line"].startswith("www.atlantaallergy.com ")
+    assert out["_decline_card"]["line"] == "www.atlantaallergy.com couldn't be read for this ask"
 
 
 def test_a_mapping_misfit_on_a_pasted_link_still_fails_honestly(monkeypatch) -> None:
