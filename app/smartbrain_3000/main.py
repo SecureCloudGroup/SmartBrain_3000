@@ -374,7 +374,7 @@ def _make_lifespan(mcp):
         # unlock transitions are honored on every call.
         ni_flow.set_secrets_provider(
             lambda: getattr(application.state, "secret_store", None))
-        ni_flow.set_audit_sink(lambda: getattr(application.state, "audit", None))  # v2 auto-pick fetches
+        ni_flow.set_audit_sink(lambda: getattr(application.state, "audit", None))  # auto-pick fetches
 
         # S2 (round 9/10): the flow worker's web-search service for source
         # research on a catalog miss. Configured providers when the store is
@@ -456,6 +456,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="SmartBrain_3000", version=__version__, lifespan=_make_lifespan(mcp),
                   docs_url=None, redoc_url=None, openapi_url=None)
     _install_routes(app)
+    ni_flow.warn_retired_flow_flag()  # SMARTBRAIN_NI_FLOW=v1 is a harmless leftover now
     # Read-only Knowledge for external tools; auth-gated by the MCP access token.
     app.mount("/mcp", mcp_server.auth_wrapped_app(mcp, lambda: _mcp_token(app)))
 

@@ -282,7 +282,6 @@ _INTENT = {"kind": "external_data", "subject": "earthquakes", "cadence_minutes":
 
 @pytest.fixture(autouse=True)
 def _v2(monkeypatch):
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v2")
     monkeypatch.setenv("SMARTBRAIN_NI_RESEARCH", "auto")
     monkeypatch.setattr(gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
     monkeypatch.setattr(ni_flow.pagegraph, "fetch_page_graph",
@@ -443,18 +442,6 @@ def test_a_decline_stops_honestly_with_the_reasons_and_builds_nothing(lib, monke
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up"
     assert store.get_item(item_id)["spec"].get("_shell") is True
     assert any("researched, no card" in n for n in ni_flow._flow_read(store, item_id)["notes"])
-
-
-def test_v1_is_unchanged_and_never_researches(lib, monkeypatch) -> None:  # noqa: F811
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")
-    seam = Script()
-    store = _store()
-    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: _wrap(lib))
-    ni_research_flow.set_research_chat(lambda m, ms, t: seam(ms, t), cloud="anthropic/x", consented=True)
-    item_id = ni_flow.create_shell_item(store, _ASK)
-    ni_flow._flow_write(store, item_id, ni_flow._make_record(_ASK, "intent"))
-    out = ni_flow._run_external_flow(store, item_id, _ASK, _INTENT, None, lambda p: "{}", lambda u: {})
-    assert seam.seen == [] and out["state"] == "source" and out["error"] == ni_flow.AWAITING_SOURCE_PICK
 
 
 @pytest.fixture()

@@ -35,7 +35,7 @@ the human verdict, so replaying the 2026-10-05 results reproduces 13 / 6 / 4 / 2
 counts and R, P, W, L, D rates per kind and overall (L = links + declined, the plan's "links/declined" line;
 D = declined alone).
 
-**Declined (the v2 declined card).** A run whose flow ended `declined` has outcome `declined` and carries
+**Declined (the declined card).** A run whose flow ended `declined` has outcome `declined` and carries
 `decline: {reason, headline, line, links}`. It is its own class. When the gold expects a decline (`expected_outcome:
 decline`, or `card` among `forbidden_outcomes`) it scores `right` (reason "declined, as the gold expects"); for a
 card-expecting or open gold it scores `declined`, which is neither right nor wrong (it counts in L and D, never in
@@ -53,16 +53,15 @@ together with it. A built-source mismatch is scored `partial` with `needs_review
 with `wrong` 0 and `review` above 0 still has cards a person has not judged.
 
 The source check reads only the source the card was built from (`built_source`: the last tapped row,
-which under v2 is the row the flow picked for itself, or the web page / dataset an open-path card says
-it came from), in v1 and v2 alike. A row v1 tapped but did not build from never counts. A built source
+which is the row the flow picked for itself, or the web page / dataset an open-path card says
+it came from). A row the flow tried but did not build from never counts. A built source
 that passes every other check but is not in the gold's `acceptable_sources` scores `partial` with
 `needs_review` (reason "built source not in the gold's acceptable sources"): a narrow gold list is not
 evidence the card is wrong. `wrong` stays for failed constraint checks, a forbidden outcome and a human verdict.
 
 The table has a `waiting` column: runs parked at the source pick with a buildable row still untried
-(outcome `waiting-pick`). When every row has failed, v1 and v2 report the same label (`stop_label` in
-`ni-live-e2e.py`): `links` when the flow offers link rows, else `no-source`. Older results with outcome
-`source` still score as links.
+(outcome `waiting-pick`). When every row has failed, the run reports `links` when the flow offers link rows, else
+`no-source` (`stop_label` in `ni-live-e2e.py`). Older results with outcome `source` still score as links.
 
 ## Record a live baseline (T's machine, real model)
 
@@ -78,8 +77,8 @@ PYTHONPATH=app python3 tools/ni-eval.py record \
   --out /tmp/baseline-v0.26.0.json
 ```
 
-Add `--set A,B` or `--only "<text or id>"` to narrow, and `--flow v1|v2` to run under that `ni_flow`
-flag (it sets `SMARTBRAIN_NI_FLOW` for the run; replay takes it too, default is the stored flag, v1). For a cloud model pass its id as `--model`
+Add `--set A,B` or `--only "<text or id>"` to narrow. There is one flow: `--flow` was removed and any value is an
+error. For a cloud model pass its id as `--model`
 (the gateway must route it). Output: one `<id>.json` per ask (model replies, fetch responses; headers
 are never stored and secret-looking query values are redacted) and the table printed at the end.
 Review cassettes for personal data before committing them. Asks in sets B-G have no recorded
@@ -105,7 +104,7 @@ Library-mode cassettes also need `--pack-dir` at replay (the pack is not recorde
 
 ### Researcher (S4c)
 
-`--research cloud|local|off` (record and replay, v2 only) sets the researcher tier for the run through
+`--research cloud|local|off` (record and replay) sets the researcher tier for the run through
 `SMARTBRAIN_NI_RESEARCH` and puts its model turns in the cassette (`research`: the raw responses with usage).
 `cloud` uses `--research-model` (default `anthropic/claude-sonnet-5-5`) with the operator's consent, the
 flow itself staying on `--model`; `local` is the closed-world mode on `--model`; `off` is no researcher. A
@@ -123,7 +122,7 @@ format is `html`, or a refresh) is still not replayable, as above. Measure S4c o
 gold with, for example:
 
 ```
-python3 tools/ni-eval.py record --flow v2 --research cloud --research-model anthropic/claude-sonnet-5-5 \
+python3 tools/ni-eval.py record --research cloud --research-model anthropic/claude-sonnet-5-5 \
   --model mlx/Qwen3.5-9B-MLX-4bit --pack-dir <dir holding library/> --cassette-dir <dir> --out <file.json>
 ```
 

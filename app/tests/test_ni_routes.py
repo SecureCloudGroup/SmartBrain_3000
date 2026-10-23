@@ -100,7 +100,7 @@ def test_routes_require_unlock(client: TestClient) -> None:
 _BOARD_ROW_KEYS = {"id", "title", "state", "enabled", "interval_minutes", "last_checked", "last_status",
                    "consecutive_failures", "position", "display", "interpreted", "template_update",
                    "template_gone", "needs_credentials", "needs_params", "l2_proposal", "c2_ok", "awaiting_yes",
-                   "shell", "born", "flow", "payload_slot", "payload_at", "payload_ok", "payload"}
+                   "shell", "born", "flow", "actions", "payload_slot", "payload_at", "payload_ok", "payload"}
 
 
 def test_board_shape_and_slot_selection(client: TestClient) -> None:
@@ -116,20 +116,14 @@ def test_board_shape_and_slot_selection(client: TestClient) -> None:
     ]}
 
 
-def test_board_row_actions_only_in_v2(client: TestClient, monkeypatch) -> None:
-    from smartbrain_3000 import db as dbmod
+def test_board_row_always_carries_actions(client: TestClient) -> None:
     from smartbrain_3000 import ni_master
 
     _unlock(client)
     iid = _create_via_tool(client)
-    monkeypatch.delenv("SMARTBRAIN_NI_FLOW", raising=False)
-    v1 = next(i for i in client.get("/api/ni/board").json()["items"] if i["id"] == iid)
-    assert "actions" not in v1 and set(v1) == _BOARD_ROW_KEYS
-    dbmod.meta_set(client.app.state.ni.conn, "ni_flow", "v2")
-    v2 = next(i for i in client.get("/api/ni/board").json()["items"] if i["id"] == iid)
-    assert set(v2) == _BOARD_ROW_KEYS | {"actions"}
-    assert v2["actions"][0] == "activate" and set(v2["actions"]) <= ni_master.ACTION_KINDS
-    assert {k: v for k, v in v2.items() if k != "actions"} == v1, "v2 only adds the key"
+    row = next(i for i in client.get("/api/ni/board").json()["items"] if i["id"] == iid)
+    assert set(row) == _BOARD_ROW_KEYS
+    assert row["actions"][0] == "activate" and set(row["actions"]) <= ni_master.ACTION_KINDS
 
 
 def test_board_row_carries_the_interpretation_and_only_the_coverage(client: TestClient) -> None:
@@ -1248,8 +1242,8 @@ def test_intake_validates_source_url_shape(client: TestClient) -> None:
 
 
 def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> None:
-    """Retry re-runs the SAME sealed request; a fetch-class failure drops the
-    URL (fresh source resolution), a running/healthy flow refuses."""
+    """Retry re-runs the SAME sealed request with only the address the user named (``_pasted``); the
+    engine's own last address never rides (S10 review M2); a running/healthy flow refuses."""
     from smartbrain_3000 import ni_flow
     _unlock(client)
     store = client.app.state.ni
@@ -1259,7 +1253,7 @@ def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> No
     iid = client.post("/api/ni/intake", json={"request": "retry me please"}).json()["id"]
     # Running flow (state intent) → 409.
     assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 409
-    # Terminal fetch failure → retry WITHOUT the url.
+    # The engine's own last address (a terminal fetch failure, or any other) → retry WITHOUT it.
     ni_flow._fail(store, iid, "fetch", "sample fetch failed: FetchError")
     record = ni_flow._flow_read(store, iid)
     record["source_url"] = "https://query1.finance.yahoo.com/bad"
@@ -1268,10 +1262,17 @@ def test_retry_reruns_a_failed_shell_flow(client: TestClient, monkeypatch) -> No
     r = client.post(f"/api/ni/items/{iid}/flow/retry")
     assert r.status_code == 200, r.text
     assert fired["id"] == iid and fired.get("source_url") is None
-    # Terminal non-fetch failure keeps the user's URL.
     ni_flow._fail(store, iid, "mapping", "mapping stage failed after retry")
     record = ni_flow._flow_read(store, iid)
-    record["source_url"] = "https://api.example.com/mine"
+    record["source_url"] = "https://api.example.com/engine-tried"
+    ni_flow._flow_write(store, iid, record)
+    fired.clear()
+    assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 200
+    assert fired.get("source_url") is None
+    # The address the user named keeps riding, whatever the failure.
+    ni_flow._fail(store, iid, "fetch", "sample fetch failed: FetchError")
+    record = ni_flow._flow_read(store, iid)
+    record.update(source_url="https://api.example.com/mine", _pasted="https://api.example.com/mine")
     ni_flow._flow_write(store, iid, record)
     fired.clear()
     assert client.post(f"/api/ni/items/{iid}/flow/retry").status_code == 200
@@ -1533,28 +1534,6 @@ def test_answer_route_409_when_no_question_pending(client: TestClient) -> None:
     assert r.status_code == 409 and "not asking" in r.json()["detail"]
 
 
-def test_reopen_route_reenters_pick_for_failed_shells_only(
-        client: TestClient, monkeypatch) -> None:
-    """G1: reopen = the 'pick a different source' way out. Shell + terminal
-    only; finalized cards 409 toward Fix."""
-    from smartbrain_3000 import ni_flow
-    _unlock(client)
-    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
-    iid = client.post("/api/ni/intake", json={"request": "a source that died"}).json()["id"]
-    store = client.app.state.ni
-    # Non-terminal → 409.
-    assert client.post(f"/api/ni/items/{iid}/flow/reopen").status_code == 409
-    ni_flow._fail(store, iid, "fetch", "sample fetch failed: HTTPError")
-    r = client.post(f"/api/ni/items/{iid}/flow/reopen")
-    assert r.status_code == 200 and r.json()["state"] == "source"
-    row = next(x for x in client.get("/api/ni/board").json()["items"]
-               if x["id"] == iid)
-    assert row["flow"]["state"] == "source" and "suggestions" in row["flow"]
-    # Finalized card → 409 (Fix owns re-derivation).
-    iid2 = _create_via_tool(client)
-    assert client.post(f"/api/ni/items/{iid2}/flow/reopen").status_code == 409
-
-
 def test_findings_routes_list_and_resolve(client: TestClient) -> None:
     from smartbrain_3000 import ni_watch
     _unlock(client)
@@ -1661,8 +1640,8 @@ def test_retry_reseeds_the_record_so_the_worker_can_actually_run(
     result = ni_flow.run_flow(store, iid,
                                gateway_call=lambda m, p: intent_reply,
                                fetcher=lambda url: {})
-    assert result["state"] == "source", (
-        "the retried flow must proceed (here: to the pick pause), not crash")
+    assert result["state"] == "declined", (
+        "the retried flow must proceed (here: to the no-source decline), not crash")
 
 
 def test_retry_never_promotes_an_unapproved_confirm_url(

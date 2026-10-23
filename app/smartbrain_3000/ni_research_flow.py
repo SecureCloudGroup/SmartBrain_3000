@@ -132,16 +132,32 @@ def _preview_of(ctx: ResearchCtx, spec: dict) -> dict:
     return ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(tools.spec_input(sample, spec["source"])))
 
 
-def _can_land(ctx: ResearchCtx, item_id: str, request: str, proposal: dict) -> str | None:
+def _declined_of(record: dict) -> frozenset[str]:
+    """The addresses the user said NO to on this card (``_declined``, bounded by the flow), for set membership."""
+    out: set[str] = set()
+    for url in record.get("_declined") or []:  # bounded: ni_flow keeps the last _MAX_DECLINED
+        try:
+            if isinstance(url, str):
+                out.add(normal_url(url))
+        except ValueError:  # not an address (a bad port): nothing to avoid
+            continue
+    return frozenset(out)
+
+
+def _can_land(ctx: ResearchCtx, item_id: str, request: str, proposal: dict,
+              declined: frozenset[str] = frozenset()) -> str | None:
     """Why this proposal cannot become a card (the whole spec validates and the scene binds the real outputs),
     else None. A failure goes back to the model as a failed proposal. The same rule ``try_recipe`` and
     ``propose_card`` already ran on the sample (``tools.landing_reason``); here it runs on the sealed proposal, with
-    the card's real id, as the backstop."""
+    the card's real id, as the backstop. A source the user said NO to on this card never lands again, whichever
+    way the run found it (the Library hides it; a search or a page link can still name it)."""
     assert isinstance(request, str) and item_id, "args required"
     assert isinstance(proposal, dict), "a proposal"
     try:
         spec = _stamp(proposal["spec"], request)
         ni.validate_spec(spec)
+        if normal_url(str(spec["source"].get("url") or "")) in declined:
+            return "you said no to this source on this card: find a different one"
         preview = _preview_of(ctx, spec)
     except (ni.NIError, ValueError, KeyError, AssertionError) as exc:
         return f"the card cannot be shown: {one_line(exc, 150)}"
@@ -220,7 +236,7 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
     assert store is not None and item_id, "args required"
     record = ni_flow._flow_read(store, item_id) or {}
     lib = ni_flow._resolve_library()
-    if not ni_flow._is_v2(store) or record.get("_cancel") or lib is None:
+    if record.get("_cancel") or lib is None:
         return None
     plan = plan_for(store, item_id, record)
     if plan.mode == "off":
@@ -240,7 +256,8 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
                         else "researching (cloud) in the Library and on the web")
     _audit(item_id, plan)
     chat = _chat_for(store, plan.model or "", plan.mode == "local")
-    accept = lambda proposal: _can_land(ctx, item_id, request, proposal)
+    declined = _declined_of(record)
+    accept = lambda proposal: _can_land(ctx, item_id, request, proposal, declined)
     place = "" if question["entities"] else str(intent.get("place") or "")
     out = (loop.run_research(ctx, chat, place=place, accept=accept) if plan.mode == "cloud"
            else loop.run_closed_world(ctx, chat, accept=accept))
@@ -263,7 +280,7 @@ def research_plan(store: ni.NIStore, item: dict) -> policy.Plan | None:
     and the card simply stays failing with its own status."""
     assert store is not None and isinstance(item, dict), "store + item required"
     assert item.get("id"), "an item id"
-    if not ni_flow._is_v2(store) or ni_flow._resolve_library() is None:
+    if ni_flow._resolve_library() is None:
         return None
     plan = plan_for(store, item["id"], {}, web=False)  # re-research reads the Library only: any consent covers it
     return plan if plan.mode == "cloud" else None

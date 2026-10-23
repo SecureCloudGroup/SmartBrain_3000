@@ -252,7 +252,7 @@ def test_worker_restart_reuses_the_sealed_intent_without_a_model_call() -> None:
     })
     first = ni_flow.run_flow(store, item_id, gateway_call=_scripted_model([intent_reply]),
                              fetcher=lambda url: fixture)
-    assert first["state"] == "source", first  # paused for a source; the intent is sealed on the record
+    assert first["state"] == "declined", first  # no Library source answers; the intent is sealed on the record
     sealed = (ni_flow._flow_read(store, item_id) or {}).get("intent")
     assert isinstance(sealed, dict) and sealed["subject"] == "AAPL"
     mapping_reply = json.dumps({
@@ -269,7 +269,7 @@ def test_worker_restart_reuses_the_sealed_intent_without_a_model_call() -> None:
 
 
 def test_flow_paused_at_source_when_no_library_source_no_url() -> None:
-    """No Library source + no user URL ⇒ flow pauses at ``source`` state."""
+    """No Library source + no user URL ⇒ the flow ends on the declined card (it never parks on a pick)."""
     store, _conn = _store()
     request = "custom feed I have not named yet"
     item_id = ni_flow.create_shell_item(store, request)
@@ -284,7 +284,7 @@ def test_flow_paused_at_source_when_no_library_source_no_url() -> None:
         fetcher=lambda url: {},   # unused — no fetch happens on the pause
         )
     record = ni_flow._flow_read(store, item_id)
-    assert record is not None and record["state"] == "source"
+    assert record is not None and record["state"] == "declined"
 
 
 def test_flow_resume_via_tool_completes(monkeypatch) -> None:
@@ -796,26 +796,6 @@ def test_h2_terminal_flow_hidden_for_finalized_items_only() -> None:
     ni_flow._transition(store, shell_id, "failed", error="mapping: no match")
     assert ni_flow.board_flow_field(store, shell_id) is None, \
         "terminal slot must not mask a finalized card with a payload"
-
-
-def test_h3_awaiting_pick_marker_on_source_state() -> None:
-    """H3 (audit 2026-09-13): a source-state pause carries the AWAITING_SOURCE_PICK
-    marker (the frontend labels it distinctly from an autonomous search).
-    """
-    store, _conn = _store()
-    item_id = ni_flow.create_shell_item(store, "unknown feed")
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "x", "cadence_minutes": 15,
-        "wants": ["value"], "threshold": None, "display_hint": "value",
-    })
-    model = _scripted_model([intent_reply])
-    ni_flow.run_flow(
-        store, item_id, gateway_call=lambda m, p: model(m, p),
-        fetcher=lambda url: {}, )
-    record = ni_flow._flow_read(store, item_id)
-    assert record is not None and record["state"] == "source"
-    assert record.get("error") == ni_flow.AWAITING_SOURCE_PICK, \
-        f"expected awaiting_pick marker; got {record.get('error')!r}"
 
 
 def test_m1_born_marker_survives_journal_pruning() -> None:
@@ -1768,14 +1748,19 @@ def test_g4a_refine_cadence_note_updates_interval_without_a_worker(monkeypatch) 
     assert fired == {}, "a cadence note never spawns a worker"
 
 
-def test_g4a_refine_source_change_note_reenters_the_pick(monkeypatch) -> None:
+def test_g4a_refine_source_change_note_relocates_like_no(monkeypatch) -> None:
+    """There is no pick to re-enter: "a different source" declines the card's source and the auto-pick runs again
+    from the card's words, exactly as No does."""
     store, _conn = _store()
     item = _refine_card(store)
-    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    started: list[dict] = []
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: started.append({"id": iid, **kw}) or True)
     out = ni_flow.begin_refine(store, item, "use a different source for this")
     assert out == {"kind": "source_change"}
     record = ni_flow._flow_read(store, item["id"])
-    assert record["state"] == "source"
+    assert record["state"] == "intent" and record["_declined"] == [item["spec"]["source"]["url"]]
+    assert record["request"] == "track the weather in Charleston" and not record.get("source_url")
+    assert started == [{"id": item["id"]}], "the worker starts from the words, with no address"
 
 
 def test_g4a_refine_content_note_seals_and_rebuilds(monkeypatch) -> None:
@@ -2374,71 +2359,6 @@ def test_s2_evaluate_orders_by_page_evidence(monkeypatch) -> None:
     assert out[0]["evidence"] == ["name: High Tide"]
     assert out[0]["fitness"] > 0
     assert "fitness" not in out[2]  # unfetchable: unscored, still offerable
-
-
-def test_library_miss_searches_seals_and_boards_web_candidates(monkeypatch) -> None:
-    """THE FIELD REGRESSION (tides class): words → no Library source → S2 search
-    → evidence (rank-time only) → sealed ≤3 {title,host,url} — snippets and
-    evidence are NEVER sealed — and the board renders the rows verbatim as
-    links (ruling 2026-10-05: kind "link", found "page"; never tapped to build)."""
-    svc = _FakeSearchService(results=[
-        {"title": "Creek Tide Charts", "url": "https://tides.example.org/creek",
-         "snippet": "daily tide tables"},
-        {"title": "Boating Portal", "url": "https://boats.example.net/",
-         "snippet": "marina news"},
-    ])
-    _wire_search(monkeypatch, svc)
-    _no_page_fetch(monkeypatch)
-    store, _conn = _store()
-    item_id = ni_flow.create_shell_item(store, "tide times for the creek landing")
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "tides", "cadence_minutes": 720,
-        "wants": ["tide times"], "threshold": None, "display_hint": "list",
-    })
-    web_rank = json.dumps({"best": "r0", "alternates": ["r1"],
-                           "confidence": "high"})
-    result = ni_flow.run_flow(store, item_id,
-                              gateway_call=_scripted_model(
-                                  [intent_reply, web_rank]),
-                              fetcher=lambda url: {})
-    assert result["state"] == "source"
-    record = ni_flow._flow_read(store, item_id)
-    assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
-    sealed = record["_ranked_search"]
-    assert [set(r) for r in sealed] == [{"title", "host", "url"}] * 2
-    assert sealed[0]["url"] == "https://tides.example.org/creek"
-    field = ni_flow.board_flow_field(store, item_id)
-    sugs = field["suggestions"]
-    assert [(s["kind"], s["found"]) for s in sugs] == [("link", "page")] * 2
-    assert sugs[0]["url"] == "https://tides.example.org/creek"
-    assert svc.queries  # the search actually ran, from the user's words
-    assert svc.queries[0] == "tide times for the creek landing"
-
-
-def test_s2_failures_always_fall_to_the_plain_pause(monkeypatch) -> None:
-    """Zero rows, a raising provider, and an unwired provider all land the
-    exact plain pause of today — a search problem may never fail a flow."""
-    intent_reply = json.dumps({
-        "kind": "external_data", "subject": "obscurities", "cadence_minutes": 60,
-        "wants": ["numbers"], "threshold": None, "display_hint": "value",
-    })
-    for service in (_FakeSearchService(results=[]),
-                    _FakeSearchService(raise_exc=True),
-                    None):
-        if service is not None:
-            _wire_search(monkeypatch, service)
-        else:
-            monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
-        store, _conn = _store()
-        item_id = ni_flow.create_shell_item(store, "utterly uncatalogued need")
-        result = ni_flow.run_flow(store, item_id,
-                                  gateway_call=_scripted_model([intent_reply]),
-                                  fetcher=lambda url: {})
-        assert result["state"] == "source"
-        record = ni_flow._flow_read(store, item_id)
-        assert record["error"] == ni_flow.AWAITING_SOURCE_PICK
-        assert not record.get("_ranked_search")
-        assert "paste a link" in (record.get("notes") or [""])[-1]
 
 
 # ---- P1 debt riders (2026-09-22): human labels + honest preview badge ------
@@ -3091,20 +3011,16 @@ def test_board_keeps_terminal_slot_that_carries_a_question() -> None:
     assert ni_flow._flow_read(store, item_id) is not None, "slot must survive the read"
 
 
-def test_board_flow_field_actions_only_in_v2(monkeypatch) -> None:
-    monkeypatch.delenv("SMARTBRAIN_NI_FLOW", raising=False)
+def test_board_flow_field_carries_actions_and_progress() -> None:
     store, conn = _store()
     item_id = ni_flow.create_shell_item(store, "needs a pick")
     ni_flow._transition(store, item_id, "sampling")
-    v1 = ni_flow.board_flow_field(store, item_id)
-    assert v1 == {"state": "sampling"}, "v1 payload is untouched"
-    dbmod.meta_set(conn, "ni_flow", "v2")
     v2 = ni_flow.board_flow_field(store, item_id)
     assert v2 == {"state": "sampling", "actions": ["cancel", "delete"],
                   "progress": {"step": 3, "of": 4, "label": "Reading a sample"}}
 
 
-def test_build_progress_is_monotone_gated_and_v2_only(monkeypatch) -> None:
+def test_build_progress_is_monotone_and_gated() -> None:
     order = ["intent", "source", "sampling", "mapping", "assembling"]
     steps = [ni_flow.build_progress({"state": st})["step"] for st in order]
     assert steps == sorted(steps) and steps[0] == 1 and steps[-1] == ni_flow.PROGRESS_OF
@@ -3116,13 +3032,10 @@ def test_build_progress_is_monotone_gated_and_v2_only(monkeypatch) -> None:
     assert ni_flow.build_progress(stop) is None  # an honest stop builds nothing: no bar, no "trying"
     trying = ni_flow.build_progress({"state": "sampling", "_try": {"n": 2, "of": 3, "host": "api.example.org"}})
     assert trying["try"] == {"n": 2, "of": 3, "host": "api.example.org"}
-    monkeypatch.delenv("SMARTBRAIN_NI_FLOW", raising=False)
     store, conn = _store()
     item_id = ni_flow.create_shell_item(store, "progress ask")
     ni_flow._transition(store, item_id, "mapping")
     before = ni_flow._flow_read(store, item_id)
-    assert "progress" not in ni_flow.board_flow_field(store, item_id)  # v1 payload is untouched
-    dbmod.meta_set(conn, "ni_flow", "v2")
     assert ni_flow.board_flow_field(store, item_id)["progress"]["step"] == 4
     assert ni_flow._flow_read(store, item_id) == before, "a board read writes nothing"
 

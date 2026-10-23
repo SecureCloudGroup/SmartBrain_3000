@@ -441,7 +441,7 @@ def test_r4_2_realign_url_rebuilds_from_template_at_now(monkeypatch) -> None:
     store = nimod.NIStore(conn, gen_master_key())
     item_id = ni_flow.create_shell_item(store, "r")
     live = {"state": "sampling", "request": "r", "updated_at": "", "notes": [],
-             "_library_source": "demo",
+             "_library_source": "demo", "_library_url": "https://ex.test/?d=2026-10-09",
              "_library_url_template": "https://ex.test/?d={{param:d}}",
              "_library_clock_params": {"d": {"format": "%Y-%m-%d", "offset_days": 0,
                                                "label": "d"}}}

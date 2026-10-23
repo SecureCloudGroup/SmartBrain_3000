@@ -625,7 +625,7 @@ def test_when_no_chosen_answer_is_in_the_response_it_ends_honestly_never_mapping
     prompts: list[str] = []
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
                                   WEATHER_URL, _mapping_model(prompts), lambda _u: sample)
-    assert out["state"] == "unsupported" and "has nothing for this right now" in out["error"]
+    assert out["state"] == "declined", out
     assert not any("Choose the best candidate path" in p for p in prompts)
 
 
@@ -763,13 +763,14 @@ def test_a_sparse_row_shows_a_dash_and_a_field_gone_from_every_row_fails() -> No
 
 def test_a_source_with_nothing_for_the_ask_moves_to_the_next_source(lib, monkeypatch) -> None:
     """Live 2026-09-29: TheSportsDB listed no Dodgers games ({"events": null}); the card fell to a model
-    guess over an empty response and failed. Now the pick re-lands on the other sources, named honestly."""
+    guess over an empty response and failed. Now the auto-pick moves on to its next source, named honestly."""
     store = _store()
     item_id = _picked(store, lib, monkeypatch)
     other = "https://api.example.org/other"
     rec = ni_flow._flow_read(store, item_id)
     rec["_ranked_library"] = [{"url": WEATHER_URL, "provider": "Open-Meteo"},
                               {"url": other, "provider": "Other"}]
+    rec["_auto_picked"] = True
     ni_flow._flow_write(store, item_id, rec)
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", _INTENT, WEATHER_URL,
                                   lambda _p: "{}", lambda _u: {"current": {}, "daily": {}})

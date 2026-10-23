@@ -79,8 +79,8 @@ not. Being precise about the line matters more than claiming everything:
   and local self-repair run on a local model or not at all.) **Building** a card
   reads your request and samples of its source, so if that routing points off this
   computer, the new card asks you first: build with that model (this card only; a
-  later Fix or refine doesn't ask again) or with your local model. When the new
-  flow finds no ready-made Library source, it can **research** one, and the same question
+  later Fix or refine doesn't ask again) or with your local model. When no
+  ready-made Library source answers, SmartBrain can **research** one, and the same question
   then says what leaves this computer if you allow a cloud model: your exact question, the
   titles and details of Library sources, the web search results it gets back (titles,
   snippets and addresses), digests of up to 8 pages or data files it reads, today's date,
@@ -168,14 +168,17 @@ not. Being precise about the line matters more than claiming everything:
   it matches the fingerprint this app release pins. Finding sources for your
   words then happens entirely on your machine; nothing about your request is
   sent. Sources you add yourself stay sealed on your machine.
-- **Your Yes, and your suggestions, to the SmartBrain Library.** When you tap a
-  Library source on a card, the app sends the Library a vote in the background:
-  that source's id, "yes", and the app version. It never sends your request, the
-  filled-in address, a place, or a key. A source you add yourself is sent only if
-  you tick **Also suggest it to the SmartBrain Library**, and then only its name,
-  description, category and address pattern, with every value you filled in
-  removed. Both go to `smartbrain.securecloudgroup.com`, which keeps no account,
-  cookie, device id or IP address: a vote is stored with the day it arrived.
+- **Your suggestions, to the SmartBrain Library.** SmartBrain picks a Library
+  source for a new card itself, reading it once for the preview; nothing about that
+  pick, your **Keep**, or a link you paste is sent to the Library. The one vote left
+  is from a card an earlier version left waiting on its old source picker: pasting
+  the address of a Library source it listed sends a vote in the background (that
+  source's id, "yes", and the app version), never your request, the filled-in
+  address, a place, or a key. A source you add yourself is sent only if you tick **Also suggest
+  it to the SmartBrain Library**, and then only its name, description, category and
+  address pattern, with every value you filled in removed. Both go to
+  `smartbrain.securecloudgroup.com`, which keeps no account, cookie, device id or IP
+  address: a vote is stored with the day it arrived.
 - **A source that needs your own key or contact email.** Some Library sources
   need a free key from their provider; a few providers (the SEC, the Bureau of
   Labor Statistics) ask automated requests for a contact email. The card asks
@@ -183,15 +186,14 @@ not. Being precise about the line matters more than claiming everything:
   provider's host, and sent only to that host over HTTPS; a redirect elsewhere is
   refused. The email is sealed too and is sent only to sources with that rule, in
   the request's User-Agent header.
-- **Card creation, when the Library has nothing (a bounded search).** While you
-  are *creating* a card and no Library source answers it, the build engine
-  searches **your own words** through the web-search engine below and reads up to
-  four of the result pages — once, through the same network guard, with safe
-  search forced on — to rank the pages that may help, which the card lists as
-  links. That pre-read is part of the search; the address a card fetches
-  *recurringly* is still only the Library source you tap or the link you paste.
-  No search happens when a Library source answers the ask, when you pasted a URL,
-  or after the card exists.
+- **Card creation reads one Library source before you Keep.** While a new card is
+  built, SmartBrain fetches the Library source it picked (the same network guard as
+  any fetch, an address filled from your own words, and your key only if you typed
+  one) and shows the result as a preview. It reads nothing more and does not
+  refresh the card until you tap **Keep**. When no Library source answers and you
+  have not allowed a model for research, nothing is searched or fetched: the card
+  says so and lists links. What research sends, if you allow it, is described under
+  "Cloud model calls" above.
 - **The card template library (only if you connect one).** A connected library is
   checked at the URL you pinned about once a day (plus your manual "Check now").
   The check downloads the signed template pack; nothing about you or your cards is

@@ -8,9 +8,11 @@ and detects what no single flow can see about itself:
 - **Stalled builds**: absorbs the M3 stale sweep — a worker that died leaves
   a non-terminal record; the sweep fails it honestly and W-CREATE files the
   finding so the pattern is visible, not just the instance.
-- **Dead-end-law violations**: every terminal record must surface a reason
-  plus a question or reopen affordance (ni_master.terminal_surface). A
-  violation is a HIGH finding — the masking class, machine-detected.
+- **Served-row audit**: each card is checked as the board serves it (the row
+  ``GET /api/ni/board`` returns, not the internal flow slot). The checks are a
+  table (``ROW_CHECKS``). The dead-end law is one: a stopped card must show a
+  reason plus a question, a reopen or a way on. A violation is a HIGH finding
+  — the masking class, machine-detected.
 - **Failure clustering**: the same error class across several cards in a day
   is a class break candidate (a provider changed, a stage regressed) — one
   WARN finding names it once, edge-triggered by the open-finding dedupe.
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from . import ni, ni_flow, ni_master
@@ -94,19 +97,74 @@ def resolve_finding(conn, finding_id: str) -> bool:
     return row is not None
 
 
-def _is_dead_end(store: ni.NIStore, item_id: str, shell: bool) -> bool:
-    """Would the board leave this terminal card with no reason or way out?
+# ---- the served-row audit: checks over the rows the board actually returns ----------------------------------------
+#
+# The watcher reads each card the way the board's own route builds it (``ni_routes._board_row``, the function
+# ``GET /api/ni/board`` maps over the store), never the internal flow slot, so it sees exactly what the user's
+# screen is given. A check is a row of ``ROW_CHECKS``: a code, a severity, a host-free title and a predicate over one
+# served row. Adding an audit is adding a row; the pass, the finding and its dedupe stay the same. Cost: one full row
+# build (snapshot decrypt, render and brief fields) per card per NI tick, bounded by ``ni._MAX_ITEMS``; a row that
+# fails to build is logged and skipped by the audit only, never by failure clustering.
 
-    Audits what the board actually returns (``ni_flow.board_flow_field``), not
-    ``terminal_surface`` itself, which by construction always answers. A terminal
-    record hidden because a finalized card still renders its working payload is
-    deliberate, not a dead end.
-    """
-    assert store is not None and item_id, "args required"
-    view = ni_flow.board_flow_field(store, item_id)
-    if view is None:
-        return shell or not ni_flow._item_has_renderable_payload(store, item_id)
-    return not view.get("reason") or not (view.get("question") or view.get("reopen"))
+# flow actions that are a way forward for a stopped card (``delete`` is on every list and is not one)
+_WAY_ON_ACTIONS: frozenset[str] = frozenset({
+    "retry", "fix", "refine", "give_access", "answer_date", "allow_model", "use_local", "add_credential", "fill_param",
+    "pick_source",
+})
+
+
+def _terminal_flow(row: dict) -> dict | None:
+    flow = row.get("flow")
+    return flow if isinstance(flow, dict) and flow.get("state") in ni_master.TERMINAL_STATES else None
+
+
+def _row_dead_end(row: dict) -> bool:
+    """A card the board serves as stopped, with no reason or no way out. A terminal flow hidden because a finalized
+    card still renders its working payload is deliberate; a shell, or a card with nothing to render, is not."""
+    assert isinstance(row, dict), "a served row"
+    flow = _terminal_flow(row)
+    if flow is None:
+        return False
+    reason = flow.get("reason") or (flow.get("decline") or {}).get("line")
+    actions = set(flow.get("actions") or ())
+    return not reason or not (flow.get("question") or flow.get("reopen") or actions & _WAY_ON_ACTIONS)
+
+
+def _row_hidden_terminal(row: dict, record_terminal: bool) -> bool:
+    """The record is terminal but the board serves no flow and nothing to show: a blank card."""
+    assert isinstance(row, dict), "a served row"
+    return record_terminal and row.get("flow") is None and (bool(row.get("shell")) or row.get("payload") is None)
+
+
+def _row_no_actions(row: dict) -> bool:
+    """A served card with an empty action list: ``delete`` is on every list, so empty means the card cannot be removed."""
+    assert isinstance(row, dict), "a served row"
+    return row.get("actions") == []
+
+
+ROW_CHECKS: tuple[tuple[str, str, str, Callable[[dict], bool]], ...] = (
+    ("dead_end", "high", "a finished-with-failure card offers no reason or way out", _row_dead_end),
+    ("no_actions", "high", "the board serves a card with no actions at all", _row_no_actions),
+)
+
+
+def served_row(store: ni.NIStore, item: dict) -> dict:
+    """The row the board route returns for ``item``. Imported at call time: the routes import this module."""
+    assert store is not None and item, "store + item required"
+    from . import ni_routes
+    return ni_routes._board_row(store, item)
+
+
+def audit_row(store: ni.NIStore, item: dict, record: dict | None = None) -> list[tuple[str, str, str]]:
+    """Every check the served row of ``item`` fails, as ``(code, severity, title)``. ``record`` is the card's flow
+    record when it has one; a terminal record the board hides behind no payload counts as a dead end too."""
+    assert store is not None and item, "store + item required"
+    row = served_row(store, item)
+    failed = [(code, severity, title) for code, severity, title, check in ROW_CHECKS if check(row)]
+    terminal = bool(record) and str(record.get("state") or "") in ni_master.TERMINAL_STATES
+    if _row_hidden_terminal(row, terminal) and not any(code == "dead_end" for code, _, _ in failed):
+        failed.append(ROW_CHECKS[0][:3])
+    return failed
 
 
 def watch_create(store: ni.NIStore) -> dict:
@@ -130,7 +188,7 @@ def watch_create(store: ni.NIStore) -> dict:
     except Exception as exc:  # isolation: sweep failure never stops the pass
         log.warning("ni_watch: stale sweep failed: %s", exc)
 
-    # 2 + 3. Terminal-record audit: dead-end law + failure clustering.
+    # 2 + 3. Served-row audit (dead-end law and the other row checks) + failure clustering.
     cutoff = datetime.now(UTC) - timedelta(hours=_CLUSTER_WINDOW_HOURS)
     clusters: dict[str, int] = {}
     try:
@@ -141,18 +199,18 @@ def watch_create(store: ni.NIStore) -> dict:
     for item in items:  # bounded by ni._MAX_ITEMS
         try:
             record = ni_flow._flow_read(store, item["id"])
-            if record is None:
-                continue
-            state = str(record.get("state") or "")
+            try:
+                failed = audit_row(store, item, record)  # every card, as the board serves it
+            except Exception as exc:  # a row that cannot be built skips the audit, not the clustering below
+                log.warning("ni_watch: skipped the served-row audit for %s: %s", item.get("id"), type(exc).__name__)
+                failed = []
+            for _code, severity, title in failed:
+                if file_finding(conn, "create", severity, title, item_id=item["id"]):
+                    summary["filed"] += 1
+                    summary["high"] += severity == "high"
+            state = str((record or {}).get("state") or "")
             if state not in ni_master.TERMINAL_STATES:
                 continue
-            shell = bool(item["spec"].get("_shell"))
-            if _is_dead_end(store, item["id"], shell) and file_finding(
-                    conn, "create", "high",
-                    "a finished-with-failure card offers no reason or way out",
-                    item_id=item["id"]):
-                summary["filed"] += 1
-                summary["high"] += 1
             when = record.get("updated_at") or record.get("created_at")
             ts = None
             if isinstance(when, str):

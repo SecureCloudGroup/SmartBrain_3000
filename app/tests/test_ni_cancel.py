@@ -18,7 +18,6 @@ from smartbrain_3000 import ni_flow, ni_master
 def _v2_local(monkeypatch):
     from smartbrain_3000 import gateway as _gateway
     monkeypatch.setattr(_gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v2")
 
 
 @pytest.fixture()
@@ -51,16 +50,15 @@ def test_cancel_stops_a_running_flow_and_offers_retry(client) -> None:
     assert row["flow"]["reason"] == ni_master.reason_for("failed", "cancelled: stopped by you")
 
 
-def test_cancel_refuses_an_ended_flow_a_missing_item_and_v1(client, monkeypatch) -> None:
+def test_cancel_refuses_an_ended_flow_a_missing_item(client) -> None:
     item_id = _running(client)
     ni_flow._transition(client.app.state.ni, item_id, "failed", error="fetch: boom")
     assert client.post(f"/api/ni/items/{item_id}/flow/cancel").status_code == 409
     assert client.post("/api/ni/items/nope/flow/cancel").status_code == 404
     live = ni_flow.create_shell_item(client.app.state.ni, "another ask")
     ni_flow._transition(client.app.state.ni, live, "mapping")
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")
-    assert client.post(f"/api/ni/items/{live}/flow/cancel").status_code == 404  # v1 has no such route
-    assert ni_flow._flow_read(client.app.state.ni, live)["state"] == "mapping"
+    assert client.post(f"/api/ni/items/{live}/flow/cancel").status_code == 200
+    assert ni_flow._flow_read(client.app.state.ni, live)["state"] == "failed"
 
 
 def test_retry_waits_while_the_cancelled_worker_is_still_stopping(client, monkeypatch) -> None:

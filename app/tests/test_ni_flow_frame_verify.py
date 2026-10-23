@@ -134,12 +134,12 @@ def _row(key: str) -> dict:
 
 def _pick(store, monkeypatch, key: str, ask: str, intent: dict, rest: tuple = (),
           lib: _Lib | None = None) -> tuple[str, str]:
-    """A card paused at the pick with ``key``'s source first (and ``rest`` after it), tapped."""
+    """A card the auto-pick is trying, with ``key``'s source first (and ``rest`` after it)."""
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: lib or _Lib())
     item_id = ni_flow.create_shell_item(store, ask)
     rows = [_row(key), *rest]
     rec = ni_flow._make_record(ask, "source", intent=intent)
-    rec["_ranked_library"] = rows
+    rec["_ranked_library"], rec["_auto_picked"] = rows, True
     ni_flow._flow_write(store, item_id, rec)
     ni_flow.seal_library_pick(store, item_id, rows[0]["url"], rows[0])
     return item_id, rows[0]["url"]
@@ -210,33 +210,39 @@ def test_code_owns_the_frame_kind_and_the_window() -> None:
     assert "frame_kind" not in ni_flow._INTENT_PROMPT
 
 
-def test_locate_gets_the_intents_frame_at_every_call_site(monkeypatch) -> None:
+def test_locate_gets_the_intents_frame(monkeypatch) -> None:
     lib = _Lib(cands=[{**_row("open_meteo_charleston"), "label": "", "choice": False, "status": "ok",
                        "tier": "curated", "needs_key": None, "needs_contact": False, "frame_kind": None}])
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: lib)
+    monkeypatch.setattr(ni_flow, "_auto_continue", lambda store, item_id, *a: ni_flow._flow_read(store, item_id))
     store = _store()
     item_id = ni_flow.create_shell_item(store, "high in Denver on Saturday")
     intent = _intent("high in Denver on Saturday", "weather", ["high temperature"], "Denver")
     ni_flow._flow_write(store, item_id, ni_flow._make_record("high in Denver on Saturday", "source", intent=intent))
-    out = ni_flow._pause_source_pick(store, item_id, "high in Denver on Saturday", intent, _no_model)
+    out = ni_flow._auto_pick(store, item_id, "high in Denver on Saturday", intent, _no_model, _no_model)
     assert out["_ranked_library"][0]["scope"] == "place"
-    ni_flow.reenter_source_pick(store, item_id, "pick again")
     want = {"subject": "weather", "wants": ["high temperature"], "place": "Denver", "frame_kind": None}
-    assert lib.hints == [want, want]
+    assert lib.hints == [want]
 
 
-def test_no_library_row_goes_to_the_web(monkeypatch) -> None:
-    """Locate offering no row (whatever its skip reasons say) sends the pick to the web stage."""
+def test_no_library_row_goes_to_research_never_a_web_stage(monkeypatch) -> None:
+    """Locate offering no row (whatever its skip reasons say) hands the ask to research; with research off the card
+    ends declined. The retired web stage (a search with no model consent) never runs."""
+    from smartbrain_3000 import ni_research_flow
+
     class Unsure(_Lib):
         def candidates(self, ask, limit=3, hint=None):
             return [], ["not about what was asked"]
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: Unsure())
     went: list[str] = []
-    monkeypatch.setattr(ni_flow, "_pause_with_web", lambda *a, **k: went.append("web") or None)
+    monkeypatch.setattr(ni_research_flow, "fallback", lambda *a, **k: went.append("research") or None)
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", lambda: went.append("web") or None)
     store = _store()
     item_id = ni_flow.create_shell_item(store, "zork status")
-    ni_flow._pause_source_pick(store, item_id, "zork status", _intent("zork status", "zork", ["status"]), _no_model)
-    assert went == ["web"]
+    ni_flow._flow_write(store, item_id, ni_flow._make_record("zork status", "source"))
+    out = ni_flow._auto_pick(store, item_id, "zork status", _intent("zork status", "zork", ["status"]),
+                             _no_model, _no_model)
+    assert went == ["research"] and out["state"] == "declined"
 
 
 # ---- §32 pick: window, measure, question form ----------------------------------------------------------
@@ -487,7 +493,7 @@ def _nws_pick(store, monkeypatch, lookup):
     row = {**_row("nws_forecast_chs"), "url": TEMPLATE, "lookup": lookup, "scope": "place"}
     nxt = {**_row("open_meteo_charleston")}
     rec = ni_flow._make_record(ask, "source", intent=_intent(ask, "weather", ["forecast"], "Charleston"))
-    rec["_ranked_library"] = [row, nxt]
+    rec["_ranked_library"], rec["_auto_picked"] = [row, nxt], True
     ni_flow._flow_write(store, item_id, rec)
     ni_flow.seal_library_pick(store, item_id, TEMPLATE, rec["_ranked_library"][0])
     return item_id, ask
@@ -523,7 +529,8 @@ def test_a_lookup_that_leaves_the_host_moves_on(monkeypatch) -> None:
     item_id, ask = _nws_pick(store, monkeypatch, bad)
     out = ni_flow._sample_and_map(store, item_id, ask, _intent(ask, "weather", ["forecast"]), TEMPLATE, _no_model,
                                   lambda _u: pytest.fail("nothing is fetched off the source's host"))
-    assert out["state"] == "source" and "pick another source" in " | ".join(out["notes"])
+    assert out["state"] == "source" and "couldn't finish its address" in out["notes"][-1]
+    assert [r["source_id"] for r in out["_ranked_library"]] == [_row("open_meteo_charleston")["source_id"]]
 
 
 # ---- the page path (C9-C11) ------------------------------------------------------------------------------
@@ -549,6 +556,7 @@ def _page_model(reading: dict, serves: bool = True, wrong: list | None = None):
 
 
 def _web_pick(store, monkeypatch, case: dict, pages: list[str]) -> tuple[str, dict]:
+    """The paste box holding ``pages`` as its links (a decline's pages); the first is the one the user pasted."""
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", None)
     monkeypatch.setattr(nimod, "_clock", lambda: datetime.fromisoformat(case["now"]))
     by_url = {_MANIFEST[p]["url"]: p for p in pages}
@@ -580,24 +588,26 @@ def test_page_readings_through_the_flow(monkeypatch, case) -> None:
 @pytest.mark.parametrize(("rid", "reason"), [("reddit_title", "couldn't be read"),
                                              ("flightaware_modal", "couldn't be read"),
                                              ("aws_docs_heading", "")])
-def test_a_refused_page_reading_moves_to_the_next_page(monkeypatch, rid, reason) -> None:
+def test_a_refused_page_reading_ends_declined_with_the_reason(monkeypatch, rid, reason) -> None:
+    """The page the user pasted is the one source they named: a refused reading ends on the declined card saying
+    why, never on another page nobody tapped (S10 review M3)."""
     case = next(c for c in _READINGS if c["id"] == rid)
     store = _store()
     item_id, intent = _web_pick(store, monkeypatch, case, [case["page"], "slack_status"])
     url = _MANIFEST[case["page"]]["url"]
     out = ni_flow._build_page_card(store, item_id, case["ask"], intent, url, _page_model(case["preview"]))
-    assert out["state"] == "source"
-    assert [r["url"] for r in out["_ranked_search"]] == [_MANIFEST["slack_status"]["url"]]
-    assert "didn't show what you asked" in " | ".join(out["notes"]) and reason in " | ".join(out["notes"])
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "source_cant_answer"
+    line = out["_decline_card"]["line"]
+    assert "didn't show what you asked" in line and reason in line, line
 
 
-def test_an_unreadable_model_reply_tries_the_next_page(monkeypatch) -> None:
+def test_an_unreadable_model_reply_ends_declined(monkeypatch) -> None:
     case = next(c for c in _READINGS if c["id"] == "slack_ok")
     store = _store()
     item_id, intent = _web_pick(store, monkeypatch, case, [case["page"], "githubstatus"])
     out = ni_flow._build_page_card(store, item_id, case["ask"], intent, _MANIFEST[case["page"]]["url"],
                                    lambda _p: "not json at all")
-    assert out["state"] == "source" and len(out["_ranked_search"]) == 1
+    assert out["state"] == "declined" and store.get_item(item_id)["spec"].get("_shell") is True
 
 
 def test_the_judge_saying_it_does_not_serve_is_binding(monkeypatch) -> None:
@@ -606,7 +616,7 @@ def test_the_judge_saying_it_does_not_serve_is_binding(monkeypatch) -> None:
     item_id, intent = _web_pick(store, monkeypatch, case, [case["page"], "githubstatus"])
     out = ni_flow._build_page_card(store, item_id, case["ask"], intent, _MANIFEST[case["page"]]["url"],
                                    _page_model(case["preview"], serves=False))
-    assert out["state"] == "source"
+    assert out["state"] == "declined"
 
 
 def _graph(name: str) -> dict:

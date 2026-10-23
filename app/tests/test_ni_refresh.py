@@ -46,7 +46,6 @@ PATHS = {"title": "title", "mag": "mag"}
 @pytest.fixture(autouse=True)
 def _v2(monkeypatch):
     """The v2 flow with research on auto, a Library that offers the card's own source and an alternative."""
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v2")
     monkeypatch.setenv("SMARTBRAIN_NI_RESEARCH", "auto")
     monkeypatch.setattr(gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: FakeLibrary([_row(URL), _row(ALT)]))
@@ -335,14 +334,6 @@ def test_a_library_scope_consent_still_re_researches_with_the_web_switch_on(monk
     assert _work(store, conn, key, iid) and script.seen, "the researcher ran"
     assert all("web_search" not in {t["function"]["name"] for t in s["tools"]} for s in script.seen if s["tools"])
     assert _proposal(store, iid)["spec"]["source"]["url"] == ALT
-
-
-def test_the_v1_flow_never_re_researches(monkeypatch) -> None:
-    store, conn, key, iid = _seed(monkeypatch, tier="verified_endpoint")
-    _drift(monkeypatch, store, conn, key, iid)
-    script = _researcher()
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")
-    assert not _work(store, conn, key, iid) and script.seen == []
 
 
 def test_a_decline_is_honest_and_the_day_limit_holds(monkeypatch) -> None:

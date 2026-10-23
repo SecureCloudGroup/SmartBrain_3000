@@ -219,46 +219,30 @@ def test_rows_cell_time_rides_declared_zone(monkeypatch) -> None:
     assert time_ops and all(o.get("zone") == "zone" for o in time_ops)
 
 
-def test_pause_with_web_names_why_the_library_row_dropped() -> None:
-    """A silent-drop ("the Library has no source for this") used to bury the reason the previously
-    tapped Library row failed. ``_pause_with_web`` now reads ``drop_why`` and prefixes the pause
-    note with it so every move-on says why."""
+def test_every_move_on_names_why_the_source_dropped() -> None:
+    """A silent drop used to bury why the source failed. Both endings of a move-on say it: the auto-pick's next try
+    notes it, and a row the user named ends on the declined card with it as the card's one line."""
     import duckdb
 
     from smartbrain_3000 import db as dbmod
     from smartbrain_3000.secrets import gen_master_key
 
-    class _Service:
-        def search(self, _request):
-            return [{"title": "A page", "host": "example.org",
-                      "url": "https://example.org/a", "snippet": "x"}]
-
-    class _NoopEval:
-        def __call__(self, rows, _intent, _request):
-            return [{**r, "fitness": 1, "evidence": ["x"]} for r in rows]
-
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
     store = nimod.NIStore(conn, gen_master_key())
-    item_id = ni_flow.create_shell_item(store, "when is sunset in Denver")
-    ni_flow._flow_write(store, item_id,
-                        ni_flow._make_record("when is sunset in Denver", "source"))
-    import pytest
-    mp = pytest.MonkeyPatch()
-    try:
-        mp.setattr(ni_flow, "_resolve_search_service", lambda: _Service())
-        mp.setattr(ni_flow, "_s2_search_candidates", lambda _s, _r, _i: [
-            {"title": "A page", "host": "example.org", "url": "https://example.org/a",
-             "snippet": "x", "fitness": 1}])
-        mp.setattr(ni_flow, "_s2_evaluate", _NoopEval())
-        mp.setattr(ni_flow, "rank_web_rows", lambda _web, _r, _i, _cm: [0])
-        pause = ni_flow._pause_with_web(store, item_id, "when is sunset in Denver",
-                                         {}, lambda _p: "", drop_why="its next time has already passed")
-    finally:
-        mp.undo()
-    assert pause is not None
-    note = (pause.get("notes") or [""])[-1]
-    assert "its next time has already passed" in note, f"missing why in: {note!r}"
+    request, why = "when is sunset in Denver", "its next time has already passed"
+    sun = {"source_id": "sun", "url": "https://api.sunrise.example.org/json", "host": "api.sunrise.example.org",
+           "provider": "Sunrise", "title": "Sunrise", "answers": True}
+    other = {**sun, "source_id": "other", "url": "https://other.example.org/sun", "host": "other.example.org"}
+    for n, (auto, rows) in enumerate(((True, [sun, other]), (None, [sun]))):
+        item_id = ni_flow.create_shell_item(store, f"{request} ({n})")
+        ni_flow._flow_write(store, item_id, {**ni_flow._make_record(request, "source"),
+                                             "_ranked_library": rows, "_auto_picked": auto})
+        out = ni_flow._move_on(store, item_id, sun["url"], why)
+        if auto:
+            assert out["state"] == "source" and why in out["notes"][-1], out["notes"]
+        else:
+            assert out["state"] == "declined" and why in out["_decline_card"]["line"], out["_decline_card"]
 
 
 def test_a_want_that_names_the_sources_own_category_is_answered() -> None:

@@ -1827,10 +1827,6 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, value }),
     }),
-  niFlowReopen: (id: string) =>
-    req<{ ok: boolean; state: string }>(`/api/ni/items/${encodeURIComponent(id)}/flow/reopen`, {
-      method: "POST",
-    }),
   niFindings: () =>
     req<{ findings: NiFinding[] }>("/api/ni/findings"),
   niResolveFinding: (id: string) =>
@@ -1843,9 +1839,14 @@ export const api = {
     req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/flow/cancel`, {
       method: "POST",
     }),
-  // v2: one item's flow, awaiting-yes block and actions (the per-item poll). 404 under v1.
+  // v2: one item's flow, awaiting-yes block and actions (the per-item poll).
   niFlowGet: (id: string) =>
     req<NiFlowPoll>(`/api/ni/items/${encodeURIComponent(id)}/flow`),
+  // The pick_source action: a declined or failed shell re-enters the source pause (paste a link to the data).
+  niFlowReopen: (id: string) =>
+    req<{ ok: boolean; state: string }>(`/api/ni/items/${encodeURIComponent(id)}/flow/reopen`, {
+      method: "POST",
+    }),
   niFlowRetry: (id: string) =>
     req<{ id: string; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/retry`, {

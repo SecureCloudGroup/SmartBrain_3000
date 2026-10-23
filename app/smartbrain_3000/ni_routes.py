@@ -254,12 +254,11 @@ def _board_row(store: ni.NIStore, item: dict, *,
         row["brief"] = _brief_field(store, item)
     if ni.spec_renders(item["spec"]):  # Round 20 (B3a): ride only on a page-browser card
         row.update(_render_fields(item))
-    if ni_flow.flow_mode(store.conn) == "v2":  # v1 rows omit the key
-        flow = row["flow"]  # a live flow declares its own actions (it holds the record)
-        row["actions"] = list(flow["actions"]) if flow and "actions" in flow else \
-            ni_master.actions_for(
-                "", {}, shell=row["shell"], awaiting_yes=row["awaiting_yes"] is not None,
-                item_state=item["state"], has_payload=snap is not None)
+    flow = row["flow"]  # a live flow declares its own actions (it holds the record)
+    row["actions"] = list(flow["actions"]) if flow and "actions" in flow else \
+        ni_master.actions_for(
+            "", {}, shell=row["shell"], awaiting_yes=row["awaiting_yes"] is not None,
+            item_state=item["state"], has_payload=snap is not None)
     return row
 
 
@@ -498,11 +497,11 @@ def get_item_image(request: Request, item_id: str) -> Response:
 
 @router.get("/api/ni/items/{item_id}/flow")
 def get_item_flow(request: Request, item_id: str) -> dict:
-    """v2 per-item poll: ``{state, flow, awaiting_yes, actions}`` for ONE item (the board row's own
-    pieces, without the other items' payloads). Strictly read-only; 404 for an unknown item or under v1."""
+    """Per-item poll: ``{state, flow, awaiting_yes, actions}`` for ONE item (the board row's own
+    pieces, without the other items' payloads). Strictly read-only; 404 for an unknown item."""
     store = _store(request)
     item = store.get_item(item_id)
-    if item is None or ni_flow.flow_mode(store.conn) != "v2":
+    if item is None:
         raise HTTPException(status_code=404, detail="item not found")
     flow = ni_flow.board_flow_field(store, item_id, read_only=True)
     waiting = _awaiting_yes_of(item)
@@ -1091,6 +1090,8 @@ def intake(request: Request, body: IntakeIn) -> dict:
                                              allow_duplicate=body.allow_duplicate)
     except ValueError as exc:  # duplicate title — name the existing card
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    if source_url is not None:
+        ni_flow.mark_pasted(store, item_id, source_url)  # the user's own link: a Retry reads it again
     started = ni_flow.start_flow_worker(store, item_id, source_url=source_url)
     request.app.state.audit.append(
         "user", "ni_intake", "reviewed", "executed", True,
@@ -1123,26 +1124,17 @@ def retry_flow(request: Request, item_id: str) -> dict:
         raise HTTPException(
             status_code=409,
             detail=f"nothing to retry (flow state {state or 'none'!r})")
-    if ni_flow.flow_mode(store.conn) == "v2" and ni_flow.is_working(item_id):
+    if ni_flow.is_working(item_id):
         raise HTTPException(status_code=409, detail="still stopping the last build — try again in a moment")
     request_text = str(record.get("request") or item["spec"].get("goal") or "")
     if not request_text:
         raise HTTPException(status_code=409, detail="flow record lost the request")
-    source_url = record.get("source_url")
-    # A failed SAMPLING url should not silently re-ride a retry that the user
-    # intends as a fresh start — but a user-named URL was their consent, so it
-    # stays. Heuristic: keep the URL only when the failure was NOT at fetch.
-    error = str(record.get("error") or "")
-    # Consent guard (claims audit 2026-09-21): a record that died at the
-    # retired catalog's confirm pause carries a URL the user NEVER approved —
-    # a retry must not promote it to a consented fetch.
-    died_unapproved = "confirm" in error or bool(record.get("_recipe_id"))
-    keep_url = isinstance(source_url, str) and bool(source_url) and \
-        not error.startswith("fetch") and not died_unapproved
+    # Only the address the user named themselves (``_pasted``) rides a retry; the engine's own last address (a
+    # declined auto-pick's row, a retired confirm's URL) is never promoted to a consented fetch (S10 review M2).
     # Claims audit 2026-09-21: clear-then-spawn CRASHED the worker ("no flow
     # record") — Retry never worked; the mocked route test was the mask.
     # RE-SEED the record with the sealed request instead of clearing it.
-    started = ni_flow.reseed_for_retry(store, item_id, record, request_text, keep_url)
+    started = ni_flow.reseed_for_retry(store, item_id, record, request_text)
     request.app.state.audit.append(
         "user", "ni_intake_retry", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),
@@ -1153,12 +1145,12 @@ def retry_flow(request: Request, item_id: str) -> dict:
 
 @router.post("/api/ni/items/{item_id}/flow/cancel")
 def cancel_item_flow(request: Request, item_id: str) -> dict:
-    """v2 Cancel: stop the card's running flow (cooperative; the worker finishes its current fetch and
-    seals nothing). Desktop-local, audited. 404 under v1 and for an unknown item; 409 unless a flow is
+    """Cancel: stop the card's running flow (cooperative; the worker finishes its current fetch and
+    seals nothing). Desktop-local, audited. 404 for an unknown item; 409 unless a flow is
     running (not ready, not already ended)."""
     _require_desktop_local(request)
     store = _store(request)
-    if ni_flow.flow_mode(store.conn) != "v2" or store.get_item(item_id) is None:
+    if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
     if not ni_flow.cancel_flow(store, item_id):
         raise HTTPException(status_code=409, detail="nothing is building on this card")
@@ -1389,9 +1381,9 @@ def _answer_model_consent(request: Request, store, item_id: str, stamped: dict,
 
 @router.post("/api/ni/items/{item_id}/flow/reopen")
 def reopen_flow_pick(request: Request, item_id: str) -> dict:
-    """G1: a terminally failed SHELL re-enters the source pick — the "pick a
-    different source" way out the no-dead-end law promises. 409 for finalized
-    cards (Fix/remap owns those) and non-terminal flows.
+    """The ``pick_source`` action: a declined or failed SHELL re-enters the source pause, where the user pastes a
+    link to the data (the "paste a link" way back a decline promises). 409 for finished cards (Fix owns those) and
+    for flows that are not over, or whose card does not offer the action.
     """
     _require_desktop_local(request)
     store = _store(request)
@@ -1399,14 +1391,12 @@ def reopen_flow_pick(request: Request, item_id: str) -> dict:
     if item is None:
         raise HTTPException(status_code=404, detail="item not found")
     if not item["spec"].get("_shell"):
-        raise HTTPException(status_code=409,
-                            detail="finished cards reopen via Fix, not the source pick")
-    record = ni_flow._flow_read(store, item_id)
-    state = str((record or {}).get("state") or "")
-    if record is None or state not in ni_master.TERMINAL_STATES:
-        raise HTTPException(status_code=409,
-                            detail=f"nothing to reopen (flow state {state or 'none'!r})")
-    ni_flow.reenter_source_pick(store, item_id, "user reopened the source pick")
+        raise HTTPException(status_code=409, detail="finished cards reopen via Fix, not the source pick")
+    flow = ni_flow.board_flow_field(store, item_id, read_only=True)
+    if not flow or "pick_source" not in (flow.get("actions") or []):
+        state = str((flow or {}).get("state") or "")
+        raise HTTPException(status_code=409, detail=f"nothing to reopen (flow state {state or 'none'!r})")
+    ni_flow.reenter_source_pick(store, item_id, "you reopened the card to paste a link to the data")
     request.app.state.audit.append(
         "user", "ni_flow_reopen", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id}),

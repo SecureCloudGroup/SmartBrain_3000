@@ -492,12 +492,23 @@ def test_candidates_for_the_card_flow(lib) -> None:
     assert [c["source_id"] for c in coins] == ["coingecko-price", "keyed-quote"]
     assert coins[0]["needs_key"] is None and coins[1]["needs_key"]["in"] == "query"
     nothing, _ = lib.candidates("tides in Denver CO")
-    assert nothing == []  # no station within range: the flow falls through to web search, honestly
+    assert nothing == []  # no station within range: the flow hands the ask to research, honestly
 
 
-# --- the flow: Library candidates on the pick card, and a tap is a Yes (R6) ------------------------
+# --- the flow: the auto-pick seals the Library's rows, and a vote is sealed at rest (R6) ----------------------
 
-def test_flow_pick_pause_seals_library_candidates_and_a_tap_records_yes(tmp_path, pack_bytes, monkeypatch) -> None:
+def _auto_pick(store, monkeypatch, request: str) -> dict:
+    """The v2 auto-pick for ``request``, stopped before its first fetch: the rows it sealed."""
+    from smartbrain_3000 import ni_flow
+    monkeypatch.setattr(ni_flow, "_auto_continue", lambda s, item_id, *a: ni_flow._flow_read(s, item_id))
+    item_id = ni_flow.create_shell_item(store, request)
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(request, "source"))
+    never = lambda *_a: (_ for _ in ()).throw(AssertionError("nothing is fetched or asked here"))
+    return ni_flow._auto_pick(store, item_id, request, {"kind": "external_data"}, never, never)
+
+
+def test_the_auto_pick_seals_the_nearest_station_and_a_vote_is_sealed_at_rest(tmp_path, pack_bytes,
+                                                                               monkeypatch) -> None:
     from smartbrain_3000 import ni_flow
     idx, _ = _index(tmp_path, pack_bytes)
     idx.install()
@@ -505,16 +516,9 @@ def test_flow_pick_pause_seals_library_candidates_and_a_tap_records_yes(tmp_path
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
     store = ni.NIStore(conn, gen_master_key())
-    item_id = ni_flow.create_shell_item(store, "tides for Melbourne FL")
-    ni_flow._flow_write(store, item_id, ni_flow._make_record("tides for Melbourne FL", "source"))
-    ni_flow._pause_source_pick(store, item_id, "tides for Melbourne FL", {"kind": "external_data"},
-                               call_model=lambda _p: "{}")
-    rec = ni_flow._flow_read(store, item_id)
-    assert rec["error"] == ni_flow.AWAITING_SOURCE_PICK and rec["_ranked_library"][0]["source_id"] == "coops-tide-hilo"
-    field = ni_flow.board_flow_field(store, item_id)
-    sug = field["suggestions"][0]
-    assert sug["kind"] == "library" and "station=872" in sug["url"]
-    assert any("Melbourne Causeway" in e for e in sug["evidence"])
+    rec = _auto_pick(store, monkeypatch, "tides for Melbourne FL")
+    assert rec["_auto_picked"] and rec["_ranked_library"][0]["source_id"] == "coops-tide-hilo"
+    assert "station=872" in rec["_ranked_library"][0]["url"]
     local = library_index.LocalSources(store)
     assert local.record_yes("coops-tide-hilo") == 1 and local.record_yes("coops-tide-hilo") == 2
     raw = conn.execute("SELECT ciphertext FROM ni_snapshots WHERE item_id = ? AND slot = 'votes'",
@@ -555,28 +559,14 @@ def test_the_library_answers_first_and_web_search_never_runs(tmp_path, pack_byte
     store = _flow_store(tmp_path, pack_bytes, monkeypatch)
     svc = _NoSearch()
     monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", lambda: svc)
-    item_id = ni_flow.create_shell_item(store, "tides for Melbourne FL")
-    ni_flow._pause_source_pick(store, item_id, "tides for Melbourne FL", {"kind": "external_data"},
-                               call_model=lambda _p: "{}")
-    rec = ni_flow._flow_read(store, item_id)
+    rec = _auto_pick(store, monkeypatch, "tides for Melbourne FL")
     assert rec["_ranked_library"] and not rec.get("_ranked_search")
     assert svc.queries == []
 
 
-def test_a_declined_or_refined_source_repicks_from_the_library(tmp_path, pack_bytes, monkeypatch) -> None:
-    """Re-entering the pick (a note asking for another source) offers the Library's rows again."""
-    from smartbrain_3000 import ni_flow
-    store = _flow_store(tmp_path, pack_bytes, monkeypatch)
-    item_id = ni_flow.create_shell_item(store, "tides for Melbourne FL")
-    ni_flow._flow_write(store, item_id, ni_flow._make_record("tides for Melbourne FL", "failed"))
-    ni_flow.reenter_source_pick(store, item_id, "pick again")
-    field = ni_flow.board_flow_field(store, item_id)
-    assert field["state"] == "source" and field["suggestions"][0]["kind"] == "library"
-
-
-def test_a_retired_catalog_confirm_pause_relands_as_a_library_pick(tmp_path, pack_bytes, monkeypatch) -> None:
+def test_a_retired_catalog_confirm_pause_relands_as_the_paste_box(tmp_path, pack_bytes, monkeypatch) -> None:
     """A card left waiting at the retired built-in catalog's confirm step after an upgrade
-    becomes a normal pick card with the Library's sources — never a dead state."""
+    becomes the paste box with an honest note — never a dead state, and nothing it can't do."""
     from smartbrain_3000 import ni_flow
     store = _flow_store(tmp_path, pack_bytes, monkeypatch)
     item_id = ni_flow.create_shell_item(store, "tides for Melbourne FL")
@@ -586,8 +576,10 @@ def test_a_retired_catalog_confirm_pause_relands_as_a_library_pick(tmp_path, pac
     store.write_snapshot(item_id, "flow", record, ok=True)  # as a pre-Library build wrote it
     field = ni_flow.board_flow_field(store, item_id)
     assert field["state"] == "source" and field["error"] == ni_flow.AWAITING_SOURCE_PICK
-    assert field["suggestions"][0]["kind"] == "library"
-    assert ni_flow._flow_read(store, item_id)["state"] == "source"
+    assert field["suggestions"] == []
+    rec = ni_flow._flow_read(store, item_id)
+    assert rec["state"] == "source" and rec["notes"][-1] == ni_flow._RETIRED_NOTE
+    assert not rec.get("_recipe_id") and not rec.get("source_url"), "nothing of the retired step rides on"
 
 
 def test_classify_the_longest_keyword_wins(tmp_path) -> None:

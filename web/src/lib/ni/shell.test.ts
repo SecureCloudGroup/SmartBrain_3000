@@ -21,7 +21,7 @@ function item(overrides: Partial<NiBoardItem>): NiBoardItem {
     payload_at: "2026-10-07T12:00:00Z",
     interpreted: false,
     template_update: false, template_gone: false, needs_credentials: [], needs_params: [], l2_proposal: false,
-    c2_ok: false, awaiting_yes: null, shell: false, born: "", flow: null, payload_ok: null,
+    c2_ok: false, awaiting_yes: null, shell: false, born: "", flow: null, payload_ok: null, actions: [],
     ...overrides,
   };
 }

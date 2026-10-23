@@ -179,17 +179,15 @@ def test_waiting_is_its_own_column_not_links() -> None:
     assert ne.score_ask({"outcome": "source"}, _gold())["cls"] == "links", "old source stays links"
 
 
-def test_flow_flag_sets_the_env_for_the_run(monkeypatch) -> None:
+def test_flow_flag_is_an_error(monkeypatch) -> None:
     import argparse
 
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "x")  # records the original so teardown restores it
-    monkeypatch.delenv("SMARTBRAIN_NI_FLOW")
-    ne._set_flow(argparse.Namespace(flow=None))
-    assert "SMARTBRAIN_NI_FLOW" not in os.environ
-    ne._set_flow(argparse.Namespace(flow="v2"))
-    assert os.environ["SMARTBRAIN_NI_FLOW"] == "v2"
-    with pytest.raises(SystemExit):  # argparse rejects anything but v1 / v2
-        ne.main(["replay", "--cassette-dir", str(_EVAL), "--flow", "v3"])
+    ne._set_flow(argparse.Namespace(flow=None))  # no flag: fine, v2 is the only flow
+    for value in ("v1", "v2", "v3"):
+        with pytest.raises(SystemExit):
+            ne._set_flow(argparse.Namespace(flow=value))
+        with pytest.raises(SystemExit):
+            ne.main(["replay", "--cassette-dir", str(_EVAL), "--flow", value])
 
 
 # --- cassette mechanics ---------------------------------------------------------------------------
@@ -269,7 +267,7 @@ def test_replaying_the_ci_cassette_drives_the_real_flow_and_scores_it() -> None:
     # CI4 ("countdown to Christmas", no date) ends on the card's question "when is it?", which the user answers: it
     # waits. It scored "declined" while every unsupported terminal read as one; since the declined card is its own
     # state, a terminal that holds a question is "waiting", and a decline the gold expects would score right.
-    assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "waiting", "CI5": "links",
+    assert got == {"CI1": "right", "CI2": "partial", "CI3": "wrong", "CI4": "waiting", "CI5": "declined",
                    "CI6": "right", "CI7": "right", "CI8": "right",
                    "CI9": "right", "CI10": "right"}, got  # CI9 (new): the gold expects a decline and the flow ends on the declined card
     assert (table["ALL"]["n"], table["ALL"]["right"], table["ALL"]["decl_ok"]) == (10, 6, 1), table["ALL"]

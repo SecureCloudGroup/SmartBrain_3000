@@ -222,7 +222,7 @@ def test_engine_mode_is_an_exclusive_mode_flag() -> None:
 def test_engine_gate_grades_each_row_against_registry_expected_state() -> None:
     """engine_gate_pass grades every case against its registry expected_state.
 
-    Per ni-cases.md §B: BY-DESIGN ``failed``/``source`` rows PASS on state
+    Per the case registry (fixtures/ni_flow/cases.json): BY-DESIGN ``failed``/``source`` rows PASS on state
     match alone (their honest outcome IS the feature). ``ready`` /
     ``awaiting_params`` / ``awaiting_credential`` rows additionally require
     the C2 frozen-URL invariant. ``refuse``-class rows accept either

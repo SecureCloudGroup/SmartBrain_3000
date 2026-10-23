@@ -252,7 +252,9 @@ def test_a_count_the_model_spells_out_for_a_list_in_the_sample_is_accepted() -> 
     assert reply == {"storms": "activeStorms"} and offered["activeStorms"]["count"] is True
 
 
-def test_when_every_library_source_refuses_the_card_searches_the_web(monkeypatch) -> None:
+def test_when_the_one_library_source_refuses_the_card_declines_and_never_searches(monkeypatch) -> None:
+    """Field 2026-09-28 (ESPN refused): the card used to search the web. A refusal of the one source the card held
+    now ends on the declined card with the reason; the retired web stage never runs (S10 review M3)."""
     store = _store()
     item_id = ni_flow.create_shell_item(store, "Yankees score")
     record = ni_flow._make_record("Yankees score", "sampling")
@@ -264,14 +266,11 @@ def test_when_every_library_source_refuses_the_card_searches_the_web(monkeypatch
     def refused(url):
         raise netguard.FetchError("upstream returned HTTP 403", status=403)
 
-    calls = []
-    monkeypatch.setattr(ni_flow, "_pause_with_web",
-                        lambda s, i, r, it, cm, drop_why=None, links=None: calls.append(r) or ni_flow._transition(
-                            s, i, "source", error=ni_flow.AWAITING_SOURCE_PICK, _ranked_search=[
-                                {"title": "MLB", "host": "mlb.com", "url": "https://www.mlb.com/yankees", "evidence": []}]))
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", lambda: (_ for _ in ()).throw(AssertionError("searched")))
     out = ni_flow._sample_and_map(store, item_id, "Yankees score", {"wants": ["score"]},
                                   "https://site.api.espn.com/x", lambda p: "{}", refused)
-    assert calls == ["Yankees score"] and out["_ranked_search"][0]["host"] == "mlb.com"
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "source_cant_answer"
+    assert out["_decline_card"]["line"] == "site.api.espn.com refused SmartBrain's request"
 
 
 def test_a_card_with_nothing_to_show_is_not_built() -> None:

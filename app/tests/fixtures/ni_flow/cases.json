@@ -443,7 +443,7 @@
   {
     "id": "no-source-pause",
     "request": "track my custom sensor feed please",
-    "dimension": "no URL, no recipe -> AWAITING_SOURCE_PICK pause",
+    "dimension": "no URL, no recipe -> declined (no_answering_source)",
     "url": null,
     "fixture": null,
     "fields": {
@@ -451,7 +451,7 @@
     },
     "klass": "value",
     "expected": {
-      "engine_state": "source"
+      "engine_state": "declined"
     },
     "intent": {
       "kind": "external_data",

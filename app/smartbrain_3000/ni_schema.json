@@ -19,6 +19,7 @@
         "give_access",
         "keep",
         "pause",
+        "pick_source",
         "refine",
         "resume",
         "retry",
@@ -267,9 +268,10 @@
         "payload_slot",
         "payload_at",
         "payload_ok",
-        "payload"
+        "payload",
+        "actions"
       ],
-      "description": "One row of GET /api/ni/board. `actions` is present only under the v2 flow; `payload` is the bound scene."
+      "description": "One row of GET /api/ni/board. `actions` lists what the card offers; `payload` is the bound scene."
     },
     "BriefState": {
       "type": "object",
@@ -617,7 +619,7 @@
         "awaiting_yes",
         "actions"
       ],
-      "description": "GET /api/ni/items/{id}/flow (v2): one item's flow fields."
+      "description": "GET /api/ni/items/{id}/flow: one item's flow fields."
     },
     "FlowProgress": {
       "type": "object",
