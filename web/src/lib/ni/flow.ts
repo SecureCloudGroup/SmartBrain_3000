@@ -12,13 +12,20 @@ import type { NiAwaitingYes, NiItemFlow, NiSuggestion } from "$lib/api";
 import { browserWaitLabel } from "$lib/ni/browser";
 import { ACTION_KINDS } from "$lib/ni/types.gen";
 
+/** The flow states in which nothing is building: the flow is over (a fault, an answerable stop, or the honest
+ *  decline). Mirrors ni_master.TERMINAL_STATES; a state this bundle does not know is never terminal. */
+export const TERMINAL_FLOW_STATES: ReadonlySet<string> = new Set(["failed", "unsupported", "declined"]);
+
+/** What a declined card says first when the backend's own headline is missing (it always sends one). */
+export const DECLINED_HEADLINE = "I couldn't build a reliable card for this";
+
 // Marker the backend sets on flow.error when a `source` state is parked pending the
 // user picking between candidate sources (a resume_ni_flow approval will be parked
 // on the pending list). Kept as a constant so a rename shows up at every call site.
 export const AWAITING_SOURCE_PICK = "awaiting_pick";
 
 /** Return the calm, human sentence for this flow's current stage, or "" for the
- *  terminal error states (unsupported/failed — the caller composes those with
+ *  terminal error states (unsupported/failed/declined — the caller composes those with
  *  friendlyErrorClass). Returns "" for a null flow too so the card body falls
  *  through to its existing payload / first-run rendering. */
 export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
@@ -34,10 +41,10 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
   const s = flow.state;
   // Round 20 (B3a): a build waiting for the page browser's first install or check says so,
   // with its percentage, in place of its stage.
-  const wait = s === "failed" || s === "unsupported" ? "" : browserWaitLabel(flow);
+  const wait = TERMINAL_FLOW_STATES.has(s) ? "" : browserWaitLabel(flow);
   if (wait) return wait;
   // v2: the backend's own progress label (terminal flows carry none and fall through).
-  if (flow.progress?.label && s !== "failed" && s !== "unsupported") return flow.progress.label;
+  if (flow.progress?.label && !TERMINAL_FLOW_STATES.has(s)) return flow.progress.label;
   if (s === "intent") return "Understanding your request…";
   if (s === "source") {
     return flow.error === AWAITING_SOURCE_PICK
@@ -51,7 +58,7 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
   if (s === "awaiting_credential") return "Needs your API key";
   if (s === "awaiting_params") return "Needs a detail from you";
   if (s === "ready") return "Building the card…";
-  // failed / unsupported: caller renders friendlyErrorClass(flow.error).
+  // failed / unsupported: caller renders friendlyErrorClass(flow.error); declined: the DeclinedCard.
   return "";
 }
 
@@ -121,7 +128,7 @@ export function isFlowActive(flow: NiItemFlow | null | undefined): boolean {
     "isFlowActive: state is string when flow present",
   );
   if (!flow) return false;
-  return flow.state !== "failed" && flow.state !== "unsupported";
+  return !TERMINAL_FLOW_STATES.has(flow.state);
 }
 
 /** Where a card waiting for the user's YES got its reading (ruling 2026-10-04), as the card
@@ -198,4 +205,21 @@ export function linkWhat(link: NiSuggestion): string {
   console.assert(typeof link.host === "string", "linkWhat: host is string");
   const what = link.found === "dataset" ? "dataset" : "web page";
   return link.host.trim() ? `${link.host.trim()} · ${what}` : what;
+}
+
+/** The links a declined card shows: https only, one per address, at most three (the backend already cleans
+ *  them; this is the client's own guard, so a link it would not open is never rendered). */
+export function declinedLinks(decline: { links?: Array<{ url: string; title: string; host: string }> } | null | undefined):
+  Array<{ url: string; title: string; host: string }> {
+  console.assert(decline === null || decline === undefined || typeof decline === "object", "declinedLinks: object");
+  const seen = new Set<string>();
+  const out: Array<{ url: string; title: string; host: string }> = [];
+  for (const link of decline?.links ?? []) {
+    if (typeof link?.url !== "string" || !/^https:\/\//.test(link.url) || seen.has(link.url)) continue;
+    seen.add(link.url);
+    out.push(link);
+    if (out.length === 3) break;
+  }
+  console.assert(out.length <= 3, "declinedLinks: at most three");
+  return out;
 }

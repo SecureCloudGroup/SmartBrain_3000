@@ -130,7 +130,7 @@ log = logging.getLogger("smartbrain.ni.flow")
 
 FLOW_STATES: frozenset[str] = frozenset({
     "intent", "source", "awaiting_access", "sampling", "mapping", "assembling",
-    "awaiting_credential", "awaiting_params", "ready", "unsupported", "failed",
+    "awaiting_credential", "awaiting_params", "ready", "unsupported", "failed", "declined",
 })
 # C2/H3 (audit 2026-09-13): host-free error MARKER the frontend labels
 # ("Waiting for you to pick a source"). Sealed alongside the paused ``source``
@@ -152,7 +152,7 @@ _BORN_KEY = "_born"
 # H2 (audit 2026-09-13): the terminal flow states — a `flow` slot in one of
 # these must never mask a renderable payload, and each is a clear path (remap /
 # confirm / resume / next successful anything overwrites).
-_TERMINAL_STATES: frozenset[str] = frozenset({"failed", "unsupported"})
+_TERMINAL_STATES: frozenset[str] = ni_master.TERMINAL_STATES
 # M3 (audit 2026-09-13): a non-terminal flow older than this at unlock time is
 # a stranded shell (the worker died between ticks). The boot-time sweep in
 # ``sweep_stranded_flows`` fails those to ``failed(stale)`` so the shell never
@@ -328,11 +328,13 @@ def _transition(store: ni.NIStore, item_id: str, state: str, **fields: Any) -> d
     for key, value in fields.items():
         if key.startswith("_"):
             record[key] = value
+    if state != "declined":
+        record.pop("_decline_card", None)  # a decline's seal never outlives the declined state (reopen, retry)
     # G1 (rounds 7-8): the append-only ledger rides the record — one hook here
     # covers every stage entry and every terminal, and ni_master derives card
     # copy and watcher verdicts from it (single-writer law).
     outcome = "entered"
-    if state in ("failed", "unsupported"):
+    if state in _TERMINAL_STATES:
         outcome = state
     ni_master.ledger_append(
         record, state, outcome,
@@ -3905,8 +3907,8 @@ def _handle_computed(store: ni.NIStore, item_id: str, request: str,
     """
     assert store is not None and isinstance(intent, dict), "args required"
     if not _has_source_type("computed"):
-        return _terminate_unsupported(store, item_id,
-                                       "computed-only requests need the computed source (not enabled)")
+        return _end(store, item_id, "ask_unsupported",
+                    "computed-only requests need the computed source (not enabled)")
     supplied = None
     record_now = _flow_read(store, item_id) or {}
     if isinstance(record_now.get("_supplied"), dict):
@@ -4010,7 +4012,7 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     Consent posture: the only fetch before the user's Keep is of an installed Library row that declares
     its answers, through the same netguard path as a tap; a row needing a key or contact email goes last
     and asks for it on the card. Nothing recurs until Keep (the card is held, ``_built_from.path`` auto).
-    No buildable row: the existing honest stop (links; ruling 2026-10-05)."""
+    No buildable row: research, then the declined card (``_end``; the Library's link pages ride it; ruling 2026-10-05)."""
     assert store is not None and item_id, "store + id required"
     from . import ni_compare_flow  # local: it builds on this module's helpers
     compared = ni_compare_flow.try_compare(store, item_id, request, intent, do_fetch)  # S7: an ask that compares things
@@ -4023,7 +4025,10 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
         found = ni_research_flow.fallback(store, item_id, request, intent)
         if found is not None:
             return found
-        return _pause_source_pick(store, item_id, request, intent, call_model, rows=rows, web=False)
+        # research is off, unconsented or has no model route (a run that declined came back above as the declined
+        # card, one that faulted as the failed card): nothing here answers this ask. The honest end is the declined card, with the Library's pages as links.
+        return _end(store, item_id, "no_source_research_off", "",
+                    links=[{"title": r.get("title"), "url": r.get("page")} for r in rows if r.get("answers") is False])
     ordered = [r for r in buildable if not _row_needs_access(r)] + [r for r in buildable if _row_needs_access(r)]
     assert len(ordered) == len(buildable), "a partition loses no row"
     ordered += [r for r in rows if r not in buildable]  # the link rows ride behind, for the honest stop
@@ -4070,7 +4075,10 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
         if found is not None:
             return found
         rec = _flow_read(store, item_id) or rec
-    rec = {**rec, "_auto_picked": None}  # an honest stop is not an auto build
+        if rec.get("state") == "source" and not rec.get("_cancel") and not _buildable(rec.get("_ranked_library")):
+            # every row failed and the researcher did not answer: the declined card, with the pages the pick held
+            return _end(store, item_id, "no_source_rows_exhausted", "None of the sources I tried could answer this.")
+    rec = {**rec, "_auto_picked": None}  # a stop that is not a decline is not an auto build
     _flow_write(store, item_id, rec)
     return rec
 
@@ -5181,7 +5189,7 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
     corpus, and ≤3 web pages seal — as links, next to the Library's. Nothing
     found, providers unwired, or total failure → the plain pause (paste a URL),
     never a failed flow. ``web=False`` (v2 auto-pick): the user's consent was for a Library source, so no
-    search runs and no result page is read: the honest stop lists the Library's links only.
+    search runs and no result page is read (v1 and a reopened pick only: the v2 auto-pick ends on the declined card).
     """
     library = _without_declined(store, item_id,
                                 _library_candidates(request, intent) if rows is None else rows)
@@ -5569,8 +5577,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         why = ("didn't fit its declared answers" if _library_answers(str(live.get("_library_source") or ""))
                else "doesn't declare its answers")
         moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
-        return moved if moved is not None else _terminate_unsupported(
-            store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
+        return moved if moved is not None else _end(
+            store, item_id, "source_cant_answer", f"{live.get('_library_provider') or 'the source'} {why}")
     if answered is not None and answered.get("nothing"):
         # the source's declared answers were verified on a real response; finding none of them now
         # means it holds nothing for this ask today (no listed games) — the next source, not a model
@@ -5578,8 +5586,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # can't show the asked window or measure has nothing either: never its headline instead.
         why = answered.get("why") or "has nothing for this right now"
         moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
-        return moved if moved is not None else _terminate_unsupported(
-            store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
+        return moved if moved is not None else _end(
+            store, item_id, "source_cant_answer", f"{live.get('_library_provider') or 'the source'} {why}")
     if answered is not None:
         url = str(answered.get("url") or url)  # Round 20 (Q3b): the address the asked stretch rebound
         frame = {**_frame_of(request, intent), "window": answered.get("window")}
@@ -5596,8 +5604,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             # C8: it can't answer this ask — the next source, the web, or an honest gap; never a handoff
             why = "doesn't answer this (" + "; ".join(reasons)[:140] + ")"
             moved = _move_on(store, item_id, pick_url, why, request, intent, call_model)
-            return moved if moved is not None else _terminate_unsupported(
-                store, item_id, f"{live.get('_library_provider') or 'the source'} {why}")
+            return moved if moved is not None else _end(
+                store, item_id, "source_cant_answer", f"{live.get('_library_provider') or 'the source'} {why}")
         note = "built from the Library's declared answers: " + ", ".join(answered["labels"])
         if answered.get("missing"):
             note += "; not reported by this source right now: " + ", ".join(answered["missing"])
@@ -5747,8 +5755,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                                               intent, call_model, research=picked)
         if moved is not None:
             return moved
-        return _terminate_unsupported(
-            store, item_id,
+        return _end(
+            store, item_id, "source_cant_answer",
             f"{(live or {}).get('_library_provider') or 'the source'} {why}")
     # F6-C (blind-5, 2026-10-04): a mapping-path list whose rows name US states
     # OTHER than the asked place but never the asked one is the wrong source
@@ -5760,8 +5768,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                                              intent, call_model, research=picked)
         if moved is not None:
             return moved
-        return _terminate_unsupported(
-            store, item_id,
+        return _end(
+            store, item_id, "source_cant_answer",
             f"{(live or {}).get('_library_provider') or 'the source'} {why}")
     return _handoff(store, item_id, request, intent, url, built, fields, klass,
                     converted=converted, judge=judge, degrade_note=degrade_note,
@@ -6530,7 +6538,7 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     # N things never lands on a card that shows fewer than N, each with its own value. An honest decline instead.
     why = ni_compare.refusal(spec, preview)
     if why is not None:
-        return _terminate_unsupported(store, item_id, why)
+        return _end(store, item_id, "compare_refused_at_build", why)
     if built_from is not None:
         spec["_built_from"] = built_from
     if render is not None and render.get("feeds"):
@@ -6734,6 +6742,35 @@ def _terminate_unsupported(store: ni.NIStore, item_id: str, reason: str,
         assert question.get("kind") in ni_master.QUESTION_KINDS, "unknown question kind"
         fields["_question"] = question
     _transition(store, item_id, "unsupported", **fields)
+    return _flow_read(store, item_id) or {}
+
+
+def _pick_links(record: dict) -> list[dict]:
+    """The pages a stopped pick holds as links, for a declined card: the Library's sources without declared answers
+    (their page), then the web pages the search found. The same rows ``board_flow_field`` lists as links."""
+    assert isinstance(record, dict), "record required"
+    rows = [{"title": r.get("title"), "url": r.get("page")}
+            for r in record.get("_ranked_library") or [] if isinstance(r, dict) and r.get("answers") is False]
+    rows += [{"title": r.get("title"), "url": r.get("url")}
+             for r in record.get("_ranked_search") or [] if isinstance(r, dict)]
+    return ni_master.clean_links([r for r in rows if r["url"]])
+
+
+def _end(store: ni.NIStore, item_id: str, ending: str, reason: str, *, links: list | None = None) -> dict:
+    """The one writer of a non-card ending that can decline. ``ending`` is a row of ``ni_master.ENDINGS``: when its
+    state is ``declined`` the v2 flow seals the honest declined card (a closed code, ``reason`` as the one line,
+    up to three links); v1 keeps its ``unsupported(reason)`` unchanged. The table decides, not the caller."""
+    assert store is not None and item_id and isinstance(reason, str), "args required"
+    state, code = ni_master.ENDINGS[ending]
+    assert state == "declined" and code in ni_master.DECLINE_REASONS, "an ending that declines"
+    if not _is_v2(store):
+        return _terminate_unsupported(store, item_id, reason)
+    record = _flow_read(store, item_id) or {}
+    seal = ni_master.seal_decline(ending, reason, _pick_links(record) if links is None else links)
+    # the rows a stopped pick held went into the seal; the card never lists them again, and nothing can tap one
+    _transition(store, item_id, "declined", error=f"{seal['reason']}: {seal['line']}"[:_MAX_ERROR],
+                note=f"declined ({seal['reason']}): {seal['line']}", _decline_card=seal, _auto_picked=None,
+                _ranked_library=None, _ranked_search=None, _question=None, _try=None)
     return _flow_read(store, item_id) or {}
 
 

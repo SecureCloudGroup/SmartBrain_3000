@@ -10,7 +10,7 @@ named by the user's words. Nothing leaves the device that a single Library card 
 request per thing, held for the user's Keep.
 
 When no Library source builds it, the researcher gets the ask (it may propose a compare, ``propose_compare``); when
-nothing builds, the flow ends in an honest decline ("can't compare these yet" and why), never a one-thing card.
+nothing builds, the flow ends in the declined card ("can't compare these yet" and why), never a one-thing card.
 """
 from __future__ import annotations
 
@@ -34,11 +34,11 @@ _MAX_REASONS = 3
 
 
 def decline(store: ni.NIStore, item_id: str, why: str) -> dict:
-    """The honest end of a compare ask nothing could build: ``unsupported`` with "can't compare these yet" and why."""
+    """The honest end of a compare ask nothing could build: the declined card ("can't compare these yet" and why)."""
     assert store is not None and item_id, "args required"
     assert isinstance(why, str), "a reason"
     text = why if why.startswith("can't compare") else f"can't compare these yet: {why}"
-    return ni_flow._terminate_unsupported(store, item_id, text)
+    return ni_flow._end(store, item_id, "compare_unbuildable", text)
 
 
 def _usable(row: dict) -> bool:

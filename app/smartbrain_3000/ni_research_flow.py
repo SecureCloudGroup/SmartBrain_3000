@@ -210,9 +210,10 @@ def plan_for(store: ni.NIStore, item_id: str, record: dict, web: bool | None = N
 
 
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict | None:
-    """Research before the honest stop. The landed (held) card, or the consent question, as the flow record;
-    None when research is off, unavailable or declined (the caller then makes the honest stop, with the reasons
-    appended to its note)."""
+    """Research before the honest stop. The landed (held) card, the consent question, or (a run that ended without a
+    card) the declined card, as the flow record; None when research is off, unavailable, or the card was cancelled
+    (the caller then ends the ask itself). A run that could not finish (a fault) is the failed card, retryable,
+    never a declined one."""
     assert isinstance(intent, dict) and request, "intent and request required"
     assert store is not None and item_id, "args required"
     record = ni_flow._flow_read(store, item_id) or {}
@@ -243,8 +244,15 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
            else loop.run_closed_world(ctx, chat, accept=accept))
     if out.status == "proposed" and out.proposal is not None:
         return _land(store, item_id, request, ctx, out.proposal, out)
+    if out.status == "fault":  # the run could not finish: a fault the user retries, never a verdict about the ask
+        return ni_flow._fail(store, item_id, "research", one_line("; ".join(out.reasons), 160))
     ni_flow._append_note(store, item_id, one_line("researched, no card: " + "; ".join(out.reasons), 240))
-    return None
+    # the run ended without a card: that is the honest declined card (a closed code, up to three links the run saw),
+    # not a stop on links. A compare that no source built says so; one the verifier refused says that.
+    ending = out.ending or "research_declined_budget"
+    if question["entities"] and ending != "research_declined_checks":
+        ending = "compare_unbuildable"
+    return ni_flow._end(store, item_id, ending, "", links=out.links)
 
 
 def research_plan(store: ni.NIStore, item: dict) -> policy.Plan | None:
@@ -324,6 +332,12 @@ def reresearch(store: ni.NIStore, item: dict, reason: str) -> dict | None:
     _audit(item["id"], plan)
     accept = lambda proposal: _can_land(ctx, item["id"], request, proposal)
     out = loop.run_research(ctx, _chat_for(store, plan.model or "", False), place=place, accept=accept)
+    if out.status == "fault":  # not a decline: no streak, no longer wait; the card keeps failing and tries again in a day
+        ni_flow._try_journal(store, item["id"], "updated",
+                             one_line("re-research could not finish: " + "; ".join(out.reasons), 240))
+        store.record_run(item["id"], ni_refresh.RUN_FAULT, duration_ms=int((time.monotonic() - started) * 1000),
+                         error="fault", contract_ok=None)
+        return None
     parked = out.status == "proposed" and out.proposal is not None and _park(store, item, ctx, out.proposal, reason, plan)
     note = ("re-researched: a replacement source is parked for your approval" if parked
             else one_line("re-researched, no safe replacement: " + "; ".join(out.reasons or ["could not be parked"]), 240))

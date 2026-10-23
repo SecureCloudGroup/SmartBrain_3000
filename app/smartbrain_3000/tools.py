@@ -2112,7 +2112,7 @@ _FLOW_WAIT_SECONDS = 8.0
 _FLOW_POLL_SECONDS = 0.25
 _FLOW_SETTLED_STATES: frozenset[str] = frozenset({
     "ready", "source", "awaiting_access", "awaiting_credential",
-    "awaiting_params", "failed", "unsupported",
+    "awaiting_params", "failed", "unsupported", "declined",
 })
 
 
@@ -2165,6 +2165,11 @@ def _flow_next_step(record: dict | None) -> str:
         detail = str((record or {}).get("error") or "")
         return (f"the flow declined this request ({detail or 'unsupported'}) — tell "
                 "the user why and what would make it workable.")
+    if state == "declined":
+        detail = str((record or {}).get("error") or "")
+        return (f"the flow declined to build a card ({detail or 'no reliable source'}) — it would not be "
+                "reliable, so there is no card. Tell the user why in one line; the card on the board lists "
+                "links and can be reopened (retry, or paste a link to the data).")
     return ("the flow is still working in the background — call read_ni_item with "
             "this id in a moment to see the result. Do NOT research sources, call "
             "create_ni_item, or start another flow for this request meanwhile.")

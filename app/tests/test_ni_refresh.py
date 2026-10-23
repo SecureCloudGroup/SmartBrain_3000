@@ -16,7 +16,7 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 from test_ni_l2 import _unlock, client  # noqa: F401  (client is a fixture)
-from test_ni_research_loop import Script, call, reply
+from test_ni_research_loop import Script, call, reply, text_reply
 from test_ni_research_tools import FakeLibrary, Net, _ctx, _draft, _row
 
 from smartbrain_3000 import db as dbmod
@@ -123,7 +123,7 @@ def _kill(monkeypatch, store, conn, key, iid, times: int = 3) -> None:
 def _researcher(*, alt_body=ALT_GOOD, text_only: bool = False, consented: bool = True) -> Script:
     """The scripted researcher: finds the alternative Library source and proposes a card for it."""
     draft = _draft(ALT, {"title": "title", "mag": "mag"})
-    script = (Script(*[reply(call("library_search", query="quakes"))] * 3) if text_only else
+    script = (Script(*[text_reply("still looking")] * 3) if text_only else
               Script(reply(call("library_search", query="quakes")), reply(call("fetch_sample", url=ALT)),
                      reply(call("try_recipe", draft_spec=draft)), reply(call("propose_card", draft_spec=draft))))
     ni_research_flow.set_research_chat(lambda model, messages, tools_: script(messages, tools_), cloud=CLOUD,
@@ -368,6 +368,9 @@ def test_a_crash_mid_run_still_burns_the_attempt(monkeypatch) -> None:
     ni_research_flow.set_research_chat(lambda *a: (_ for _ in ()).throw(RuntimeError("boom")), cloud=CLOUD, consented=True)
     assert _work(store, conn, key, iid)
     assert ni_refresh.RUN_STARTED in _statuses(store, iid) and _proposal(store, iid) is None
+    assert ni_refresh.RUN_FAULT in _statuses(store, iid) and ni_refresh.RUN_DECLINED not in _statuses(store, iid), \
+        "a fault is not recorded as a decline"
+    assert store.get_item(iid)["spec"]["_research_last_attempt"]["declines"] == 0, "and it starts no back-off streak"
     assert not _work(store, conn, key, iid)
 
 

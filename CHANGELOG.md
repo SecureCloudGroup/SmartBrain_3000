@@ -13,6 +13,20 @@ to know when a release changes behavior.
 
 ### Added
 
+- **An honest "declined" card.** When SmartBrain cannot answer an ask reliably it now says so: "I couldn't
+  build a reliable card for this", with one plain line on why and up to three links to pages that may help,
+  instead of stopping on a list of links or a half-built card. It declines when research ran and found
+  nothing it could trust, when the card it built failed its checks twice, when things to compare cannot be
+  read side by side, when no source it can read answers the ask, when the one source you named cannot
+  answer, and when the kind of ask is not built yet. A card that is waiting for you (a key, a date, a model
+  choice, a source to pick) is not declined and keeps asking. A declined card never refreshes and never reads
+  any source; "Try again" or "Paste a link" reopens a new card's ask, and Fix or Refine reopens a finished one.
+  Only the new flow (`ni_flow = v2`) declines; the old flow is unchanged. The eval harness scores a decline
+  as its own class: right when the ask's gold expects a decline, otherwise "declined", which is neither
+  right nor wrong.
+  A research run that cannot finish (the model route is down, a reply cannot be handled) is a failure you can
+  retry, never a decline. The eval's CI4 now scores a question for you (waiting) the same under both flows;
+  that is a scorer change, not a flow change.
 - **Compare cards.** Ask to compare two to four things ("compare Nvidia and AMD stock prices", "weather in
   Denver vs Salt Lake City") and the card shows every one of them side by side, each with its own number,
   named in your words. Where SmartBrain cannot read all of them it says "can't compare these yet" and why,

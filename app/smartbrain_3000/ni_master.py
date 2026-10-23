@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 # Closed move set (round 7). ``research`` is registered now, chosen from G3.
 MOVES: frozenset[str] = frozenset({
@@ -58,7 +59,13 @@ STAGE_PART: dict[str, str] = {
     "ready": "prove",
     "failed": "park",
     "unsupported": "park",
+    "declined": "park",
 }
+
+# Terminal flow states: the flow is over and nothing is building. ``declined`` (v2) is the honest "I couldn't
+# build a reliable card for this"; ``unsupported`` keeps the answerable stops (a question the user can answer)
+# and every v1 ending; ``failed`` is a fault the user can retry.
+TERMINAL_STATES: frozenset[str] = frozenset({"failed", "unsupported", "declined"})
 
 # Closed question kinds a paused/terminal card may ask. Each maps to one card
 # affordance the frontend already has or gains in G1.
@@ -84,6 +91,56 @@ ACTION_KINDS: frozenset[str] = frozenset({
     "edit", "delete", "activate", "activate_sites", "give_access", "answer_date",
     "allow_model", "use_local", "fill_param", "add_credential", "review_fix",
 })
+
+# ---- the declined card state (plan G6, P6, 6.1, 6.2: "a decline is acceptable, a wrong card is the failure") ----
+#
+# A decline is an ask the system cannot answer reliably. It ends as ONE terminal state, ``declined``, carrying a
+# closed ``reason`` code, one plain line, and up to ``DECLINE_LINKS`` links. Every v2 ending that stops without a
+# card is a row of ``ENDINGS`` below, the only place the rule lives: which flow state it lands in and, for a
+# decline, which code. ``ni_flow._end`` reads this table; nothing else decides.
+DECLINE_REASONS: frozenset[str] = frozenset({
+    "no_answering_source",   # no source we can read declares an answer for this ask (and research found none)
+    "research_gave_up",      # the researcher ran and ended without a card: the budget or the steps ran out, or the model stopped, with no card
+    "verify_refused",        # a card was built and the verifier refused it twice
+    "compare_unbuildable",   # a compare of named things that no source reads side by side
+    "source_cant_answer",    # the one source the user named (or Fix re-reads) does not answer this ask
+    "ask_unsupported",       # this kind of ask is not built yet
+})
+DECLINE_LINKS = 3
+DECLINE_HEADLINE = "I couldn't build a reliable card for this"
+DECLINE_LINES: dict[str, str] = {
+    "no_answering_source": "No source I can read answers this.",
+    "research_gave_up": "I looked for a source and ran out of steps before finding one I could trust.",
+    "verify_refused": "I found a source, but the card built from it failed its checks twice, so I won't show it.",
+    "compare_unbuildable": "I can't compare these yet: no source reads them side by side.",
+    "source_cant_answer": "That source can't answer this ask.",
+    "ask_unsupported": "This kind of ask isn't supported yet.",
+}
+# The user's ways back from a decline: run the same ask again, or re-enter the source pick (paste a link).
+DECLINE_REOPEN: tuple[str, ...] = ("retry", "pick_source")
+
+# One row per ending of the v2 flow that is not a card: (flow state it lands in, decline code or None).
+# A decline is for an ask nothing the user can do on this card will make answerable; an ending where the user
+# can still act (pick a link, add a key, answer a question, retry a fault) keeps its own state.
+ENDINGS: dict[str, tuple[str, str | None]] = {
+    # -- declined: nothing the card can ask the user would change the answer --
+    "research_declined_checks": ("declined", "verify_refused"),
+    "research_declined_budget": ("declined", "research_gave_up"),
+    "research_declined_no_source": ("declined", "no_answering_source"),
+    "no_source_research_off": ("declined", "no_answering_source"),
+    "no_source_rows_exhausted": ("declined", "no_answering_source"),
+    "compare_unbuildable": ("declined", "compare_unbuildable"),
+    "compare_refused_at_build": ("declined", "compare_unbuildable"),
+    "source_cant_answer": ("declined", "source_cant_answer"),
+    "ask_unsupported": ("declined", "ask_unsupported"),
+    # -- stays: the user can act --
+    "pick_has_untried_row": ("source", None),            # a buildable Library row is still offered to tap
+    "needs_key_or_email": ("awaiting_access", None),     # the picked source's key or contact email
+    # (a built card that waits for a key or a value is not an ending: it is a draft card with its own gate)
+    "model_consent_question": ("unsupported", None),     # build with a model outside this computer?
+    "date_question": ("unsupported", None),              # "when is it?"
+    "fault": ("failed", None),                           # fetch / mapping / assembly: retry runs it again
+}
 
 _GATE_ACTIONS: dict[str, tuple[str, ...]] = {
     "awaiting_access": ("give_access",),
@@ -120,7 +177,7 @@ def actions_for(state: str, record: dict, *, shell: bool, awaiting_yes: bool,
     assert isinstance(state, str) and isinstance(item_state, str), "states are text"
     out: list[str] = []
     if state and state != "ready":
-        if state in ("failed", "unsupported"):
+        if state in TERMINAL_STATES:
             surface = terminal_surface(state, record, shell=shell)
             out += _QUESTION_ACTIONS.get(str((surface.get("question") or {}).get("kind")), ())
             if "retry" in surface.get("reopen", []):
@@ -209,6 +266,9 @@ def choose_move(*, state: str, error_class: str, shell: bool) -> dict:
         # The one unsupported class a user answer can unblock today.
         return {"move": "ask_user", "question": "supply_date",
                 "reopen": ["retry"]}
+    if state == "declined":
+        # A decline is final for this build; the user reopens it (run again, or paste a link to the data).
+        return {"move": "park", "question": None, "reopen": list(DECLINE_REOPEN)}
     if state == "failed" and error_class == "declined":
         # Round-5 field lesson: a decline is a fork, not a death.
         return {"move": "ask_user", "question": "pick_source", "reopen": []}
@@ -219,7 +279,7 @@ def choose_move(*, state: str, error_class: str, shell: bool) -> dict:
     if state == "failed" and error_class == "cancelled":
         # v2 Cancel: the user stopped it; the one way on is to run the same request again
         return {"move": "park", "question": None, "reopen": ["retry"]}
-    if state in ("failed", "unsupported"):
+    if state in TERMINAL_STATES:
         return {"move": "park", "question": None, "reopen": ["retry"]}
     return {"move": "advance", "question": None, "reopen": []}
 
@@ -235,6 +295,7 @@ _REASONS: dict[str, str] = {
     "declined": "You declined the suggested source.",
     "computed-only": "This needs a specific date, written as YYYY-MM-DD.",
     "intent": "The request couldn't be understood well enough to build from.",
+    "research": "The research couldn't finish (the model was unavailable) — retry runs it again.",
     # Claims audit 2026-09-21: classes the flow actually writes that the map
     # missed — the card showed the blind sentence for each of these.
     "assembly": "The card couldn't be assembled from the mapped fields.",
@@ -249,6 +310,8 @@ _REASONS: dict[str, str] = {
 def reason_for(state: str, error: str | None) -> str:
     """One honest sentence for a terminal record; raw detail stays in History."""
     klass = error_class_of(error)
+    if state == "declined":  # the code is the error's class; an unknown code reads the blind sentence, never a raise
+        return DECLINE_LINES.get(klass, DECLINE_HEADLINE + ".")
     if klass in _REASONS:
         return _REASONS[klass]
     if state == "unsupported":
@@ -287,11 +350,15 @@ def terminal_surface(state: str, record: dict, *, shell: bool) -> dict:
     non-empty ``reason`` and (a question or at least one reopen affordance).
     ni_watch asserts this invariant over live records.
     """
-    assert state in ("failed", "unsupported"), "terminal states only"
+    assert state in TERMINAL_STATES, "terminal states only"
     error = record.get("error") if isinstance(record.get("error"), str) else None
     move = choose_move(state=state, error_class=error_class_of(error),
                        shell=shell)
     out: dict[str, Any] = {"reason": reason_for(state, error)}
+    if state == "declined":
+        view = decline_view(record)
+        out["reason"] = view["line"]
+        out["decline"] = view
     # A question STAMPED on the record (e.g. supply_date at termination) is
     # authoritative; the move table covers records that predate stamping.
     question = question_for(state, record)
@@ -305,3 +372,46 @@ def terminal_surface(state: str, record: dict, *, shell: bool) -> dict:
     if reopen:
         out["reopen"] = reopen
     return out
+
+
+def clean_links(links: object) -> list[dict]:
+    """Up to ``DECLINE_LINKS`` links a declined card may show: ``{title, url, host}`` with an https address, one per
+    address, each field bounded. Anything else a caller hands over is dropped, never rendered."""
+    assert DECLINE_LINKS > 0, "a link cap"
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in links if isinstance(links, list) else []:  # bounded by the input, cut at DECLINE_LINKS
+        if not isinstance(row, dict) or not isinstance(row.get("url"), str):
+            continue
+        url = row["url"].strip()
+        parts = urlsplit(url)
+        if parts.scheme != "https" or not parts.hostname or len(url) > 500 or url in seen:
+            continue
+        seen.add(url)
+        title = " ".join(str(row.get("title") or "").split())[:120]
+        out.append({"title": title or parts.hostname, "url": url, "host": parts.hostname.lower()[:120]})
+        if len(out) == DECLINE_LINKS:
+            break
+    return out
+
+
+def decline_view(record: dict) -> dict:
+    """``{reason, headline, line, links}`` of a declined record, from its sealed ``_decline_card`` (single writer:
+    the card renders this verbatim). A record without a valid seal still answers honestly with the blind code
+    ``no_answering_source``; the view is total."""
+    assert isinstance(record, dict), "record required"
+    sealed = record.get("_decline_card") if isinstance(record.get("_decline_card"), dict) else {}
+    code = sealed.get("reason") if sealed.get("reason") in DECLINE_REASONS else "no_answering_source"
+    line = " ".join(str(sealed.get("line") or "").split())[:200] or DECLINE_LINES[code]
+    out = {"reason": code, "headline": DECLINE_HEADLINE, "line": line, "links": clean_links(sealed.get("links"))}
+    assert out["reason"] in DECLINE_REASONS and len(out["links"]) <= DECLINE_LINKS, "a closed decline"
+    return out
+
+
+def seal_decline(ending: str, line: str | None, links: object) -> dict:
+    """The ``_decline_card`` seal for one ``ENDINGS`` row that declines: ``{reason, line, links}``."""
+    assert ending in ENDINGS, "a known ending"
+    state, code = ENDINGS[ending]
+    assert state == "declined" and code in DECLINE_REASONS, "this ending declines"
+    text = " ".join(str(line or "").split())[:200] or DECLINE_LINES[code]
+    return {"reason": code, "line": text, "links": clean_links(links)}

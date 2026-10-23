@@ -11,6 +11,7 @@
   import BriefSummary from "$lib/components/BriefSummary.svelte";
   import CardShell from "$lib/components/CardShell.svelte";
   import BuildProgress from "$lib/components/BuildProgress.svelte";
+  import DeclinedCard from "$lib/components/DeclinedCard.svelte";
   import LinksStop from "$lib/components/LinksStop.svelte";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -46,7 +47,7 @@
   } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { fitText } from "$lib/ni/fit";
-  import { AWAITING_SOURCE_PICK, allows, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, rowActions, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
+  import { AWAITING_SOURCE_PICK, TERMINAL_FLOW_STATES, allows, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, rowActions, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -1343,7 +1344,7 @@
                    line replaces the payload/first-run copy so the card tells one
                    truth at a time. failed/unsupported render the honest error via
                    friendlyErrorClass; every other state has a calm stage label. -->
-              {#if item.flow.progress && item.flow.state !== "failed" && item.flow.state !== "unsupported"}
+              {#if item.flow.progress && !TERMINAL_FLOW_STATES.has(item.flow.state)}
                 <!-- v2: the backend's build progress (step bar, "Trying source n of m"), with Cancel
                      when the row declares it. Its busy/error state lives in the component. -->
                 <BuildProgress
@@ -1354,7 +1355,24 @@
                   onCancelled={() => void load()}
                 />
               {/if}
-              {#if item.flow.state === "failed" || item.flow.state === "unsupported"}
+              {#if item.flow.state === "declined" && item.flow.decline}
+                <!-- The honest decline: the backend's headline, reason line and up to three links verbatim,
+                     with the ways back (run again / paste a link on a shell; Fix / Refine on a finished card).
+                     It never builds or fetches on its own. -->
+                <DeclinedCard
+                  decline={item.flow.decline}
+                  busy={busyId === item.id}
+                  error={flowActionError[item.id] ?? ""}
+                  canFix={allows(item, "fix", !item.shell)}
+                  canRefine={allows(item, "refine", !item.shell)}
+                  canRetry={allows(item, "retry", item.shell === true && !!item.flow.reopen?.includes("retry"))}
+                  canPick={rowActions(item) === null && item.shell === true && !!item.flow.reopen?.includes("pick_source")}
+                  onFix={() => fixItem(item)}
+                  onRefine={() => openRefine(item)}
+                  onRetry={() => retryFlow(item)}
+                  onPick={() => reopenPick(item)}
+                />
+              {:else if item.flow.state === "failed" || item.flow.state === "unsupported"}
                 <!-- G1 single-writer law: the card renders the MASTER's reason
                      sentence, question, and reopen affordances verbatim — a
                      terminal is never a dead end (retry / pick again / answer). -->

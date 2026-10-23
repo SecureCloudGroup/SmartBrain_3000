@@ -260,7 +260,8 @@ def test_finalize_refuses_a_one_entity_card_for_a_compare_ask(monkeypatch) -> No
     item_id = ni_flow.create_shell_item(store, _ask(["Nvidia", "AMD"]))
     spec = _spec(["Nvidia", "AMD"])
     out = ni_flow._finalize(store, item_id, spec, ONE_THING, note="n", born="flow", fetched_at=NOW)
-    assert out["state"] == "unsupported" and "can't compare these yet" in str(out)
+    assert out["state"] == "declined" and "can't compare these yet" in str(out)
+    assert out["_decline_card"]["reason"] == "compare_unbuildable"
 
 
 def test_the_researcher_cannot_land_a_one_entity_card(monkeypatch) -> None:
@@ -494,18 +495,18 @@ def test_shared_address_rows_build_one_fetch_two_paths(lib, monkeypatch) -> None
 
 
 @pytest.mark.parametrize("params", [None, {"quote": "EUR"}], ids=["path-per-thing", "same-reading"])
-def test_shared_address_rows_end_ready_or_unsupported_never_failed(lib, monkeypatch, params) -> None:  # noqa: F811
+def test_shared_address_rows_end_ready_or_declined_never_failed(lib, monkeypatch, params) -> None:  # noqa: F811
     _store_, _id, out, _ = _run_shared(lib, monkeypatch, "compare EUR and GBP exchange rates", params)
-    assert out["state"] in ("ready", "unsupported"), out
+    assert out["state"] in ("ready", "declined"), out
     if params:
-        assert out["state"] == "unsupported" and "can't compare these yet" in str(out)
+        assert out["state"] == "declined" and "can't compare these yet" in str(out)
 
 
 def test_a_long_token_in_the_ask_never_fails_the_item(lib, monkeypatch) -> None:  # noqa: F811
     request = "compare EUR and GBP exchange rates " + "x" * 300
     bodies = {_RATE_URL.format(q=c): {"rates": {c: 1.0}} for c in ("EUR", "GBP")}
     _s, _i, out, _f = _run_flow(lib, monkeypatch, request, bodies)
-    assert out["state"] in ("ready", "unsupported"), out
+    assert out["state"] in ("ready", "declined"), out
     assert ni_compare_flow.metric_for(request, ("EUR", "GBP"), [])[0] is None   # no raise on its own either
 
 
@@ -515,27 +516,28 @@ def test_a_seal_error_in_one_source_is_that_sources_reason_not_a_crash(lib, monk
     monkeypatch.setattr(ni_flow, "build_final_spec", boom)
     bodies = {_RATE_URL.format(q=c): {"rates": {c: 1.0}} for c in ("EUR", "GBP")}
     _s, _i, out, _f = _run_flow(lib, monkeypatch, "compare EUR and GBP exchange rates", bodies)
-    assert out["state"] == "unsupported", out
+    assert out["state"] == "declined", out
 
 
 def test_auto_pick_declines_honestly_when_no_source_serves_every_thing(lib, monkeypatch) -> None:  # noqa: F811
     request = "compare EUR and Zorblax exchange rates"
     store, item_id, out, fetched = _run_flow(lib, monkeypatch, request, {})
     assert fetched == []
-    assert out["state"] == "unsupported" and "can't compare these yet" in str(out)
+    assert out["state"] == "declined" and "can't compare these yet" in str(out)
+    assert out["_decline_card"]["reason"] == "compare_unbuildable"
     assert store.get_item(item_id)["spec"].get("_shell") is True  # no one-thing card was built
 
 
 def test_auto_pick_declines_when_one_thing_cannot_be_read(lib, monkeypatch) -> None:  # noqa: F811
     bodies = {_RATE_URL.format(q="EUR"): {"rates": {"EUR": 0.92}}, _RATE_URL.format(q="GBP"): {"rates": {}}}
     store, item_id, out, _ = _run_flow(lib, monkeypatch, "compare EUR and GBP exchange rates", bodies)
-    assert out["state"] == "unsupported" and "GBP" in str(out)
+    assert out["state"] == "declined" and "GBP" in str(out)
 
 
 def test_more_than_four_things_decline(lib, monkeypatch) -> None:  # noqa: F811
     request = "compare Nvidia, AMD, Intel, Qualcomm and Apple stock prices"
     store, item_id, out, _ = _run_flow(lib, monkeypatch, request, {})
-    assert out["state"] == "unsupported" and "up to 4" in str(out)
+    assert out["state"] == "declined" and "up to 4" in str(out)
 
 
 def test_metric_for_skips_a_measure_the_source_does_not_report() -> None:

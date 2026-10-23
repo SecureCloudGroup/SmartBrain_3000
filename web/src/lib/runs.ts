@@ -36,6 +36,7 @@ export function runStatusLabel(status: string): string {
   if (status === "repair_research_started") return "Looking for a replacement source";
   if (status === "repair_research_proposed") return "Found a replacement source for your approval";
   if (status === "repair_research_declined") return "No safe replacement found";
+  if (status === "repair_research_fault") return "Couldn't finish looking for a replacement; will try again later";
   return status;
 }
 

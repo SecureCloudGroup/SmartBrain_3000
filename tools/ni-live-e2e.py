@@ -13,7 +13,8 @@ Outcomes per ask: ``live`` (built AND its first engine run is ok), ``built-no-ru
 its reading, host and page / dataset title print so a human judges whether the YES would be right;
 ruling 2026-10-04 — only a link the user pastes builds one now, so a harness run never reports it),
 ``links`` (no Library source declares answers for the ask: the pause offers only links — each prints as
-host — title), ``needs-key`` / ``needs-email`` (an honest pause the user answers), ``no-source``, ``failed``.
+host — title), ``needs-key`` / ``needs-email`` (an honest pause the user answers), ``declined`` (the v2 declined card:
+a closed reason code, one line, up to three links), ``no-source``, ``failed``.
 Previews are printed so a human judges whether the card shows what was asked — a green
 state with the wrong data is still a failure.
 
@@ -40,7 +41,7 @@ sys.path.insert(0, str(REPO / "app"))
 import duckdb  # noqa: E402
 
 from smartbrain_3000 import db as dbmod  # noqa: E402
-from smartbrain_3000 import library_index, ni, ni_flow, search  # noqa: E402
+from smartbrain_3000 import library_index, ni, ni_flow, ni_master, search  # noqa: E402
 from smartbrain_3000.scheduler import ScheduleStore  # noqa: E402
 from smartbrain_3000.secrets import SecretStore, gen_master_key  # noqa: E402
 
@@ -135,6 +136,11 @@ def _v2_stop(store, item_id: str, rec: dict, out: dict) -> dict:
     """Under v2 the flow parks only at an honest stop (links) or at a key it will not send before Keep."""
     assert isinstance(rec, dict) and isinstance(out, dict), "records required"
     out["notes"] = [str(n) for n in rec.get("notes") or []]
+    if rec.get("state") == "declined":  # the honest declined card: its own outcome, with the closed reason and the links
+        view = ni_master.decline_view(rec)
+        out["outcome"], out["detail"] = "declined", f"{view['reason']}: {view['line']}"[:160]
+        out["links"] = [{"host": x["host"], "title": x["title"], "url": x["url"], "found": "page"} for x in view["links"]]
+        return out
     if rec.get("state") == "awaiting_access":
         need = (rec.get("_access") or {})
         out["outcome"] = "needs-key" if need.get("key") else "needs-email"
@@ -161,7 +167,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         item_id = ni_flow.create_shell_item(store, ask)
         rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model)
         v2 = ni_flow._is_v2(store)  # v2 auto-picks inside run_flow: nothing to tap
-        if v2 and rec.get("state") in ("source", "awaiting_access"):
+        if v2 and rec.get("state") in ("source", "awaiting_access", "declined"):
             return _v2_stop(store, item_id, rec, out)
         for _tap in range(0 if v2 else 3):  # a source that refuses us re-lands the pick: tap the next one, like a person
             if rec.get("state") != "source":
@@ -184,7 +190,8 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         out["notes"] = [str(n) for n in rec.get("notes") or []]  # the flow's own account: frame, verify
         if state != "ready":
             parked = state == "source" and rec.get("error") == ni_flow.AWAITING_SOURCE_PICK
-            out["outcome"] = "failed" if state in ("failed", "unsupported") else state
+            out["outcome"] = ("asks" if state == "unsupported" and isinstance(rec.get("_question"), dict)
+                              else "failed" if state in ("failed", "unsupported") else state)
             if parked:  # taps spent with the record still parked: the label v2 would give
                 sugs = (ni_flow.board_flow_field(store, item_id) or {}).get("suggestions") or []
                 out["outcome"], out["links"] = stop_label(sugs)

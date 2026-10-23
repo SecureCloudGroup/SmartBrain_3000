@@ -1,0 +1,17 @@
+{
+ "ask_id": "CI9",
+ "fetches": [],
+ "meta": {
+  "built_by_hand": "a decline the gold expects: the Library holds only a documentation page (no declared answers) and research is off, so the v2 flow ends on the declined card",
+  "model": "scripted",
+  "research": "off"
+ },
+ "model": [
+  {
+   "reply": "{\"kind\": \"external_data\", \"subject\": \"park\", \"cadence_minutes\": 60, \"wants\": [\"crowd\"], \"threshold\": null, \"display_hint\": \"value\"}",
+   "sha": null
+  }
+ ],
+ "research": [],
+ "search": []
+}

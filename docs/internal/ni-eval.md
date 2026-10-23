@@ -32,7 +32,20 @@ key) / declined / waiting (parked at the source pick) / error. A card is wrong w
 only some asked places show; right when checks ran and passed. With nothing checkable it is
 `partial` with `needs_review`. The same card a human already judged (same source and card text) takes
 the human verdict, so replaying the 2026-10-05 results reproduces 13 / 6 / 4 / 27. `aggregate` gives
-counts and R, P, W, L rates per kind and overall (L = links + declined).
+counts and R, P, W, L, D rates per kind and overall (L = links + declined, the plan's "links/declined" line;
+D = declined alone).
+
+**Declined (the v2 declined card).** A run whose flow ended `declined` has outcome `declined` and carries
+`decline: {reason, headline, line, links}`. It is its own class. When the gold expects a decline (`expected_outcome:
+decline`, or `card` among `forbidden_outcomes`) it scores `right` (reason "declined, as the gold expects"); for a
+card-expecting or open gold it scores `declined`, which is neither right nor wrong (it counts in L and D, never in
+R or W). Only a declined outcome earns the credit: links, needs-key and a question the user answers (`asks`, scored
+`waiting`) do not. A card on a decline gold is `wrong`, as before. The table's last column `dok` counts the rights that
+were expected declines (they are inside `right`), so read `right` with it. `flow_outcome` maps a finished record to its
+outcome word: `live`, `declined`, `asks` (an `unsupported` record holding a question), else the state. Before the
+declined state, every `unsupported` terminal scored as `declined`; the CI ask CI4 ("countdown to Christmas", no date)
+ends on the question "when is it?", so it now scores `waiting`. The tuning gold (`gold.json`) has no ask whose
+gold expects a decline, so nothing there changes class; the decline path is covered by CI9 below.
 
 The table prints a `review` column (`needs_review` in the `--out` table) right after `wrong`, for every kind
 row and for ALL: the number of runs the scorer flagged for a human look, whatever their class. Read "wrong 0"
@@ -84,8 +97,10 @@ cd app && PYTHONPATH=. python3 ../tools/ni-eval.py replay \
 
 Model replies are served in recorded order (a changed prompt is counted as `cassette_drift` and
 served anyway); fetches are served by function + URL; anything unrecorded raises `CassetteMiss` and the
-ask scores `error`. `pytest tests/test_ni_eval_replay.py` runs the committed `ci` cassette (five asks
-built by hand from `fixtures/ni_flow`, no model) through the real `run_flow` in seconds.
+ask scores `error`. `pytest tests/test_ni_eval_replay.py` runs the committed `ci` cassette (nine asks
+built by hand from `fixtures/ni_flow`, no model) through the real `run_flow` in seconds. `CI9` is a decline the gold
+expects ("will the new park downtown be crowded this weekend": the Library holds only a documentation page, research
+off): it replays to `declined` / `no_answering_source` and scores `right`.
 Library-mode cassettes also need `--pack-dir` at replay (the pack is not recorded).
 
 ### Researcher (S4c)

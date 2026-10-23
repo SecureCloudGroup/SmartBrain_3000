@@ -144,7 +144,7 @@ def watch_create(store: ni.NIStore) -> dict:
             if record is None:
                 continue
             state = str(record.get("state") or "")
-            if state not in ("failed", "unsupported"):
+            if state not in ni_master.TERMINAL_STATES:
                 continue
             shell = bool(item["spec"].get("_shell"))
             if _is_dead_end(store, item["id"], shell) and file_finding(
@@ -165,7 +165,7 @@ def watch_create(store: ni.NIStore) -> dict:
             if ts is None or ts >= cutoff:
                 klass = ni_master.error_class_of(
                     record.get("error") if isinstance(record.get("error"), str) else None)
-                if klass not in ("none", "declined"):
+                if state != "declined" and klass not in ("none", "declined"):  # a decline is a verdict, not a class break
                     clusters[klass] = clusters.get(klass, 0) + 1
         except Exception as exc:  # one bad record never stops the audit
             log.warning("ni_watch: record audit failed for %s: %s",
