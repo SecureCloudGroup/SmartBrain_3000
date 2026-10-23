@@ -5,7 +5,9 @@ card reads one source and one source answers for one thing. A compare card is a 
 source carries ``compare = {entities: [{name, url, path}, ...]}``, one sealed address per compared thing. There are
 no free parameters: each address is exact at Keep, so a refresh can only fetch what the user kept. ``source.url`` is
 the first thing's address, so everything that reads one source address (robots, ports, the cadence floor, the host
-shown to the user) keeps working; all addresses share that host.
+shown to the user) keeps working; all addresses share that host. Things are told apart by their (address, path)
+pair: one address may serve several things at different paths (a response that holds every rate), and ``fetch``
+reads each distinct address once.
 
 Each refresh fetches the addresses one by one through the same politeness path as any card (``ni_fetch``,
 ``ni_polite``), reads one number at each thing's ``path`` and hands the pipeline ``{"rows": [{"name", "value"}]}``.
@@ -123,7 +125,8 @@ def _origin(url: str) -> tuple[str, str, int | None]:
 
 
 def validate_source(source: dict) -> None:
-    """Shape-check ``source.compare`` (raises ValueError): 2..4 distinct things, each with a printable name, a literal
+    """Shape-check ``source.compare`` (raises ValueError): 2..4 distinct things (distinct names and distinct
+    (address, path) readings), each with a printable name, a literal
     http(s) address with no parameter slot and a readable path; every address on the first one's scheme, host and
     port, and ``source.url`` is the first address. A compare source carries no key, header or contact email."""
     from . import ni
@@ -137,7 +140,7 @@ def validate_source(source: dict) -> None:
     if source.get("headers") or source.get("secret_query") or source.get("contact_ua"):
         raise ValueError("spec.source.compare reads plain addresses: no headers, key or contact email")
     seen_names: set[str] = set()
-    seen_urls: set[str] = set()
+    seen_reads: set[tuple[str, str]] = set()
     for i, item in enumerate(items):  # bounded: at most MAX_ENTITIES
         where = f"spec.source.compare.entities[{i}]"
         if not isinstance(item, dict) or set(item) != _ENTITY_KEYS:
@@ -155,10 +158,10 @@ def validate_source(source: dict) -> None:
         except (ni.NIError, ValueError):
             raise ValueError(f"{where}.path is not a readable path") from None
         key = " ".join(name.casefold().split())
-        if key in seen_names or url in seen_urls:
-            raise ValueError("spec.source.compare things and addresses must be distinct")
+        if key in seen_names or (url, path) in seen_reads:
+            raise ValueError("spec.source.compare things and (address, path) readings must be distinct")
         seen_names.add(key)
-        seen_urls.add(url)
+        seen_reads.add((url, path))
     if items[0]["url"] != source.get("url"):
         raise ValueError("spec.source.url must be the first compared address")
     first = _origin(items[0]["url"])
@@ -195,24 +198,26 @@ def payload_of(entities: list[dict], values: list[object]) -> dict:
 
 
 def fetch(spec_source: dict, get: Callable[[str], object]) -> dict:
-    """Read every compared address with ``get(url)`` and return the payload. A capacity refusal from ``get`` (a NIError
-    of a capacity kind: the host is busy) defers the whole card at once; any other failure, or a response with no
-    number at the thing's path, leaves that thing out and the run fails as ``compare_partial`` naming every one."""
+    """Read every distinct compared address ONCE with ``get(url)`` and return the payload. A capacity refusal from
+    ``get`` (a NIError of a capacity kind: the host is busy) defers the whole card at once; any other fetch failure
+    (a NIError), or a response with no number at the thing's path, leaves that thing out and the run fails as
+    ``compare_partial`` naming every one. Anything that is not a NIError is a bug and propagates."""
     from . import ni
     assert isinstance(spec_source, dict), "source must be a dict"
     assert callable(get), "a fetcher"
     items = [e for e in (spec_source.get("compare") or {}).get("entities") or [] if isinstance(e, dict)]
+    responses: dict[str, tuple[object]] = {}   # url -> (parsed,), or () for an address that failed
     values: list[object] = []
     lost: list[str] = []
     for item in items[:MAX_ENTITIES]:  # bounded
-        try:
-            got = number_at(get(item["url"]), item["path"])
-        except ni.NIError as exc:
-            if exc.kind in ni.CAPACITY_KINDS:
-                raise
-            got = None
-        except Exception:  # a failed fetch of one thing is that thing's absence, named below
-            got = None
+        if item["url"] not in responses:
+            try:
+                responses[item["url"]] = (get(item["url"]),)
+            except ni.NIError as exc:
+                if exc.kind in ni.CAPACITY_KINDS:
+                    raise
+                responses[item["url"]] = ()   # a dead address is the absence of every thing it serves, named below
+        got = number_at(responses[item["url"]][0], item["path"]) if responses[item["url"]] else None
         values.append(got)
         if got is None:
             lost.append(item["name"])
@@ -250,6 +255,16 @@ def clean_unit(unit: object) -> str | None:
         return None
     text = " ".join(unit.split())
     return text if len(text) <= MAX_UNIT and _UNIT_RE.fullmatch(text) else None
+
+
+def measure_label(request: str, entities: tuple[str, ...] | list[str]) -> str:
+    """The value label of a researcher's compare, from the question's own words: the closed measure name the ask says
+    ("humidity", "wind") when it names one, else "Value". Never text a model or a source returned."""
+    assert isinstance(request, str), "request must be a string"
+    from . import ni_compare_flow, ni_flow
+    said = frozenset(w for e in entities for w in ni_compare_flow._words(e))
+    named, _unreported = ni_flow._unbound_measures(request, [], said)
+    return named[0].replace("_", " ").capitalize() if named else "Value"
 
 
 def title_of(names_: list[str], label: str) -> str:

@@ -124,7 +124,7 @@ def _src(names=("Nvidia", "AMD"), **over) -> dict:
     lambda s: s["compare"].update(entities=s["compare"]["entities"][:1]),
     lambda s: s["compare"].update(entities=_things(list(PRICES)) + [{"name": "Fifth", "url": HOST + "/q/5", "path": "a"}]),
     lambda s: s["compare"]["entities"][1].update(name="Nvidia"),  # duplicate name
-    lambda s: s["compare"]["entities"][1].update(url=s["compare"]["entities"][0]["url"]),  # duplicate address
+    lambda s: s["compare"]["entities"][1].update(url=s["compare"]["entities"][0]["url"], path="quote.price"),  # same reading
     lambda s: s["compare"]["entities"][1].update(url="https://other.example.org/quote/amd"),  # a second host
     lambda s: s["compare"]["entities"][1].update(url=HOST + "/quote/{{ticker}}"),  # a template, not an address
     lambda s: s["compare"]["entities"][1].update(path="$$bad path"),
@@ -140,6 +140,12 @@ def test_validate_source_refuses(mutate) -> None:
     spec["source"] = src
     with pytest.raises((ValueError, TypeError, AssertionError)):
         ni.validate_spec(spec)
+
+
+def test_one_address_may_serve_several_things_at_different_paths() -> None:
+    src = _src()
+    src["compare"]["entities"][1].update(url=src["compare"]["entities"][0]["url"], path="quote.other")
+    ni_compare.validate_source(src)
 
 
 # ---- the run: fan-out fetch, an honest partial --------------------------------------------------------------
@@ -186,6 +192,36 @@ def test_one_failing_fetch_is_a_partial_status_and_the_last_good_stays(monkeypat
     assert store.read_snapshot(iid, "preview") is not None  # the card keeps showing what it last showed
 
 
+def test_a_shared_address_is_fetched_once_and_each_thing_read_at_its_path(monkeypatch) -> None:
+    names = ["Nvidia", "AMD"]
+    spec = _spec(names)
+    shared = _url("Nvidia")
+    for i, n in enumerate(names):
+        spec["source"]["compare"]["entities"][i].update(url=shared, path=f"quotes.{SLUG[n]}")
+    got: list[str] = []
+
+    def get(url):
+        got.append(url)
+        return {"quotes": {SLUG[n]: PRICES[n] for n in names}}
+    out = ni_compare.fetch(spec["source"], get)
+    assert got == [shared] and [r["value"] for r in out["rows"]] == [PRICES[n] for n in names]
+
+
+def test_a_programming_error_is_not_a_missing_thing() -> None:
+    def get(url):
+        raise KeyError("a bug, not a dead address")
+    with pytest.raises(KeyError):
+        ni_compare.fetch(_src(), get)
+
+
+def test_a_dead_address_is_that_things_absence() -> None:
+    def get(url):
+        raise ni.NIError("fetch_failed", "down")
+    with pytest.raises(ni.NIError) as exc:
+        ni_compare.fetch(_src(), get)
+    assert exc.value.kind == ni_compare.PARTIAL
+
+
 def test_one_missing_number_is_a_partial_too(monkeypatch) -> None:
     names = ["Nvidia", "AMD", "Intel"]
     bodies = {_url(n): _body(n) for n in names}
@@ -227,9 +263,23 @@ def test_finalize_refuses_a_one_entity_card_for_a_compare_ask(monkeypatch) -> No
     assert out["state"] == "unsupported" and "can't compare these yet" in str(out)
 
 
-def test_the_researcher_cannot_land_a_one_entity_card() -> None:
-    spec = _spec(["Nvidia", "AMD"])
-    assert ni_compare.refusal(spec, ONE_THING)  # the same gate _can_land ends with
+def test_the_researcher_cannot_land_a_one_entity_card(monkeypatch) -> None:
+    names = ["Nvidia", "AMD"]
+    ctx, _ = _compare_ctx(monkeypatch, names)
+    sealed = tools.propose_compare(ctx, {"metric": "Price", "unit": "USD", "things": [
+        {"name": n, "url": _url(n), "path": "quote.price"} for n in names]})["proposal"]
+    assert ni_research_flow._can_land(ctx, "item-1", _ask(names), sealed) is None   # the honest compare lands
+    one = copy.deepcopy(sealed)   # the same sealed recipe, but the card reads ONE of the two things
+    one["spec"].update(source={"type": "http_json", "url": _url("Nvidia")},
+                       pipeline=[{"op": "extract", "paths": {"price": "quote.price"}}],
+                       scene={"type": "stack", "dir": "v", "gap": "sm", "children": [
+                           {"type": "text", "value": "{{price}}", "role": "value", "tone": "default", "size": "md"}]})
+    proposal = one
+    why = ni_research_flow._can_land(ctx, "item-1", _ask(names), proposal)
+    assert why and "can't compare these yet" in why, why
+    # the gate line is what refuses it: with the refusal off the same proposal lands
+    monkeypatch.setattr(ni_compare, "refusal", lambda *a, **k: None)
+    assert ni_research_flow._can_land(ctx, "item-1", _ask(names), proposal) is None
 
 
 # ---- the refresh re-check ---------------------------------------------------------------------------------
@@ -286,8 +336,10 @@ def test_propose_compare_seals_a_card_that_shows_all(monkeypatch, names) -> None
     out = tools.propose_compare(ctx, {"metric": "Price", "unit": "USD", "things": [
         {"name": n.upper(), "url": _url(n), "path": "quote.price"} for n in names]})
     assert out.get("ok"), out
-    spec = ctx.proposal["spec"] if getattr(ctx, "proposal", None) else out.get("spec")
-    assert spec is None or [e["name"] for e in ni_compare.sealed(spec)] == names  # the question's spelling, not the model's
+    spec = out["proposal"]["spec"]
+    assert [e["name"] for e in ni_compare.sealed(spec)] == names  # the question's spelling, not the model's
+    assert "Price" not in spec["title"] and "Price" not in str(spec["scene"])  # nor does the model's metric label it
+    assert spec["title"] == ni_compare.title_of(names, "Value")
 
 
 def test_propose_compare_refuses_a_composed_address(monkeypatch) -> None:
@@ -396,6 +448,74 @@ def test_auto_pick_builds_a_compare_from_a_parameterised_row(lib, monkeypatch, c
     spec = store.get_item(item_id)["spec"]
     assert ni_compare.is_compare(spec) and [e["name"] for e in ni_compare.sealed(spec)] == codes
     assert spec["scene"]["form"] == "compare"
+
+
+class _OneAddressLib(_PerThingLib):
+    """A Library whose answer carries the thing in the PATH ("rates.{quote}"): every thing has the SAME address."""
+
+    def __init__(self, real, params=None) -> None:
+        super().__init__(real)
+        self.params = params
+
+    def candidates(self, request, limit=3, hint=None):
+        rows, why = super().candidates(request, limit, hint)
+        return [{**r, "url": _SHARED_URL, **({"params": self.params} if self.params else {})} for r in rows], why
+
+
+_SHARED_URL = "https://api.rates.example.org/latest?base=USD"
+_SHARED_BODY = {"rates": {"EUR": 0.92, "GBP": 0.79, "JPY": 149.5}}
+
+
+def _run_shared(lib, monkeypatch, request, params=None):  # noqa: F811
+    wrap = _OneAddressLib(lib, params)
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: wrap)
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
+    monkeypatch.setattr(ni_research_flow, "fallback", lambda *a, **k: None)
+    store = _flow_store()
+    item_id = ni_flow.create_shell_item(store, request)
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(request, "intent"))
+    fetched: list[str] = []
+
+    def fetch(url):
+        fetched.append(url)
+        return copy.deepcopy(_SHARED_BODY)
+    out = ni_flow._run_external_flow(store, item_id, request, {**_INTENT, "wants": [], "subject": request}, None,
+                                     _model, fetch)
+    return store, item_id, out, fetched
+
+
+def test_shared_address_rows_build_one_fetch_two_paths(lib, monkeypatch) -> None:  # noqa: F811
+    store, item_id, out, fetched = _run_shared(lib, monkeypatch, "compare EUR and GBP exchange rates")
+    assert out["state"] == "ready", out
+    assert fetched == [_SHARED_URL]
+    spec = store.get_item(item_id)["spec"]
+    assert [e["name"] for e in ni_compare.sealed(spec)] == ["EUR", "GBP"]
+    assert len({e["path"] for e in ni_compare.sealed(spec)}) == 2
+
+
+@pytest.mark.parametrize("params", [None, {"quote": "EUR"}], ids=["path-per-thing", "same-reading"])
+def test_shared_address_rows_end_ready_or_unsupported_never_failed(lib, monkeypatch, params) -> None:  # noqa: F811
+    _store_, _id, out, _ = _run_shared(lib, monkeypatch, "compare EUR and GBP exchange rates", params)
+    assert out["state"] in ("ready", "unsupported"), out
+    if params:
+        assert out["state"] == "unsupported" and "can't compare these yet" in str(out)
+
+
+def test_a_long_token_in_the_ask_never_fails_the_item(lib, monkeypatch) -> None:  # noqa: F811
+    request = "compare EUR and GBP exchange rates " + "x" * 300
+    bodies = {_RATE_URL.format(q=c): {"rates": {c: 1.0}} for c in ("EUR", "GBP")}
+    _s, _i, out, _f = _run_flow(lib, monkeypatch, request, bodies)
+    assert out["state"] in ("ready", "unsupported"), out
+    assert ni_compare_flow.metric_for(request, ("EUR", "GBP"), [])[0] is None   # no raise on its own either
+
+
+def test_a_seal_error_in_one_source_is_that_sources_reason_not_a_crash(lib, monkeypatch) -> None:  # noqa: F811
+    def boom(*a, **k):
+        raise ValueError("seal refused")
+    monkeypatch.setattr(ni_flow, "build_final_spec", boom)
+    bodies = {_RATE_URL.format(q=c): {"rates": {c: 1.0}} for c in ("EUR", "GBP")}
+    _s, _i, out, _f = _run_flow(lib, monkeypatch, "compare EUR and GBP exchange rates", bodies)
+    assert out["state"] == "unsupported", out
 
 
 def test_auto_pick_declines_honestly_when_no_source_serves_every_thing(lib, monkeypatch) -> None:  # noqa: F811

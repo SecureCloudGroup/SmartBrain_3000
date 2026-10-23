@@ -96,8 +96,9 @@ def _read(row: dict, answer: dict, sample: object) -> tuple[float | int | None, 
     return ni_compare.number_at(payload, filled["path"]), unit, filled["path"]
 
 
-def _try_source(store, item_id, request, intent, names_, picks, do_fetch, now) -> tuple[dict | None, str]:
-    """Build the card from one source's per-thing rows (``picks``), or ``(None, why)``."""
+def _prepare(request, intent, names_, picks, do_fetch, now) -> tuple[dict | None, str]:
+    """Everything that can refuse one source, before anything is written: its metric, a reading per thing (each
+    distinct address fetched once), and the sealed spec. ``({spec, built, answer, note}, "")`` or ``(None, why)``."""
     assert len(picks) == len(names_), "a row per thing"
     assert callable(do_fetch), "a fetcher"
     answer, why = metric_for(request, names_, ni_flow._library_answers(picks[0]["source_id"]))
@@ -106,14 +107,18 @@ def _try_source(store, item_id, request, intent, names_, picks, do_fetch, now) -
     entities: list[dict] = []
     values: list = []
     units: set = set()
+    samples: dict[str, object] = {}   # an address that serves several things (the thing in the PATH) is read once
     for name, row in zip(names_, picks, strict=True):  # bounded: at most MAX_ENTITIES
         try:
-            sample = do_fetch(row["url"])
-            number, unit, path = _read(row, answer, sample)
+            if row["url"] not in samples:
+                samples[row["url"]] = do_fetch(row["url"])
+            number, unit, path = _read(row, answer, samples[row["url"]])
         except Exception as exc:  # a thing that can't be read stops this source; the next one may serve it
             return None, f"{name} couldn't be read ({type(exc).__name__})"
         if number is None:
             return None, f"it has no {answer['label'].lower()} for {name}"
+        if any((e["url"], e["path"]) == (row["url"], path) for e in entities):
+            return None, f"one address and path serves more than one of them, so they can't be told apart ({name})"
         entities.append({"name": name, "url": row["url"], "path": path})
         values.append(number)
         units.add(unit)
@@ -131,12 +136,30 @@ def _try_source(store, item_id, request, intent, names_, picks, do_fetch, now) -
     spec = ni_flow.build_final_spec(request, intent, source, cadence, built["pipeline"], built["scene"])
     spec["title"] = title
     ni.validate_spec(spec)
-    note = (f"built from the Library: {answer['label']} for {', '.join(names_)}, one address each on "
+    note = (f"built from the Library: {answer['label']} for {', '.join(names_)}, one reading each on "
             f"{picks[0].get('host') or 'the source'}")
-    ni_flow._transition(store, item_id, "assembling", source_url=source["url"], note=note)
+    return {"spec": spec, "built": built, "note": note}, ""
+
+
+def _try_source(store, item_id, request, intent, names_, picks, do_fetch, now) -> tuple[dict | None, str]:
+    """Build the card from one source's per-thing rows (``picks``), or ``(None, why)``. The error boundary is one
+    source's attempt: whatever refuses or breaks it (the metric, a long token in the ask, the seal) ends THIS source
+    as a reason, logged, and the next source runs. The landing below it is outside: a write failure is not a source's
+    nothing."""
+    ready = None
+    try:
+        ready, why = _prepare(request, intent, names_, picks, do_fetch, now)
+    except (ValueError, TypeError, KeyError, AssertionError, ni.NIError) as exc:
+        log.warning("compare: source %s declined by %s: %s", picks[0].get("source_id"), type(exc).__name__, exc)
+        return None, f"it can't be sealed as a comparison ({type(exc).__name__})"
+    if ready is None:
+        return None, why
+    spec, built, note = ready["spec"], ready["built"], ready["note"]
+    url = spec["source"]["url"]
+    ni_flow._transition(store, item_id, "assembling", source_url=url, note=note)
     ni_flow._try_journal(store, item_id, "updated", note)
     landed = ni_flow._finalize(store, item_id, spec, built["preview_payload"], note=note, born="flow", fetched_at=now,
-                               built_from=ni_flow._built_from_of(store, item_id, "auto", source["url"],
+                               built_from=ni_flow._built_from_of(store, item_id, "auto", url,
                                                                   str(picks[0].get("title") or "")))
     return landed, ""
 

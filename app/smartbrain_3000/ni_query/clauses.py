@@ -69,12 +69,14 @@ _NUM_CMP = frozenset({"<", "<=", ">", ">=", "=", "!="})
 _MAX_COMPARATORS = 6
 _VALUE_KINDS = frozenset({"current_value", "status", "text_brief"})
 _MAX_LEX = 200
+_MAX_WORD = 200
 
 
 def fold(word: str) -> str:
-    """A plural folded to its singular, as ni_flow folds answer words (-ies → -y, -s off)."""
+    """A plural folded to its singular, as ni_flow folds answer words (-ies → -y, -s off). Total on any token: one
+    longer than a word can be (an ask may hold a 5000-character run) is cut to the cap, never an error."""
     assert isinstance(word, str), "word must be a str"
-    assert len(word) <= 200, "a word, not a text"
+    word = word[:_MAX_WORD]
     if len(word) > 4 and word.endswith("ies"):
         return word[:-3] + "y"
     if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):

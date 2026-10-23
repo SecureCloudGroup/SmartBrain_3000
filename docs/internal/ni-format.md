@@ -3923,8 +3923,10 @@ unchanged pipeline grammar and the existing `compare` form (§34) take the rows 
 `number` on `value`. The painter is unchanged.
 
 **The sealed `compare` key.** Closed to `{entities}`: 2..4 items, each exactly `{name, url, path}`. Names are printable,
-1..80 characters and distinct; addresses are literal (no `{{...}}`), distinct, pass the `http_json` URL shape check and
-share one scheme, host and port; `source.url` equals the first address; no headers, `secret_query` or `contact_ua`
+1..80 characters and distinct; addresses are literal (no `{{...}}`), pass the `http_json` URL shape check and share one
+scheme, host and port; things are told apart by their `(address, path)` pair, so one address may serve several things at
+different paths (a response holding every rate: `rates.EUR`, `rates.GBP`) and a run fetches each distinct address once,
+while two things with the same address AND path are refused; `source.url` equals the first address; no headers, `secret_query` or `contact_ua`
 (a compare reads keyless addresses). Paths pass `ni.parse_path`. Export and template install refuse a compare card
 (`ni_routes._sanitize_spec_for_export`, `ni_library._TEMPLATE_STRIP_SOURCE_KEYS`): its addresses name the user's
 choices of things.
@@ -3932,7 +3934,10 @@ choices of things.
 **Labels come from the question.** `ni_compare.asked(request)` takes the things from the ask
 (`ni_verify.constraints.parse_entities`, in the user's casing); a temporal pair ("now versus a year ago") is not a
 compare. The row names, the title and the form's labels are those words. A model only says which asked thing an
-address is for (`propose_compare`); nothing a source or a model returns becomes a label.
+address is for (`propose_compare`); nothing a source or a model returns becomes a label. The value label is the
+Library answer's own declared label on the Library path; on the researcher's path it is the closed measure the ask
+names ("humidity", "wind"; `ni_compare.measure_label`) or "Value". The `metric` the model passes to `propose_compare`
+is not used for any label.
 
 **The check.** `ni_compare.shown / reasons / refusal` (the `compare` verification class, run by
 `ni_research.tools._checks`): an asked thing counts as shown when a row names it in a text cell and has a number of its
@@ -3940,9 +3945,9 @@ own, or when one row names every asked thing and has a number (a head-to-head). 
 `refusal(spec, outputs)` parses the things from `spec["goal"]` and returns "can't compare these yet: it shows N of M
 compared (X missing)", or the more-than-four reason. It runs on every build path: `ni_flow._finalize` (the single
 choke point for auto-pick and mapping) and `ni_research_flow._can_land` (the researcher's accept callback). The S9
-refresh re-check (`ni._constraint_drift`, which `ni_refresh` shares) runs `ni_compare.drift` on any card: the fresh
-outputs must still show every sealed name and every thing the goal names; a miss is `constraint_drift` with a
-`compare: ...` line.
+refresh re-check (`ni._constraint_drift`, which `ni_refresh` shares) runs `ni_compare.drift` only when the card's source is a compare (`is_compare`); a legacy one-thing card whose goal
+compares is not re-checked): the fresh outputs must still show every sealed name and every thing the goal names; a miss
+is `constraint_drift` with a `compare: ...` line.
 
 **Statuses.** `compare_partial` (an `NIError` kind): one or more addresses failed or had no number. The run fails
 loudly, naming the things; `last_good` keeps showing; copy "one of the compared things couldn't be read; the last good
@@ -3954,8 +3959,10 @@ about that thing alone (`ni_compare.entity_ask` rewrites the ask), keeps rows th
 lookup or clock parameter, and looks for a source with exactly one row per thing and a declared plain number answer
 for the asked metric (`metric_for`: a measure the source does not report skips it; a non-current window declines). It
 fetches each row's address through the flow's fetcher, reads the answer's path filled with that row's parameters,
-needs one unit across the things, and seals with `ni_flow._finalize` (held for Keep, `_built_from.path` `auto`). No
-source builds it: the researcher gets the ask (`ni_research_flow.fallback`); else `decline` ends the item as
+needs one unit across the things (a source serving every thing from one address is fetched once and read at each
+thing's path), and seals with `ni_flow._finalize` (held for Keep, `_built_from.path` `auto`). No
+source builds it (each source's whole attempt, seal included, is one error boundary: any refusal ends that source as a
+reason and the next runs; never a `failed` item): the researcher gets the ask (`ni_research_flow.fallback`); else `decline` ends the item as
 `unsupported` with the reasons. The mapping re-run (`_run_remap`) is refused for a compare card.
 
 **Researcher.** New terminal tool `propose_compare({metric, unit, things: [{name, url, path}]})` (the grammar's `Tool`

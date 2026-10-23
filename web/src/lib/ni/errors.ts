@@ -13,7 +13,7 @@ const FRIENDLY: Record<string, string> = {
   // S9 (ni-format §23.1): a kept research-built card re-checked its constraints and the source
   // no longer answers the question. The card keeps showing its last good reading.
   constraint_drift: "this source stopped answering your question; the last good reading is still shown",
-  // S7 (ni-format §36): a compare card reads one address per thing; when one of them fails the whole
+  // S7 (ni-format §38): a compare card reads one address per thing; when one of them fails the whole
   // card fails loudly rather than showing fewer things than it was kept with.
   compare_partial: "one of the compared things couldn't be read; the last good comparison is still shown",
   secret_missing: "credential problem",

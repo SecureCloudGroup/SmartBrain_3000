@@ -476,9 +476,9 @@ def propose_compare(ctx: ResearchCtx, compare: object) -> dict:
     values, fmt, err = _compare_values(ctx, things)
     if values is None:
         return _done(ctx, "propose_compare", "compare", err)
-    label = one_line(compare.get("metric") if isinstance(compare, dict) else "", ni_compare.MAX_LABEL)  # type: ignore[union-attr]
+    label = ni_compare.measure_label(ctx.request, [t["name"] for t in things])  # the question's words, never the model's
     unit = ni_compare.clean_unit(compare.get("unit") if isinstance(compare, dict) else None)  # type: ignore[union-attr]
-    built, err = _compare_spec(ctx, things, values, fmt, label or "Value", unit)
+    built, err = _compare_spec(ctx, things, values, fmt, label, unit)
     if built is None:
         return _done(ctx, "propose_compare", "compare", err)
     checks = _checks(ctx, built["outputs"], things[0]["url"], ctx.urls.get(things[0]["url"]) or {})
