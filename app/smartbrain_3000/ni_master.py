@@ -89,7 +89,7 @@ REOPEN_KINDS: frozenset[str] = frozenset({"retry", "pick_source", "delete"})
 ACTION_KINDS: frozenset[str] = frozenset({
     "keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "pause", "resume",
     "edit", "delete", "activate", "activate_sites", "give_access", "answer_date",
-    "allow_model", "use_local", "fill_param", "add_credential", "review_fix",
+    "allow_model", "use_local", "fill_param", "add_credential", "review_fix", "pick_source",
 })
 
 # ---- the declined card state (plan G6, P6, 6.1, 6.2: "a decline is acceptable, a wrong card is the failure") ----
@@ -151,7 +151,14 @@ _QUESTION_ACTIONS: dict[str, tuple[str, ...]] = {
     "supply_date": ("answer_date",),
     "model_consent": ("allow_model", "use_local"),
     "give_access": ("give_access",),
+    "pick_source": ("pick_source",),
 }
+# The action behind each way out a terminal card names: a reopen the card offers always has its action on the
+# board row ("delete" is on every row already). ``pick_source`` is a shell's: a finished card reopens via Fix.
+_REOPEN_ACTIONS: dict[str, tuple[str, ...]] = {"retry": ("retry",), "pick_source": ("pick_source",), "delete": ()}
+assert set(_REOPEN_ACTIONS) == REOPEN_KINDS, "every reopen kind has its action"
+assert all(a in ACTION_KINDS for ways in (*_REOPEN_ACTIONS.values(), *_QUESTION_ACTIONS.values()) for a in ways), \
+    "closed vocabulary"
 _ITEM_ACTIONS: dict[str, tuple[str, ...]] = {
     "draft": ("edit", "refine", "delete"),
     "commissioning": ("run", "pause", "edit", "refine", "delete"),
@@ -180,8 +187,8 @@ def actions_for(state: str, record: dict, *, shell: bool, awaiting_yes: bool,
         if state in TERMINAL_STATES:
             surface = terminal_surface(state, record, shell=shell)
             out += _QUESTION_ACTIONS.get(str((surface.get("question") or {}).get("kind")), ())
-            if "retry" in surface.get("reopen", []):
-                out.append("retry")
+            for kind in surface.get("reopen", []):  # bounded by REOPEN_KINDS
+                out += _REOPEN_ACTIONS[kind]
             out += ("delete",) if shell else ("fix", "refine", "delete")
         else:
             out += _GATE_ACTIONS.get(state, ())
@@ -364,9 +371,11 @@ def terminal_surface(state: str, record: dict, *, shell: bool) -> dict:
     question = question_for(state, record)
     if question is None and move["move"] == "ask_user" and move.get("question"):
         question = {"kind": move["question"]}
+    if not shell and question is not None and question.get("kind") == "pick_source":
+        question = None  # a finished card never re-enters the source pick: Fix re-reads its own source
     if question is not None:
         out["question"] = question
-    reopen = [r for r in move.get("reopen", []) if r in REOPEN_KINDS]
+    reopen = [r for r in move.get("reopen", []) if r in REOPEN_KINDS and (shell or r != "pick_source")]
     if not question and not reopen:
         reopen = ["retry"]  # law backstop: never a bare terminal
     if reopen:

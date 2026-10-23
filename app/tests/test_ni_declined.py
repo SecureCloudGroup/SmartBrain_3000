@@ -298,10 +298,12 @@ def test_the_board_field_carries_the_reason_the_line_the_links_and_the_way_back(
     assert field["decline"]["headline"] == "I couldn't build a reliable card for this"
     assert field["decline"]["reason"] == "research_gave_up" and len(field["decline"]["links"]) <= 3
     assert field["reopen"] == ["retry", "pick_source"] and "question" not in field and "suggestions" not in field
-    assert field["actions"] == ["retry", "delete"], "a shell reopens by retry; Fix and Refine are for finished cards"
+    assert field["actions"] == ["retry", "pick_source", "delete"], "a shell reopens by retry or a pasted link"
     finished = ni_master.actions_for("declined", out, shell=False, awaiting_yes=False, item_state="live",
                                      has_payload=True)
     assert finished == ["retry", "fix", "refine", "delete"] and set(finished) <= ni_master.ACTION_KINDS
+    assert ni_master.terminal_surface("declined", out, shell=False)["reopen"] == ["retry"], \
+        "a finished card never offers the source pick (Fix re-reads its own source)"
 
 
 @pytest.mark.skipif(not _GEN.exists(), reason="the schema generator is not shipped in the app image")
@@ -381,7 +383,7 @@ def test_the_manual_run_and_activate_routes_refuse_a_declined_shell(client, lib,
     assert client.post(f"/api/ni/items/{item_id}/commission").status_code == 409
     row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == item_id)
     assert row["flow"]["state"] == "declined" and row["flow"]["decline"]["reason"] == "no_answering_source"
-    assert row["actions"] == ["retry", "delete"] and "run" not in row["actions"]
+    assert row["actions"] == ["retry", "pick_source", "delete"] and "run" not in row["actions"]
 
 
 # ---- reopen ----------------------------------------------------------------------------------------------
@@ -407,6 +409,50 @@ def test_retry_refuses_a_flow_that_is_not_over(client, lib, monkeypatch) -> None
     store = client.app.state.ni
     item_id = ni_flow.create_shell_item(store, _REQUEST)  # a running shell
     assert client.post(f"/api/ni/items/{item_id}/flow/retry").status_code == 409
+
+
+def test_paste_a_link_reopens_a_declined_shell_at_the_source_pause(client, lib, monkeypatch) -> None:  # noqa: F811
+    item_id = _declined_shell(client, lib, monkeypatch)
+    r = client.post(f"/api/ni/items/{item_id}/flow/reopen")
+    assert r.status_code == 200 and r.json() == {"ok": True, "state": "source"}
+    record = ni_flow._flow_read(client.app.state.ni, item_id)
+    assert record["state"] == "source" and record["error"] == ni_flow.AWAITING_SOURCE_PICK
+    assert "_decline_card" not in record
+    row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == item_id)
+    assert row["flow"]["state"] == "source" and "cancel" not in row["actions"]  # the paste box, nothing running
+    assert client.post(f"/api/ni/items/{item_id}/flow/reopen").status_code == 409  # not over: nothing to reopen
+    assert any(e["tool"] == "ni_flow_reopen" for e in client.app.state.audit.list(50))
+
+
+def test_paste_a_link_refuses_a_running_shell_and_a_finished_card(client, lib, monkeypatch) -> None:  # noqa: F811
+    store = client.app.state.ni
+    running = ni_flow.create_shell_item(store, "rain in Oslo tomorrow")
+    assert client.post(f"/api/ni/items/{running}/flow/reopen").status_code == 409
+    finished = _declined_shell(client, lib, monkeypatch)
+    item = store.get_item(finished)
+    spec = {k: v for k, v in item["spec"].items() if k != "_shell"}
+    store.update_spec(finished, spec, origin="user", preserve_attestations=True)
+    r = client.post(f"/api/ni/items/{finished}/flow/reopen")
+    assert r.status_code == 409 and "Fix" in r.json()["detail"]
+
+
+def test_every_way_out_a_terminal_card_names_is_an_action_on_its_row() -> None:
+    """The board row's actions are the one contract: a reopen or question the card names always has its action."""
+    states = sorted(ni_master.TERMINAL_STATES)
+    classes = sorted({*ni_master._REASONS, "computed-only", "declined", "cancelled", "fetch", "stale", "other"})
+    for state in states:  # bounded: 3 states x the closed error classes x 2
+        for klass in classes:
+            for shell in (True, False):
+                record = {"state": state, "error": f"{klass}: detail"}
+                surface = ni_master.terminal_surface(state, record, shell=shell)
+                actions = ni_master.actions_for(state, record, shell=shell, awaiting_yes=False, item_state="live",
+                                                has_payload=True)
+                for kind in surface.get("reopen", []):
+                    assert set(ni_master._REOPEN_ACTIONS[kind]) <= set(actions), (state, klass, shell, kind)
+                question = (surface.get("question") or {}).get("kind")
+                assert set(ni_master._QUESTION_ACTIONS.get(question, ())) <= set(actions), (state, klass, shell)
+                if not shell:
+                    assert "pick_source" not in actions and question != "pick_source", (state, klass)
 
 
 def test_a_finished_card_hides_a_declined_remap_and_keeps_its_working_payload(lib, monkeypatch) -> None:  # noqa: F811

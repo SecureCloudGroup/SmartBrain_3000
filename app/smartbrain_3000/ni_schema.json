@@ -19,6 +19,7 @@
         "give_access",
         "keep",
         "pause",
+        "pick_source",
         "refine",
         "resume",
         "retry",

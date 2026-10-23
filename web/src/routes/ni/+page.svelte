@@ -368,6 +368,21 @@
     }
   }
 
+  async function reopenPick(item: NiBoardItem): Promise<void> {
+    console.assert(typeof item.id === "string", "reopenPick: id required");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      await api.niFlowReopen(item.id);
+      toast("Okay — paste a link to the data below.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "Couldn’t reopen the card." };
+    } finally {
+      busyId = null;
+    }
+  }
+
   async function retryFlow(item: NiBoardItem): Promise<void> {
     console.assert(typeof item.id === "string", "retryFlow: id is string");
     busyId = item.id;
@@ -1346,9 +1361,11 @@
                   canFix={hasAction(item, "fix")}
                   canRefine={hasAction(item, "refine")}
                   canRetry={hasAction(item, "retry")}
+                  canPick={hasAction(item, "pick_source")}
                   onFix={() => fixItem(item)}
                   onRefine={() => openRefine(item)}
                   onRetry={() => retryFlow(item)}
+                  onPick={() => reopenPick(item)}
                 />
               {:else if item.flow.state === "failed" || item.flow.state === "unsupported"}
                 <!-- G1 single-writer law: the card renders the MASTER's reason
@@ -1429,6 +1446,13 @@
                       disabled={busyId === item.id}
                       onclick={() => retryFlow(item)}
                     >{busyId === item.id ? "Retrying…" : "Retry"}</button>
+                  {/if}
+                  {#if hasAction(item, "pick_source")}
+                    <button
+                      class="ghost"
+                      disabled={busyId === item.id}
+                      onclick={() => reopenPick(item)}
+                    >Paste a link</button>
                   {/if}
                 </div>
                 {/if}

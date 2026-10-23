@@ -31,7 +31,7 @@ function cardOf(props: Record<string, unknown> = {}): HTMLElement {
   const noop = () => {};
   mounted.push(mount(DeclinedCard, {
     target,
-    props: { decline: DECLINE, onFix: noop, onRefine: noop, onRetry: noop, ...props },
+    props: { decline: DECLINE, onFix: noop, onRefine: noop, onRetry: noop, onPick: noop, ...props },
   }));
   flushSync();
   const root = target.querySelector<HTMLElement>(".dc");
@@ -61,7 +61,7 @@ describe("DeclinedCard", () => {
 
   it("offers only the reopen actions the page declares", () => {
     expect(labels(cardOf())).toEqual([]);
-    expect(labels(cardOf({ canRetry: true }))).toEqual(["Try again"]);
+    expect(labels(cardOf({ canRetry: true, canPick: true }))).toEqual(["Try again", "Paste a link"]);
     expect(labels(cardOf({ canFix: true, canRefine: true }))).toEqual(["Fix", "Refine…"]);
   });
 

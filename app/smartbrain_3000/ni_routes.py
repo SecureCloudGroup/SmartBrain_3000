@@ -1386,6 +1386,32 @@ def _answer_model_consent(request: Request, store, item_id: str, stamped: dict,
     return {"ok": True, "started": bool(started)}
 
 
+@router.post("/api/ni/items/{item_id}/flow/reopen")
+def reopen_flow_pick(request: Request, item_id: str) -> dict:
+    """The ``pick_source`` action: a declined or failed SHELL re-enters the source pause, where the user pastes a
+    link to the data (the "paste a link" way back a decline promises). 409 for finished cards (Fix owns those) and
+    for flows that are not over, or whose card does not offer the action.
+    """
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if not item["spec"].get("_shell"):
+        raise HTTPException(status_code=409, detail="finished cards reopen via Fix, not the source pick")
+    flow = ni_flow.board_flow_field(store, item_id, read_only=True)
+    if not flow or "pick_source" not in (flow.get("actions") or []):
+        state = str((flow or {}).get("state") or "")
+        raise HTTPException(status_code=409, detail=f"nothing to reopen (flow state {state or 'none'!r})")
+    ni_flow.reenter_source_pick(store, item_id, "you reopened the card to paste a link to the data")
+    request.app.state.audit.append(
+        "user", "ni_flow_reopen", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"state": "source"}),
+    )
+    return {"ok": True, "state": "source"}
+
+
 @router.get("/api/ni/findings")
 def get_findings(request: Request, limit: int = 50) -> dict:
     """G1 oversight surface: open watcher findings, newest first (desktop-local)."""

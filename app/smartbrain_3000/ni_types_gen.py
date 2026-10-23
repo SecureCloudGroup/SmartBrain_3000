@@ -9,8 +9,8 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 ActionKind = Literal[
     "activate", "activate_sites", "add_credential", "allow_model", "answer_date", "cancel", "delete",
-    "dismiss", "edit", "fill_param", "fix", "give_access", "keep", "pause", "refine", "resume", "retry",
-    "review_fix", "run", "use_local"
+    "dismiss", "edit", "fill_param", "fix", "give_access", "keep", "pause", "pick_source", "refine", "resume",
+    "retry", "review_fix", "run", "use_local"
 ]
 
 Author = Literal[

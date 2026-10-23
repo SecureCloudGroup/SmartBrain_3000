@@ -774,13 +774,18 @@ decline.
 
 The backend declares the buttons: board rows and flow fields carry `actions`, a list from `ni_master.ACTION_KINDS`
 (`keep, dismiss, cancel, retry, fix, refine, run, pause, resume, edit, delete, activate, activate_sites,
-give_access, answer_date, allow_model, use_local, fill_param, add_credential, review_fix`). `ni_master.actions_for`
-is the one table; the client renders the declared list and ignores unknown kinds.
+give_access, answer_date, allow_model, use_local, fill_param, add_credential, review_fix, pick_source`).
+`ni_master.actions_for` is the one table; the client renders the declared list and ignores unknown kinds. Every
+reopen kind and question a terminal card names maps to its action (`_REOPEN_ACTIONS`, `_QUESTION_ACTIONS`), so a way
+out the card offers is always a button on its row.
 
 - **Retry** (`POST /flow/retry`) re-runs a terminal shell's sealed request with the same sealed answers
   (`_declined`, `_model_consent`, `_use_local`); a fetch-class failure drops the failed URL. 409 while a
   worker still runs, for a finished card, and for a non-terminal flow.
 - **Cancel** (`POST /flow/cancel`) stops a running flow; 409 when nothing is building.
+- **Paste a link** (`pick_source`, `POST /flow/reopen`): a declined or fetch-failed shell re-enters the source
+  pause, where the user pastes a link to the data (`/flow/pick-source` below). Shells only: a finished card
+  reopens via Fix, and its terminal surface never names `pick_source`. 409 when the row does not offer it.
 - **Fix** (`POST /flow/fix`, `begin_remap`) re-enters sampling on the item's own frozen source (http_json and
   page cards; unfilled params refuse). **Refine** (`POST /refine`) routes a note by code: a cadence phrase sets
   the interval; a source-change phrase re-enters the source pick; anything else re-samples the frozen source
@@ -1308,8 +1313,8 @@ declined keeps rendering its working payload (the terminal record is hidden).
 
 **Wire shape.** `{state: "declined", error, reason (= the line), decline, reopen, actions}`. `FlowDecline`,
 `DeclineLink` and `DeclineReason` are in the generated schema (`app/smartbrain_3000/ni_schema.json`, produced by
-`tools/gen-ni-schema.py`; `--check` fails when it is stale). Actions: a shell `["retry", "delete"]`, a finished
-card `["retry", "fix", "refine", "delete"]`. The client (`DeclinedCard.svelte`) shows the headline, the line, the
+`tools/gen-ni-schema.py`; `--check` fails when it is stale). Actions: a shell `["retry", "pick_source", "delete"]`,
+a finished card `["retry", "fix", "refine", "delete"]`. The client (`DeclinedCard.svelte`) shows the headline, the line, the
 https links (at most three) and the buttons the page declares; the page owns the requests.
 
 ## 40. Page tables
