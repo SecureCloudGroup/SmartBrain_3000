@@ -67,9 +67,8 @@ export function flowStageLabel(flow: NiItemFlow | null | undefined): string {
  *  sends a kind this bundle predates, which is ignored, never shown. */
 export const KNOWN_ACTIONS: ReadonlySet<string> = new Set<string>(ACTION_KINDS);
 
-/** The backend-declared actions of a board row, unknown kinds dropped; `null` for a v1 row (no
- *  `actions` key), which keeps the page's own client-side conditions. A flow's own list wins over
- *  the row's while it is active. */
+/** The backend-declared actions of a board row, unknown kinds dropped; `null` for a row without an
+ *  `actions` key (none is offered). A flow's own list wins over the row's while it is active. */
 export function rowActions(row: { actions?: string[]; flow?: { actions?: string[] } | null } | null | undefined): string[] | null {
   console.assert(row === null || row === undefined || typeof row === "object", "rowActions: row is object");
   const list = row?.flow?.actions ?? row?.actions;
@@ -78,8 +77,8 @@ export function rowActions(row: { actions?: string[]; flow?: { actions?: string[
   return list.filter((k) => typeof k === "string" && KNOWN_ACTIONS.has(k));
 }
 
-/** True when the row's backend-declared actions include `kind`. False for a v1 row and for an
- *  unknown kind. */
+/** True when the row's backend-declared actions include `kind`. False for a row without actions and
+ *  for an unknown kind. */
 export function hasAction(
   row: { actions?: string[]; flow?: { actions?: string[] } | null } | null | undefined,
   kind: string,
@@ -89,29 +88,14 @@ export function hasAction(
   return rowActions(row)?.includes(kind) ?? false;
 }
 
-/** Whether a button shows. On a v2 row (backend `actions` present) the declared list decides and
- *  `legacy` is ignored; on a v1 row (no `actions`) `legacy` is the page's own client-side
- *  condition, unchanged. */
-export function allows(
-  row: { actions?: string[]; flow?: { actions?: string[] } | null } | null | undefined,
-  kind: string,
-  legacy: boolean,
-): boolean {
-  console.assert(typeof kind === "string" && kind !== "", "allows: kind required");
-  console.assert(typeof legacy === "boolean", "allows: legacy is boolean");
-  const list = rowActions(row);
-  return list === null ? legacy : list.includes(kind);
-}
-
-/** The card menu's pause/resume button: "pause" or "resume", or "" when the row offers neither
- *  (v2 only). A v1 row keeps the toggle that follows `enabled`. */
+/** The card menu's pause/resume button: "pause" or "resume", or "" when the row offers neither. */
 export function pauseKind(
-  row: { enabled?: boolean; actions?: string[]; flow?: { actions?: string[] } | null },
+  row: { actions?: string[]; flow?: { actions?: string[] } | null },
 ): "pause" | "resume" | "" {
   console.assert(typeof row === "object" && row !== null, "pauseKind: row is object");
   const list = rowActions(row);
   console.assert(list === null || Array.isArray(list), "pauseKind: list is array or null");
-  if (list === null) return row.enabled ? "pause" : "resume";
+  if (list === null) return "";
   return list.includes("pause") ? "pause" : list.includes("resume") ? "resume" : "";
 }
 

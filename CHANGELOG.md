@@ -11,6 +11,25 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+
+- **Every new Neural Interface card now builds with the new flow, and the old build flow is gone.** A new card
+  tries the best SmartBrain Library source by itself, falling through to the next when a source fails its
+  checks, shows the real card as a preview, and does not read the source again or refresh it until you tap
+  **Keep**. This is what `SMARTBRAIN_NI_FLOW=v2` turned on; the setting and the `ni_flow` meta key no longer do
+  anything. A leftover `SMARTBRAIN_NI_FLOW=v1` is logged as a warning at start-up and ignored (it does not
+  stop the app). What goes away: the pick card that asked you to tap a Library source and the searched web
+  pages it listed, the "Pick a source" button on a stopped card (use Try again, or paste a link on the stop
+  card), the pre-read of up to four search-result pages while a card is created (the cloud researcher still
+  searches, with your consent), and `POST /api/ni/items/{id}/flow/reopen`. `GET .../flow` and
+  `POST .../flow/cancel` no longer answer 404 for lack of the setting, and every board row now carries
+  `actions`. Cards you already have are untouched: they refresh, edit, export and import as before.
+  `tools/ni-eval.py --flow` is removed (any value is an error); the eval always runs the one flow.
+  `ni_watch` now audits the cards the board actually serves (each row as `GET /api/ni/board` builds it, through
+  a table of row checks) instead of the internal flow record. `docs/internal/ni-format.md` is rewritten as a
+  stable spec of the system as it is, and `docs/internal/ni-cases.md` now points to the gold set
+  (`app/tests/ni_eval/gold/`, `docs/internal/ni-eval.md`).
+
 ### Added
 
 - **Research reads data tables on ordinary web pages.** When no data file answers an ask, the researcher can now
@@ -35,7 +54,7 @@ to know when a release changes behavior.
   answer, and when the kind of ask is not built yet. A card that is waiting for you (a key, a date, a model
   choice, a source to pick) is not declined and keeps asking. A declined card never refreshes and never reads
   any source; "Try again" or "Paste a link" reopens a new card's ask, and Fix or Refine reopens a finished one.
-  Only the new flow (`ni_flow = v2`) declines; the old flow is unchanged. The eval harness scores a decline
+  The eval harness scores a decline
   as its own class: right when the ask's gold expects a decline, otherwise "declined", which is neither
   right nor wrong.
   A research run that cannot finish (the model route is down, a reply cannot be handled) is a failure you can
@@ -55,14 +74,14 @@ to know when a release changes behavior.
   refresh, always labelled "Summary written by your local model". The headlines keep showing
   with it on. With no local model the switch says so and stays off; a cloud model is never used
   for a refresh.
-- **A new Neural Interface flow, off by default (`ni_flow = v2`).** A new card tries the
+- **A new Neural Interface flow.** A new card tries the
   best SmartBrain Library source by itself, falling through to the next ones when a
   source fails its checks. It shows the real card as a preview. SmartBrain reads that
   source once to build the preview and doesn't read it again, or refresh it, until you
   tap Keep. "Try another source" moves on to the next one. While it builds, the card
   shows its progress and a Cancel button. Sources that need your key are tried last,
   and only after you type the key. If no Library source answers, the card lists the
-  Library's links and nothing else is fetched. Turn it on with `SMARTBRAIN_NI_FLOW=v2`.
+  Library's links and nothing else is fetched.
 
 - **The new flow's researcher can search the web (cloud model, with your consent).** When no
   Library source fits, it can run up to 3 web searches and read a published JSON, RSS, CSV or

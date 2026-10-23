@@ -24,7 +24,6 @@ if _SCRIPT.exists():
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v2")
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "ni.duckdb"))
     from smartbrain_3000.main import create_app
 

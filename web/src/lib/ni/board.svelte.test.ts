@@ -269,14 +269,6 @@ describe("board store, per-item poll (v2)", () => {
     expect(fetchFlow).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the board-wide fast poll when any active row is v1", async () => {
-    const { api, fetchFlow } = setup([v2("a", 1, "sampling"), item("old", 2, "mapping")]);
-    await settle();
-    await vi.advanceTimersByTimeAsync(3_000);
-    expect(fetchFlow).not.toHaveBeenCalled();
-    expect(api.fetchBoard).toHaveBeenCalledTimes(2);
-  });
-
   it("a failed poll is ignored and retried on the next tick", async () => {
     const { board, fetchFlow, waiting } = setup([v2("a", 1, "sampling")]);
     await settle();

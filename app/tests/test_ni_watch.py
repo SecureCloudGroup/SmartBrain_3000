@@ -117,3 +117,31 @@ def test_watch_create_dead_end_check_fires_on_what_the_board_returns(
     assert fired["high"] == 1 and fired["filed"] >= 1
     titles = [f["title"] for f in ni_watch.list_findings(store.conn)]
     assert any("offers no reason or way out" in t for t in titles), titles
+
+
+def test_the_audited_row_is_the_row_the_board_serves(store: ni.NIStore) -> None:
+    """The audit reads ``ni_routes._board_row`` itself, so a field the route adds (or drops) is seen by the checks."""
+    from smartbrain_3000 import ni_routes
+
+    iid = ni_flow.create_shell_item(store, "parity case")
+    ni_flow._fail(store, iid, "mapping", "mapping stage failed")
+    item = store.get_item(iid)
+    assert ni_watch.served_row(store, item) == ni_routes._board_row(store, item)
+    assert "actions" in ni_watch.served_row(store, item)
+
+
+def test_watch_create_flags_a_served_row_with_no_actions(store: ni.NIStore, monkeypatch) -> None:
+    from smartbrain_3000 import ni_routes
+
+    ni_flow.create_shell_item(store, "no actions case")
+    real = ni_routes._board_row
+
+    def stripped(s, item, *a, **k):
+        row = real(s, item, *a, **k)
+        row["actions"] = []
+        return row
+
+    monkeypatch.setattr(ni_routes, "_board_row", stripped)
+    fired = ni_watch.watch_create(store)
+    assert fired["high"] >= 1
+    assert any("no actions" in f["title"] for f in ni_watch.list_findings(store.conn))

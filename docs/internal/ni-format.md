@@ -1,73 +1,66 @@
-# Neural Interface item format (v1)
+# Neural Interface format
 
-Internal contract for the Neural Interface (NI) subsystem: the item spec, the scene
-grammar, the pipeline, the data contract, and the lifecycle state machine. The Python
-validators (`app/smartbrain_3000/ni.py`) and the TypeScript renderer
-(`web/src/lib/ni/`) both implement THIS document; when they disagree, this document
-wins and both are bugs.
+The contract of the Neural Interface (NI) subsystem: the item spec, the scene grammar, the pipeline, the
+data contract, the lifecycle, the creation flow and the surfaces around them. The Python validators
+(`app/smartbrain_3000/ni.py`) and the TypeScript renderer (`web/src/lib/ni/`) both implement this
+document. Where they disagree with it, this document wins and both are bugs. Section numbers are stable:
+code and tests cite them (`§13`, `§29`, `§36`), so a new topic takes the next number and a section is
+never renumbered.
 
-Design laws (decided 2026-09-08, full rationale in the operator's design record):
+How a change is measured is in `docs/internal/ni-eval.md`; the gold set is `app/tests/ni_eval/gold/`.
+`docs/internal/ni-cases.md` points there.
 
-- **Deterministic core, AI at the edges.** Models run at design time, commissioning,
-  and repair time only. The runtime path — fetch → extract → transform → contract
-  check → bind → render — is pure deterministic code. The same payload always
-  produces the same scene.
-- **Authorization is not trust.** The user's choice of a source authorizes the
-  connection; the fetched content stays untrusted forever. Every model output that
-  was derived from fetched bytes must be a closed-schema, egress-inert artifact
-  (scene trees, extract paths, transform ops — never URLs, headers, schedules, or
-  free-form markup).
-- **Template-native.** Every item is an instantiated template. `params` declare the
-  slots; local items simply have all slots filled. Export-as-template is a strip of
-  filled values back to slots, never a schema change.
-- **Nothing renders that did not validate.** The scene validator and the payload
-  binder run server-side on every snapshot write; the client renderer additionally
-  refuses unknown node types. Malformed data can never reach the page.
+## Design laws
 
-## 1. Storage (migration 40)
+- **Deterministic core, AI at the edges.** Models run at design time, commissioning and repair time. The
+  runtime path (fetch, extract, transform, contract check, bind, render) is pure deterministic code: the
+  same payload always produces the same scene.
+- **Authorization is not trust.** Choosing or keeping a source authorizes the connection; fetched content
+  stays untrusted forever. Every model output derived from fetched bytes is a closed-schema, egress-inert
+  artifact (scene trees, extract paths, transform ops), never a URL, header, schedule or free-form markup.
+- **Template-native.** Every item is an instantiated template. `params` declare the slots; a local item has
+  them all filled. Export is a strip of filled values back to slots, never a schema change.
+- **Nothing renders that did not validate.** The scene validator and the payload binder run server-side on
+  every snapshot write; the client renderer additionally refuses unknown node types.
+- **A decline is acceptable, a wrong card is the failure.** An ask the system cannot answer reliably ends in
+  an honest stop (§39), never a plausible-looking card. Cards that came from an open path wait for the
+  user's Keep (§33).
+- **No dead ends.** Every stopped card shows a reason and a way forward (a question, a reopen, or an
+  action). The oversight plane audits the cards the board actually serves for it (§29, Oversight).
 
-Follows the house sealed-body + plaintext-operational-columns convention
-(schedules/feeds):
+## 1. Storage
 
-- `ni_items` — plaintext: `id TEXT PRIMARY KEY`, `enabled BOOLEAN`, `state TEXT`
-  (§6), `interval_minutes INTEGER`, `last_checked TIMESTAMP`, `last_status TEXT`
-  (host-free), `consecutive_failures INTEGER`, `first_failure_at TIMESTAMP`
-  (streak marker; §6), `position INTEGER`, `spec_rev INTEGER`,
-  `created_at TIMESTAMP`, `updated_at TIMESTAMP`; sealed body (AAD
-  `ni_item:<id>`): the spec (§2).
-- `ni_snapshots` — `item_id TEXT`, `slot TEXT` (the full closed set is eight:
-  `latest` | `last_good` | `preview` | `preview_data` (§21) | `history` (§11) |
-  `alert_state` (§12) | `last_failure` (§23) | `image` (§24) — the slot set is
-  app-level, no schema change),
-  `nonce BLOB`, `ciphertext BLOB` (AAD `ni_snapshot:<item_id>:<slot>`), `ok BOOLEAN`,
-  `created_at TIMESTAMP`, `PRIMARY KEY (item_id, slot)`. Sealed body: the bound
-  payload (§4.3) — the data, not the scene. The table also carries two reserved-id
-  row families that are NOT items (no matching `ni_items` row, `__`-prefixed ids,
-  slot names outside the item set): `__library__` (`source` pin + verified `pack`,
-  §20) and `__mcp_servers__` (`servers` registry, §22).
-- `ni_revisions` — `item_id TEXT`, `rev INTEGER`, `nonce BLOB`, `ciphertext BLOB`
-  (AAD `ni_revision:<item_id>:<rev>`), `origin TEXT` (`user` | `agent` |
-  `repair_l1` | `repair_l2` | `template`), `created_at TIMESTAMP`, `PRIMARY KEY
-  (item_id, rev)`. Keep the last 10 per item; pruning in code.
-- `ni_runs` — `item_id TEXT`, `ts TIMESTAMP`, `status TEXT`, `duration_ms INTEGER`,
-  `error TEXT` (host-free class only), `contract_ok BOOLEAN`. Keep the last 50 per
-  item; pruning in code. Plaintext throughout — operational telemetry, no content.
+The house convention: a sealed body plus plaintext operational columns.
 
-No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
+- `ni_items` - plaintext: `id TEXT PRIMARY KEY`, `enabled BOOLEAN`, `state TEXT` (§6), `interval_minutes
+  INTEGER`, `last_checked TIMESTAMP`, `last_status TEXT` (host-free), `consecutive_failures INTEGER`,
+  `first_failure_at TIMESTAMP` (the streak marker), `position INTEGER`, `spec_rev INTEGER`, `next_clock
+  TIMESTAMP` (§34, clock pass), `created_at`, `updated_at`. Sealed body (AAD `ni_item:<id>`): the spec (§2).
+- `ni_snapshots` - `item_id`, `slot`, `nonce`, `ciphertext` (AAD `ni_snapshot:<item_id>:<slot>`), `ok`,
+  `created_at`, `PRIMARY KEY (item_id, slot)`. Sealed body: the bound payload (§4.3), the data and not the
+  scene. The slot set is app-level and closed: `latest`, `last_good`, `preview`, `preview_data`, `history`
+  (§11), `alert_state` (§12), `last_failure` (§23), `image` (§24), `outputs` (§34), `journal` (§28),
+  `flow` (§29), `llm_state` (§13), `render` (§35). Reserved-id row families that are not items (ids
+  start `__`): `__library__` (source pin, verified pack, outbox, §20) and `__mcp_servers__` (§22).
+- `ni_revisions` - `item_id`, `rev`, sealed spec (AAD `ni_revision:<item_id>:<rev>`), `origin` (`user`,
+  `agent`, `repair_l1`, `repair_l2`, `template`), `created_at`. The last 10 per item are kept.
+- `ni_runs` - `item_id`, `ts`, `status`, `duration_ms`, `error` (host-free class only), `contract_ok`. The
+  last 50 per item are kept. Plaintext telemetry, no content.
+- `ni_findings` - the oversight plane's findings (§29, Oversight): code-authored host-free strings.
 
-## 2. Item spec (sealed body of `ni_items`)
+No foreign keys; `NIStore.delete` cascades in code.
+
+## 2. Item spec
 
 ```json
 {
   "version": 1,
   "title": "Spending this week",
-  "goal": "<the user's words, verbatim — never rewritten>",
-  "params": {
-    "symbol": {"label": "Ticker symbol", "kind": "string", "value": "ACME"}
-  },
-  "source": { ... §3 ... },
-  "pipeline": [ ... §4 ... ],
-  "scene": { ... §5 ... },
+  "goal": "<the user's words, verbatim, never rewritten>",
+  "params": {"symbol": {"label": "Ticker symbol", "kind": "string", "value": "ACME"}},
+  "source": { },
+  "pipeline": [ ],
+  "scene": { },
   "display": {"size": "small"},
   "contract": null,
   "repair_policy": {"l1": true, "l2_frontier": false},
@@ -75,165 +68,99 @@ No foreign keys; `NIStore.delete` cascades in code (feeds precedent).
 }
 ```
 
-- `params.*.kind` ∈ `string | number | secret | clock`. A `secret` param's `value` is always
-  a SecretStore key name in the `ni:<item_id>:` namespace, never the secret itself.
-  `{{param:NAME}}` placeholders may appear only where a field's schema says so.
-- A **`clock`-kind** param (F1 2026-10-04) carries `{label, kind: "clock", format, offset_days}`
-  INSTEAD of `value`: the engine fills it from the current clock on every fetch (`format` is a
-  strftime pattern from the engine's closed `%A-Za-z%:- _,./` chars using the closed code set
-  `%Y %m %d %H %M %S %y %j %u %w %-m %-d %B %b %A %a`; `offset_days` is a bounded int). Library
-  schedule / forecast cards (startDate=today, endDate=today+N) use this so day 2 reads day-2's date
-  instead of the creation day's literal.
-- Pre-F1 Library cards (installed on v0.24.0 / v0.24.1) sealed the creation day's clock date into
-  `source.url` as a literal. On their first tick, `ni_flow.upgrade_pre_f1_literal_dates` rewrites
-  the URL to the `{{param:name}}` shape + adds a clock-kind spec param per date — one-time,
-  idempotent (the `{{param:` marker gates it), revision-tracked (origin `repair_l1`,
-  `preserve_attestations=True`; the fetched URL at creation time reproduces byte-for-byte, so
-  `_c2_ok` and `contract` still describe the card). A verify mismatch leaves the card untouched.
-  R4-4 (2026-10-04): the upgrade tries the creation moment in UTC, the user's zone, and the
-  local-machine zone and accepts whichever reproduces the stored literal — a Docker install
-  renders the literal in UTC while the user is in LA / NZ, and the user-zone-only probe would
-  decline. R4-5: the upgrade reslots the pipeline too — a `near_earth_objects["2026-10-01"]`
-  literal rides forward alongside the URL so day 2 extracts without a miss.
-- R4-2 (2026-10-04): one `now` per build. `_sample_and_map` freezes `fetch_now = ni._clock()` at
-  entry, rebuilds the fetch URL from the sealed `_library_url_template` at that moment (a stale
-  `_library_url` from a tap-then-midnight-cross resume is realigned), and threads `fetch_now` into
-  `_handoff`; the C2 verify reads the sealed spec at the same `fetch_now` so a build crossing
-  midnight never crashes on a `_clock()` advance.
-- R4-11 (2026-10-04): `_handoff` scans the sealed `spec.params` for clock-kind entries and runs
-  `_reslot_clock_params_in_pipeline` on the pipeline — a mapping-path (freeform or remap) extract
-  path or `where` value holding a clock-filled literal walks forward instead of freezing on the
-  sample day. The reslot is idempotent (an already-slotted path has no literal to match).
-- R5-1 (2026-10-04): a `next_event` ask with `window="today"` / `"tonight"` keeps the forward
-  floor and the stale-first check — `_frame_gap`'s in-period exemption applies only to `schedule`
-  (a "tide times today" table keeps the whole day); `_build_rows_answer`'s `floor_hour` is True
-  for a next_event list too, so "when is the next tide today" at 22:30 never leads with 8:01 AM.
-- R5-2 (2026-10-04): `_realign_url_to_now` also rewrites `_access.url` when it matched the pre-
-  realign URL, and `default_fetcher` reads `_access` from the record at fetch time (not captured
-  at `run_flow` entry) — a tap at 23:58 and user-key given at 00:05 still fetches with the key.
-  `_repick_without` binds the pick row by sealed `_library_source` (then falls back to literal
-  URL) so a 403 after midnight hands off to the next source instead of returning None.
-- R5-4 (2026-10-04): `_window_op` with `floor_hour=False` keeps `step="hour"` and marks `floor:
-  false` on the op; the engine's `window` transform validator accepts an optional `floor` bool,
-  and `_window_test` disables the current-hour floor without rewriting the step — the dawn rule
-  ("tonight" at 01:30 is now..06:00, never the next evening) still fires on list cards.
-- R5-5 (2026-10-04): `_f1_templatize_literal` walks the Library record's `access.url_template`
-  by position (shared with `_derive_clock_template`) — a count-1 value replace collapsed
-  duplicated slots (treasury-yield-curve's repeated `{year}`) and bound the wrong position on a
-  day whose number equals the month (wikimedia 10/10); every clock placeholder must slot or the
-  position walk declines and the pre-R5 raw / percent-encoded replace is the fallback.
-- R5-8 (2026-10-04): `_derive_clock_template` strips `?`/`&` query segments naming vault_key
-  params from the Library template before position-aligning against the live URL — the live URL
-  has those segments stripped by `library_resolve._expand`, so a trailing `&token={key}` left in
-  the template would otherwise fail the walk for keyed clock sources (nasa-neows-feed,
-  finnhub-earnings-calendar, fec-candidates).
-- `display.size` ∈ `small | wide | large | tall` = the desktop grid cell a design takes (1×1, 2×1, 2×2, 1×2), derived from the sealed desktop span by `display_size_for_span` (a 1×2 design seals as `tall` since #496; the client reads it). The board (Phase 1a-4) is a fixed-rhythm grid — 2 columns on a phone, 3 from 780 px, 4 from 1040 px, 176 px rows — and sizes a form card from the span key on the CLIR face it is painting (`cardSpan` in `web/src/lib/ni/shell.ts`: the engine seals a phone span per candidate, often a different shape from the desktop one, e.g. a 1×1 stat with a full-width 2-row phone face), reading `display.size` only for a legacy scene or a payload without a span key; the card menu's Size entry reads `display.size`. An absent `display` means small.
+- `params.*.kind` is `string | number | secret | clock`. A `secret` param's `value` is a SecretStore key
+  name in the `ni:<item_id>:` namespace, never the secret. `{{param:NAME}}` placeholders may appear only
+  where a field's schema says so.
+- A `clock` param carries `{label, kind: "clock", format, offset_days}` instead of a value: the engine fills
+  it from the current clock on every fetch. `format` is a strftime pattern over the closed characters
+  `%A-Za-z%:- _,./` and the closed codes `%Y %m %d %H %M %S %y %j %u %w %-m %-d %B %b %A %a`;
+  `offset_days` is a bounded int. Date-windowed Library sources use it so day 2 reads day 2's date.
+- One `now` per build: the flow freezes `fetch_now` at the start of a build, rebuilds the fetch address from
+  the sealed `_library_url_template` at that moment, and the verify reads the sealed spec at the same
+  instant, so a build that crosses midnight stays consistent.
+- `display.size` is `small | wide | large | tall`, the desktop grid cell a design takes (1x1, 2x1, 2x2, 1x2),
+  derived from the sealed desktop span (`display_size_for_span`). The board is a fixed-rhythm grid (2
+  columns on a phone, 3 from 780 px, 4 from 1040 px, 176 px rows) and sizes a form card from the span key of
+  the CLIR it paints (`cardSpan`); `display.size` drives the card menu's Size entry and legacy scenes.
+  Absent means small.
 - `contract` is system-written at commissioning (§7); the agent may never set it.
-- `model` optionally overrides the `ni` route for `model` sources (schedules.model
-  precedent).
-- Interval floor: `interval_minutes >= 1`, clamped (never an error). One-shot items
-  do not exist in v1; `enabled=false` is the pause.
-- v2 optional keys: `"history"` (§11) and `"alerts"` (§12). A v1 app's validator
-  rejects specs carrying them (closed-key law) — that is the intended forward
-  refusal.
+- `model` optionally overrides the `ni` route for `model` sources. The sentinel `local/auto` (§37) resolves
+  to the first local model on the ni, chat or agent routes each time the card runs.
+- Interval floor: `interval_minutes >= 1`, clamped, never an error. `enabled=false` is the pause. Third-party
+  hosts have a 15-minute floor (`ni_polite`); cards with an `llm` stage clamp to 5 minutes; rendered cards
+  to 15.
+- Optional keys: `history` (§11), `alerts` (§12), `brief` (§37), `compare` (inside `source`, §38).
+- System-written, underscore-prefixed keys (validated by shape, stripped on export, refused in template
+  packs): `_c2_ok`, `_present_ok`, `_born` (`flow | recipe | chat`), `_shell`, `_model_consent`, `_built_from`
+  (§33), `_fit` (§34), `_l1_trial`, `_l1_last_attempt`, `_l2_proposal`, `_l2_last_attempt`,
+  `_research_last_attempt` (§23.1), `_template` (§20), `_render_ok`, `_feed_candidates` (§35), `recipe`
+  (§29), `query`, `interpretation` (§36).
 
-## 3. Sources (closed set — nine types)
+## 3. Sources
 
-The full closed set (`_SOURCE_TYPES`; validators refuse anything else):
-`http_json`, `model`, `internal.schedule` (this section), `http_page` +
-`internal.kb` (§15), `mcp_tool` (§22), `http_image` (§24), `internal.ni` (§25),
-`computed` (§29 — pure clock, zero egress).
+The closed set (`_SOURCE_TYPES`; validators refuse anything else): `http_json`, `model`, `internal.schedule`,
+`computed`, `http_page`, `internal.kb` (§15), `mcp_tool` (§22), `http_image` (§24), `internal.ni` (§25).
 
-`http_json`:
+### `http_json`
+
 ```json
 {"type": "http_json", "url": "https://api.example.com/quote?sym={{param:symbol}}",
  "headers": {"X-Api-Key": {"$secret": "ni:<item_id>:api_key"}}}
 ```
-- Fetched via `netguard.safe_fetch_json` only. `validate_public_url` runs on the
-  param-substituted URL at every create / update / commission (skipped when a
-  referenced string param is still empty; commission re-checks). The URL's
-  **scheme + authority is frozen literal**: `{{param:...}}` may appear only inside
-  the path or query, never in the scheme/userinfo/host/port — validators refuse
-  a placeholder there. Param values that DO land in the URL are percent-encoded
-  at substitution time (`urllib.parse.quote(safe="")`) so a value can never
-  rewrite URL structure.
-- Header values are literal strings or `{"$secret": "ni:..."}` refs — nothing
-  else. `{{param:...}}` is forbidden inside plain header values (a param cannot
-  smuggle auth-shaped bytes into a header). Auth-shaped literal header names
-  (`authorization`, `proxy-authorization`, `cookie`, any name containing
-  `token`/`secret`/`key`) are refused unless the value is a `$secret` ref.
-  `$secret` refs must start with `ni:` at spec validation; the loader further
-  enforces the full `ni:{item_id}:` scoping (a spec cannot borrow another
-  item's credentials).
-- `$secret` values resolve at fetch time by the engine; the resolved secret is
-  host-bound: it attaches only when the request host equals the host recorded
-  when the credential was entered (`put_credential` IDNA-lowercases the host so
-  the compare matches `urlparse().hostname`). Any other host refuses the fetch
-  outright (`secret_host_mismatch` → permanent broken). Secrets never ride an
-  http request (`secret_requires_https` refusal).
-- **Redirect discipline** (credential exfiltration guard): whenever the fetch
-  carries ANY header (secret or literal), the engine passes
-  `allow_redirects=False` through `safe_fetch_json` / `_guarded_get`, so a 3xx
-  raises `FetchError("redirect refused")` before the header re-sends to a
-  rewritten host. Header-free requests keep the default redirect behavior.
-- Response caps: 8 MB, `application/json`/`text/` content types, 8s per-read
-  timeout (netguard defaults).
-- **`format`** (optional; default `json`): names how the response body parses
-  for the pipeline. Closed set: `json`, `csv`, `feed` (RSS + Atom), `xml`,
-  `text`. Existing specs (no `format` key) run through
-  `netguard.safe_fetch_json` unchanged. Every non-JSON format flows through
-  `netguard.safe_fetch_text(url, fmt)` (same SSRF guard, same 8 MB cap, same
-  redirect discipline; content-type allowlist scoped per format) and parses
-  through `smartbrain_3000.formats` into the walker-shaped dict the pipeline
-  grammar already consumes:
-    - `csv` → `{"columns": [...], "rows": [{col: value}, ...]}` (delimiter
-      sniffed among `,;\t|`; header required; row cap 500; per-cell cap 4KB);
-    - `feed` → `{"title", "items": [{title, link, summary, published, guid}]}`
-      via the shipped `feeds.parse_feed` (stdlib ElementTree; `<!DOCTYPE>` /
-      `<!ENTITY>` refused before parse — entity-expansion defence);
-    - `xml` → xmltodict-shape `{root: {"@attr": ..., "_text": ..., child: ...}}`
-      (namespaces stripped; depth cap 12; node cap 5000; DOCTYPE refused);
-    - `text` → `{"text": "..."}` (cap 200 000 chars).
-  A parse failure surfaces as `NIError("fetch_failed", "not_<fmt>")` — the
-  `not_<fmt>` token comes from `netguard.format_error_kind` so the flow's
-  page-door / retry routing keys on it without matching message text.
 
-`model`:
-```json
-{"type": "model", "instruction": "Write a one-paragraph morning briefing …"}
-```
-- Runs through `gateway` on the `ni` route (new capability, default local), or the
-  item's `model` override. Output is plain text handed to the pipeline as
-  `{"text": "<output>"}`. The instruction is user-visible spec content.
+- Fetched through `ni_fetch` over `netguard` only: SSRF pin, redirect re-validation, byte cap, content-type
+  check, and the politeness layer `ni_polite` (per-host budget, Retry-After pause, fetch dedupe, port policy
+  80/443 or the one port a Library row declares, robots.txt for page reads and for any source that is not
+  a Library row). A host over budget defers the card (`host_busy`), it is never a failure.
+- `validate_public_url` runs on the param-substituted URL at every create, update and commission. The
+  scheme and authority are literal: `{{param:...}}` may appear only in the path or query. Param values are
+  percent-encoded at substitution (`quote(safe="")`).
+- Header values are literal strings or `{"$secret": "ni:..."}` refs. `{{param:...}}` is forbidden in plain
+  header values. Auth-shaped header names (`authorization`, `proxy-authorization`, `cookie`, any name
+  containing `token`, `secret` or `key`) are refused unless the value is a `$secret` ref. A ref must start
+  with `ni:` at validation and the loader enforces the full `ni:{item_id}:` scope.
+- `$secret` values resolve at fetch time and are host-bound: they attach only when the request host equals
+  the host recorded when the credential was entered (`secret_host_mismatch` is a permanent `broken`). They
+  never ride plain http (`secret_requires_https`).
+- Whenever a request carries any header, a typed key or the contact email, redirects are refused.
+- `secret_query: {<name>: {"$secret": "ni:<id>:<name>"}}` (at most 2, https only) carries a key in the query;
+  `contact_ua: true` adds the user's email to the honest User-Agent (`contact_missing` when unset).
+  `ni.http_request_parts` is the one request builder for the engine and the flow's sample.
+- `port` (optional, a Library row's declared port) widens the port policy to that one port.
+- `format` (optional, default `json`): `json`, `csv`, `feed` (RSS and Atom), `xml`, `text`, `table` (§40).
+  Non-JSON formats parse through `smartbrain_3000.formats` into the walker-shaped dict the pipeline reads:
+  `csv` is `{"columns", "rows"}` (delimiter sniffed among `,;\t|`, header required, 500 rows, 4 KB cells);
+  `feed` is `{"title", "items": [{title, link, summary, published, guid}]}` (DOCTYPE and ENTITY refused
+  before parse); `xml` is `{root: {"@attr", "_text", child}}` (namespaces stripped, depth 12, 5000 nodes,
+  DOCTYPE refused); `text` is `{"text"}` (200,000 characters). A parse failure is `NIError("fetch_failed",
+  "not_<fmt>")`. A bare-list JSON response is wrapped as `{"items": [...]}` before the pipeline.
+- Response caps: 8 MB, 8 s per read.
 
-`internal.schedule`:
-```json
-{"type": "internal.schedule", "schedule_id": "<id>"}
-```
-- Reads the newest `schedule_runs` row for that schedule (message only). Zero
-  egress. Payload to the pipeline: `{"message": str, "status": str, "ts": str}`.
+### `model`
 
-`computed` (§29):
-```json
-{"type": "computed", "compute": "days_until", "date": "YYYY-MM-DD"}
-```
-- Pure-clock read, zero egress. `compute` ∈ `{days_until}` (v1 has one member).
-  Payload to the pipeline: `{"days": <int>}` = target date − today (UTC);
-  negative allowed (past dates read as negative counts). Cadence rules apply
-  as-is (daily-ish intervals are the natural choice — no special-case).
-  The `interpreted` chip stays OFF (no model reads the value).
+`{"type": "model", "instruction": "..."}`. Runs through `gateway` on the `ni` route (or the item's `model`).
+Output is plain text handed on as `{"text": ...}`. A cloud model needs the card's own consent
+(`_model_consent`, §29). The instruction is user-visible spec content.
+
+### `internal.schedule`
+
+`{"type": "internal.schedule", "schedule_id": "<id>"}`. Reads the newest `schedule_runs` row (message only);
+zero egress. Payload `{"message", "status", "ts"}`.
+
+### `computed`
+
+`{"type": "computed", "compute": "days_until", "date": "YYYY-MM-DD"}`. A pure clock read, zero egress. Payload
+`{"days": int}` = target date minus today (UTC), negative for past dates. The "interpreted" chip stays off.
 
 ## 4. Pipeline
 
-An ordered list of stages; each consumes and produces a JSON value. The implicit
-final stage is always bind + render-validate (§4.3).
+An ordered list of stages, each consuming and producing a JSON value. The implicit last stage is bind and
+render-validate (§4.3).
 
 ### 4.1 `extract`
 
-```json
-{"op": "extract", "paths": {"price": "quote.latest", "rows": "items[0:5]"}}
-```
-Path grammar (shared with scene bindings, one implementation):
+`{"op": "extract", "paths": {"price": "quote.latest", "rows": "items[0:5]"}}`. Path grammar, shared with scene
+bindings (one implementation):
 
 ```
 path     = segment ("." segment)*
@@ -242,3892 +169,1191 @@ key      = [A-Za-z_][A-Za-z0-9_-]*
 index    = "-"? digits
 slice    = digits? ":" digits?
 ```
-Quoted keys (2026-09-29, for keys the plain grammar can't spell — a date
-`2026-09-27`, `5`, `0GUSD`, `a b`): `qkey = '["' qchars '"]'`, where `qchars` is 1..200
-characters with no `"` and no control characters (whitespace is allowed inside the
-quotes only). A quoted key opens a path or follows a key / subscript directly, never
-a dot: `near_earth_objects["2026-09-27"][0].name`, `["bitcoin"].usd`. Denied keys stay
-denied; anything else (`a.["x"]`, `a["x"]b`, an unclosed quote) is refused. Paths
-without `"` parse exactly as before. Library answers always emit a filled `{param}`
-segment in this quoted form.
 
-A path that fails to resolve is a stage failure (→ run fails, §6). Output is the
-object of named extracts; downstream stages and the scene see only these names.
+Quoted keys spell what the plain grammar cannot (`near_earth_objects["2026-09-27"][0].name`, `["bitcoin"].usd`):
+`'["' qchars '"]'` with 1..200 characters, no `"`, no control characters. A quoted key opens a path or
+follows a key or subscript directly, never a dot. Denied keys stay denied. A path that does not resolve is a
+stage failure. The output is the object of named extracts; downstream stages and the scene see only those
+names. `graph_extract` (§29, page cards) is a further first-stage op.
 
 ### 4.2 `transform`
 
-```json
-{"op": "transform", "apply": [
-  {"fn": "round", "field": "price", "digits": 2},
-  {"fn": "sort_by", "field": "rows", "key": "amount", "dir": "desc"},
-  {"fn": "top_n", "field": "rows", "n": 5}
-]}
-```
-Closed function set v1: `round(field, digits)`, `scale(field, factor)`,
-`rename(field, to)`, `pick(field, keys)` (for lists of objects: keep only these
-keys), `sort_by(field, key?, dir)`, `top_n(field, n<=50)`. All pure; type
-mismatches are stage failures, never coercion guesses.
+`{"op": "transform", "apply": [{"fn": "round", "field": "price", "digits": 2}, ...]}`. A closed function set, all
+pure; a type mismatch is a stage failure, never a coercion guess.
 
-Added in v2 (same closed-set discipline):
-- Aggregates over a list-of-objects field: `sum(field, key, as)`, `avg(field,
-  key, as)`, `min(field, key, as)`, `max(field, key, as)`, `count(field, as)` —
-  each writes a NEW numeric output named `as` (the list is untouched; `as` must
-  not collide with an existing output; numeric key values required, mismatch =
-  stage failure; empty list ⇒ count 0, others = stage failure `empty_aggregate`).
-- `delta_prev(field, series, as)` — current numeric `field` minus the LAST point
-  of history series `series` (§11); writes `{value, direction: "up"|"down"|
-  "flat"}` to `as`. When the series is empty (first run) it writes
-  `{value: 0, direction: "flat"}` — never a failure, so commissioning passes.
+- Basics: `round(field, digits)`, `scale(field, factor)`, `offset(field, value)`, `rename(field, to)`,
+  `pick(field, keys)`, `sort_by(field, key?, dir)`, `top_n(field, n<=50)`, `reverse(field)`.
+- Aggregates over a list of objects: `sum`, `avg`, `min`, `max` `(field, key, as)` and `count(field, as)`.
+  Each writes a new numeric output `as` (no collisions). An empty list gives count 0; the others fail with
+  `empty_aggregate`.
+- `delta_prev(field, series, as)`: the current numeric `field` minus the last point of history series
+  `series` (§11), written to `as` as `{value, direction: up|down|flat}`. An empty series gives
+  `{value: 0, direction: "flat"}`, never a failure.
+- `where(field, key, op, value)`: filters a list in place. `op` is `lt|le|gt|ge|eq|ne|starts_with|contains|in`.
+  Ordering ops need finite numbers on both sides; eq and ne compare scalars strictly (bool is not a number);
+  `starts_with` and `contains` take a non-empty string (at most 200); `in` takes 1..12 scalars. A non-matching
+  type, or an item missing `key`, is excluded, not a failure (selection, not validation). A non-list
+  `field` is `transform_type`.
+- Typed readers: `number(field, key?)` (a number sent as text), `time(field, key?, utc?, unless?, lenient?)`
+  (an ISO, RFC 2822 or epoch timestamp to the user's local time; a zoneless ISO time is the source's local
+  clock, or UTC with `utc: true`; `lenient` leaves a junk row without a time instead of failing), `date(field,
+  key?)` (a `YYYY-MM-DD` date, never shifted by zone). `key` is dotted, `[n]` allowed, and converts that field
+  of every row. The text keeps its instant (§34).
+- `zip(field, with, as)`: parallel arrays of equal length become rows (at most 500; `with` 1..7 names;
+  length mismatch `transform_type`, missing name `transform_miss`).
+- `label(field, table, key?)`: an integer code to words from an app-shipped table (`wmo_weather`, the WMO
+  interpretation codes). An unknown code is `transform_type`, never a guess.
+- `window(field, key, window, zone, utc, unless, step, floor)`: cuts a time-indexed list to the asked stretch on
+  every run (§32), keyed by an axis cell. `zone` is the source's zone, `utc` marks zoneless times as UTC,
+  `unless` is a to-be-decided flag, `step` is `day|hour|period`, and `floor: false` keeps `step` while
+  disabling the current-hour floor.
 
-Added in v-next (§29 flow-engine phase):
-- `where(field, key, op, value)` — filter a list-of-objects in place (like
-  `sort_by` / `top_n`, ``field`` stays under the same name). ``key`` is a
-  single §4.1 segment; ``op`` ∈ `lt|le|gt|ge|eq|ne`; ``value`` is a JSON
-  scalar. Semantics mirror the §5 conditions: ordering ops require finite
-  numbers on both sides, eq/ne compare scalars strictly (bool ≠ number). A
-  non-numeric item under an ordering op — or a list entry missing ``key`` —
-  is silently EXCLUDED, not a failure (filtering is selection, not
-  validation). A non-list ``field`` is a stage failure `transform_type`.
-  ``op`` also takes `starts_with` (the where transform only, not §5
-  conditions): ``value`` must be a non-empty string and an item matches when
-  its string value starts with it; a non-string item is excluded. Feeds code
-  categories as prefixes (NHC basin bins `AT1`/`EP2`/`CP1`).
+### 4.3 Bind and render-validate
 
-Added for Library answers (§32, 2026-09-29) — same closed-set discipline, all pure:
-- `number(field, key?)`, `time(field, key?, utc?)` and `date(field, key?)` — a number sent
-  as text → a number; an ISO / RFC 2822 (RSS `pubDate`) / epoch timestamp → the
-  user's local time (a zoneless ISO time is the source's local clock, or UTC with
-  `utc: true`) ("6:48 PM",
-  "Tue 6:48 PM", "Oct 3, 6:48 PM"); a `YYYY-MM-DD` date → "Tue Sep 29" within a
-  week, else "Sep 29" (", 2027" in another year), never shifted by time zones.
-  `key` (dotted, `[n]` positions allowed: `games[0].gameDate`) converts that field
-  of every list row.
-- `zip(field, with, as)` — `field` and each name in `with` (1..7 distinct other
-  outputs) are lists of the SAME length (else `transform_type`; a missing name is
-  `transform_miss`); writes `as` = rows `[{field: a0, with1: b0, …}, …]` (≤500 rows).
-  A table stored as parallel arrays (Open-Meteo `daily`) becomes a list.
-- `label(field, table, key?)` — an integer code → words from a table the APP ships
-  (`table` ∈ `wmo_weather` only: the WMO weather interpretation codes Open-Meteo
-  serves — 0 Clear sky, 1 Mainly clear, 2 Partly cloudy, 3 Overcast, 45 Fog,
-  48 Freezing fog, 51/53/55 drizzle, 56/57 freezing drizzle, 61/63/65 rain,
-  66/67 freezing rain, 71/73/75 snow, 77 Snow grains, 80/81/82 rain showers,
-  85/86 snow showers, 95 Thunderstorm, 96/99 thunderstorm with light / heavy hail).
-  A code not in the table is `transform_type`, never a guess.
-- `reverse(field)` — a list in reverse order (a source listing oldest first).
+Binding walks the scene, resolves every `{"$bind": path}` and `{{path}}` against the pipeline output,
+enforces the §5 caps, and produces the bound payload: the scene with data inlined. That is what
+`ni_snapshots` stores and what the client renders. An unresolved binding, a type mismatch or a cap violation
+fails the run; `last_good` keeps rendering.
 
-### 4.3 Bind + render-validate (implicit, always last)
+## 5. Scene grammar
 
-Binding walks the scene, resolves every `{"$bind": path}` and `{{path}}`
-interpolation against the pipeline output, enforces §5 caps, and produces the
-**bound payload**: the scene with data inlined — this is what `ni_snapshots`
-stores and what the client renders. Any unresolved binding, type mismatch, or cap
-violation fails the run; `last_good` keeps rendering.
+A scene is a tree of nodes. The set is closed: an unknown `type` fails validation on the server and is refused
+by the client.
 
-## 5. Scene grammar (v1)
+Layout: `stack {dir: v|h, gap: sm|md, children}`, `grid {cols: 2..4, children}`, `divider`.
 
-A scene is a tree of nodes. Closed node set; unknown `type` = validation failure
-server-side and refusal client-side.
+Content (each value-like prop is a JSON literal or `{"$bind": "<path>"}`):
 
-Layout:
-- `{"type": "stack", "dir": "v" | "h", "gap": "sm"|"md", "children": [...]}`
-- `{"type": "grid", "cols": 2..4, "children": [...]}`
-- `{"type": "divider"}`
+- `text {value, role: title|label|value|caption, tone, size: sm|md|lg}`; `{{path}}` interpolation in the value.
+- `number {value, format: plain|compact|percent|currency, unit, tone, size}`.
+- `chip {value, kind}`, `bar {value, max, tone}`, `icon {name, tone}` (a lucide subset).
+- `repeat {items: {"$bind": list}, max <= 50, template}`; inside the template, `item.` paths resolve against the
+  current element.
+- `spark {points: {"$bind": "history.<name>"}, kind: line|bars, tone}`: at most 500 numeric points or `{t, v}`
+  points; inline SVG, no axes.
+- `gauge {value, min, max, tone, label}`: `max > min`; clamping is presentation only.
+- `image {alt <= 200}`: the pixel channel (§24). A spec carries only `alt`; the binder injects the server-owned
+  same-origin `src`. Requires an `http_image` source.
+- `form {...}`: a designed card (§34). Hand-authored `stack` scenes (chat, templates) keep this grammar.
 
-Content (each `value`-like prop accepts a JSON literal or `{"$bind": "<path>"}`):
-- `{"type": "text", "value": "…{{path}}…", "role": "title"|"label"|"value"|"caption",
-   "tone": "default"|"muted"|"accent"|"ok"|"warn"|"danger", "size": "sm"|"md"|"lg"}`
-- `{"type": "number", "value": …, "format": "plain"|"compact"|"percent"|"currency",
-   "unit": "…", "tone": …, "size": …}`
-- `{"type": "chip", "value": …, "kind": ""|"accent"|"ok"|"warn"|"danger"}`
-- `{"type": "bar", "value": …, "max": …, "tone": …}`  (rendered 0..1 of max)
-- `{"type": "icon", "name": "<lucide subset name>", "tone": …}`
-- `{"type": "repeat", "items": {"$bind": "<path to list>"}, "max": 20,
-   "template": <node>}` — inside `template`, paths beginning `item.` resolve
-   against the current list element.
+Conditions (bind time; the client never sees them): any content node may carry `"when": [rule...]` (at most
+5), each `{left, op, right, set}` with `left`/`right` a `$bind` or a scalar, `op` in `lt|le|gt|ge|eq|ne`
+(ordering ops need numbers: mismatch is bind failure `when_type`), and `set` `{tone}` and/or `{hidden: true}`.
+Rules run in order, the last tone wins, `hidden` removes the node. The bound payload carries only the result;
+the client validator rejects `when` in a bound payload.
 
-Added in v2:
-- `{"type": "spark", "points": {"$bind": "history.<name>"}, "kind": "line"|"bars",
-   "tone": …}` — a sparkline over a history series (§11) or any bound list of
-   numbers / `{t, v}` points; ≤ 500 points (excess = bind failure); rendered as
-   hand-rolled inline SVG (polyline / rects), stroke/fill from the tone token,
-   fixed viewBox, width 100%, no axes. Non-numeric point = bind failure.
-- `{"type": "gauge", "value": …, "min": 0, "max": …, "tone": …, "label": "…"}` —
-  an arc gauge; `max > min` required, value clamped visually to [min, max]
-  (clamping is presentation; the raw value still binds for conditions).
+Rules: text is text (no markdown, HTML or links; a lying string can render but cannot become UI); tones map to
+design tokens only; caps are 100 nodes after repeat expansion, depth 8, text 2000 characters. `on_tap` is
+reserved and refused.
 
-Added in v4c:
-- `{"type": "image", "alt": "…≤200 chars…", "when"?: […]}` — the §24 pixel
-  channel. A spec's image node carries only `alt` (`{{path}}` interpolation
-  allowed) — never a `src`; the binder injects the server-owned same-origin
-  `/api/ni/items/<id>/image?v=…` src at bind time. Requires an `http_image`
-  source (refused at spec time otherwise).
+## 6. Lifecycle
 
-Conditions (v2, **bind-time — the client never sees them**): any CONTENT node may
-carry `"when": [rule…]` (≤ 5 rules):
+States (`ni_items.state`): `draft`, `commissioning`, `live`, `degraded`, `failing`, `broken`. Pause is not a
+state: `enabled=false` is the pause, and resume restores nothing else. (`paused` sits in `_STATES` reserved and
+unused.)
 
-```json
-{"when": [{"left": {"$bind": "delta.value"}, "op": "lt", "right": 0,
-           "set": {"tone": "danger"}}]}
-```
-- `left`/`right`: `{"$bind": path}` or a JSON scalar. `op` ∈ `lt|le|gt|ge|eq|ne`
-  (ordering ops require numbers on both sides — mismatch = bind failure `when_type`;
-  eq/ne compare scalars strictly, no coercion).
-- `set`: `{"tone": <tone enum>}` and/or `{"hidden": true}`. Rules evaluate in
-  order at BIND time; later tone wins; `hidden` drops the node from the bound
-  payload entirely. The stored/bound payload carries only the RESULT — `when`
-  never survives binding, and the client validator continues to REJECT it in a
-  bound payload. Determinism is preserved: conditions are pure functions of the
-  run's data.
+Approval is consent: NI write tools are reviewed, egress, non-rememberable, so a create runs only after explicit
+approval and lands in `commissioning`, except in `draft` when a secret param is empty or `draft: true` is
+passed. An update whose source effectively changed returns to `commissioning`. Every `update_spec` strips
+`_c2_ok` and `contract` and resets the failure streak.
 
-Rules:
-- **Text is text.** Bound strings render as plain text — no markdown, no HTML, no
-  links. (Injection point P3: a lying string can render, but it cannot become UI.)
-- Tones map to design tokens only; no raw colors anywhere in the grammar.
-- Caps: ≤ 100 nodes after repeat expansion, depth ≤ 8, text ≤ 2000 chars, repeat
-  `max` ≤ 50. Enforced at bind time and again by the renderer.
-- Reserved for later phases (validators must REJECT, so old apps refuse new
-  scenes rather than mis-render them): `on_tap` (behaviors) — the only
-  remaining reserved type. v2 promoted `spark`/`gauge`; v4c promoted `image`.
+- `draft`: spec and `preview` snapshot; never fetches. Left by `POST /api/ni/items/{id}/commission` (409
+  unless draft, every secret filled and no param empty, and not a shell or a draft waiting for its sites).
+- `commissioning`: C1 is one real run (failure stays here, error surfaced); C2 is the user's verdict on
+  the real result (`POST /validate`, 409 unless commissioning); C3 is the automatic next-cadence run that must
+  satisfy the contract captured at C1. If `_c2_ok` is set but no contract exists, the first clean run
+  captures it and stays commissioning for one more clean run.
+- `live`: runs at cadence, every run contract-checked.
+- `degraded`: the latest run failed or violated the contract; `last_good` renders dimmed.
+- `failing`: 3 or more consecutive failures; the effective interval doubles per failure beyond 3 (cap 24 h).
+- `broken`: 8 consecutive failures over at least 7 days measured from `first_failure_at` (not `created_at`),
+  or a permanent refusal. The engine stops scheduling it; only an edit and re-commission leaves it.
 
-## 6. Lifecycle state machine (fully enumerated)
-
-States (plaintext `ni_items.state`):
-`draft → commissioning → live ⇄ degraded ⇄ failing → broken`. Pause is NOT a
-state: `enabled=false` is the pause (§2). The due query filters on `enabled`,
-and resume (`enabled=true`) touches nothing else — the item keeps its prior
-`state` and the next due pass simply picks it back up. The `'paused'` string
-sits in `_STATES` and the due query's `NOT IN` list reserved-but-unused: no
-code path writes it (`set_state('paused')` is never called).
-
-Approval IS consent. NI write tools are REVIEWED + egress + non-rememberable, so
-the create/update handler only ever runs after explicit human approval. The
-default landing state for a fresh `create_ni_item` is therefore
-**`commissioning`** (not `draft`) — the C1 tick happens on the next scheduler
-pass. Two exceptions land it in `draft` instead: (a) any `secret`-kind param
-whose value is empty (the credential must be entered via
-`PUT /credential` before the engine tries), and (b) an explicit `draft: true`
-in the create args (the agent's "show me first" affordance).
-
-An `update_ni_item` whose source effectively changed sends the item straight to
-`commissioning` too — the approved update card IS the re-consent. Every
-`update_spec` also strips `_c2_ok` and `contract` from the sealed body and
-resets `consecutive_failures` + `first_failure_at` (both attestations describe a
-specific spec and are meaningless once the spec moves).
-
-- `draft` — spec + `preview` snapshot (dummy data, agent-invented, validated
-  against the same grammar). Never fetches. Never expires in v1. Left by the
-  Activate button (`POST /api/ni/items/{id}/commission` — refuses 409 unless
-  state is `draft` and every secret param has a value).
-- `commissioning` — entered on create (default), on activate, or on the
-  re-consent path after an update whose source effectively changed.
-  - **C1 (immediate)**: one real run of the full pipeline. Failure → stays
-    `commissioning`, error surfaced for redrafting.
-  - **C2 (user)**: the real result renders on /ni with "Looks right" /
-    "Something's wrong". Wrong → back to draft with the user's note.
-    `POST /api/ni/items/{id}/validate` refuses with 409 unless the item is
-    currently `commissioning` (integrity: a verdict outside commissioning has
-    no C1 output to endorse).
-  - **C3 (automatic)**: the next engine-cadence run must pass and satisfy the
-    contract captured at C1. **If `_c2_ok` is set but no contract was captured
-    yet, the first clean run captures the contract and STAYS commissioning**
-    (one more clean run required to promote to `live`). If a contract IS
-    present when `_c2_ok` fires, the pre-bind check runs on every subsequent
-    run; a violation is a run failure that keeps the item at `commissioning`.
-- `live` — engine runs at cadence; every run contract-checked.
-- `degraded` — latest run failed or violated contract; `last_good` renders dimmed.
-  `latest` becomes an `ok=false` marker with an empty payload so the board's
-  latest-if-ok-else-last_good fallback picks up last_good on its own.
-- `failing` — ≥ 3 consecutive failures; effective interval doubles per failure
-  beyond 3 (cap 24h).
-- `broken` — 8 consecutive failures over ≥ 7 days **measured from
-  `first_failure_at`** (the streak start), NOT `created_at`. A long-lived
-  healthy item that only starts failing today therefore can't be classed
-  broken from its birthday. `first_failure_at` is set on the FIRST failure of
-  a streak, cleared on success, on `update_spec`, and on `commission()`. A
-  permanent refusal (e.g. credential host mismatch) escalates straight to
-  `broken` without waiting on the counter. Engine stops scheduling broken
-  items; carrier-row alert fires; only user/agent action (edit → re-commission)
-  leaves it.
-
-Every failure records an `ni_runs` row with a host-free error class. `mark_checked`
-on every attempt is the backoff (feeds law).
+Every failure records an `ni_runs` row with a host-free class; `mark_checked` on every attempt is the backoff.
 
 ## 7. Data contract
 
-Captured by the system at commissioning (C1 result, confirmed by C2):
-
-```json
-{"shape": {"price": "number", "rows": "list", "rows[].amount": "number"},
- "bounds": {"price": {"min": 0}}}
-```
-- `shape` — type fingerprint of every pipeline output the scene binds.
-- `bounds` — optional plausibility ranges, honored-if-present:
-  `check_contract` enforces min/max on numeric leaves whenever a `bounds` block
-  exists. But nothing captures them — `capture_contract` writes `shape` only —
-  and no route or tool exposes a bounds editor, so today `bounds` has NO write
-  path (tests and hand-sealed specs aside). The "system-suggested,
-  user-editable" design remains aspirational.
-Checked on every run after binding; a violation is a contract failure (run fails,
-item degrades) even when everything parsed. Repair (later phases) targets contract
-satisfaction, not mere parsing.
+Captured at commissioning (C1 result, confirmed by C2): `{"shape": {output: type}, "bounds": {output: {min, max}}}`.
+`shape` fingerprints every output the scene binds. `bounds` are honoured if present, but nothing captures them
+today (`capture_contract` writes `shape` only). The contract is checked after binding on every run; a violation
+fails the run and degrades the card even when everything parsed. Repair targets contract satisfaction, not
+mere parsing.
 
 ## 8. Engine pass
 
-`ni.tick(app, pass_budget_seconds, breaker_open=None)` called from
-`scheduler.tick` after the feeds pass, feeds contract verbatim: locked →
-return; own cursor; due =
-`enabled AND state NOT IN ('draft','paused','broken') AND (last_checked IS NULL OR
-age > effective_interval)`, `NULLS FIRST`, oldest first; `_MAX_ITEMS_PER_PASS = 3`;
-per-item try/except; wall-clock budget between items; `mark_checked` on every
-attempt; host-free `last_status`. `model` sources additionally require
-`gateway.local_available()` when the route is local, and respect the scheduler
-breaker: `_auto_update_ni` passes the scheduler's `_breaker_open` to `tick`, and
-while it returns True, model-source items are SKIPPED (they stay due — no
-`mark_checked`, so the next tick with a healthy gateway picks them up).
-`http_json` and `internal.schedule` items are unaffected by the breaker (they
-don't touch the gateway).
+`ni.tick(app, pass_budget_seconds, breaker_open=None)` runs from `scheduler.tick` after the feeds pass. It
+returns when locked, keeps its own cursor, and selects items that are `enabled`, not `draft`/`paused`/`broken`,
+not held for the user's Keep (§33), and due (`last_checked` null or older than the effective interval, or
+`next_clock <= now`), oldest first, at most 3 per pass, with a wall-clock budget, per-item try/except and a
+host-free `last_status`. `model` sources need `gateway.local_available()` when the route is local and skip
+while the scheduler breaker is open (they stay due). Rendered cards have their own window (§35).
 
-Bound-payload guards on every write: `bind_scene` results are re-checked against
-per-prop expectations (text/chip string ≤ 2000 chars; number/bar numeric+finite;
-repeat items list) — a mismatch is `bind_type`. The JSON-serialized bound
-payload is capped at 256 KiB before `write_snapshot`; exceeding = run failure
-`payload_too_large`. Any exception on the whole finalize path (contract check,
-bind, snapshot write) is wrapped as `NIError` so mark_checked + `ni_runs` row +
-failure bump + `latest` ok=false snapshot fire on every failure path (a raw
-`ValueError` used to skip the run row entirely).
+Guards on every write: bound props are re-checked (`bind_type`); the bound payload is capped at 256 KiB
+(`payload_too_large`); any exception on the finalize path becomes an `NIError`, so `mark_checked`, the run
+row, the failure bump and the `latest` ok=false snapshot always fire. A due item that is not fetch-due takes
+the clock pass (§34). Capacity kinds (`host_busy`, `render_busy`, `render_unavailable`) are never failures.
 
-## 9. Tools and tiers (v1)
+## 9. Tools and tiers
 
-| tool | tier | notes |
-|---|---|---|
-| `list_ni_items` | OBSERVE | plaintext state + titles |
-| `read_ni_item` | OBSERVE | spec + health + latest bound payload (untrusted-data provenance line first, KB-tool precedent) |
-| `read_ni_spec_guide` | OBSERVE | compact NI spec-grammar reference (sources, pipeline ops, scene nodes, bindings, params, history/alerts, `preview_payload`) the drafting agent MUST consult before drafting a `create_ni_item` / `update_ni_item` spec |
-| `create_ni_item` | REVIEWED, egress | full spec + preview payload; validates everything; lands in `commissioning` (approval == consent) unless a secret param is unfilled or `draft: true` is passed |
-| `update_ni_item` | REVIEWED | partial; a source change (URL/headers/type/instruction OR the value of any param referenced by `source.url` via `{{param:}}`) sends the item to `commissioning` (re-consent). Optional `preview_payload` rewrites the preview snapshot alongside the spec — note the preview is stale until this is passed |
-| `set_ni_item_enabled` | REVIEWED | pause/resume |
-| `run_ni_item_now` | REVIEWED, egress | clears `last_checked`; refuses draft/paused/broken |
-| `delete_ni_item` | IRREVERSIBLE | typed confirm |
+The model registry exposes four NI tools: `list_ni_items` and `read_ni_item` (OBSERVE; the read returns a
+provenance line first, the journal, `state_explanation` and `user_next_action`) and `run_ni_item_now`
+(REVIEWED, egress; clears `last_checked`, refuses draft, paused and broken). Creating, updating, deleting and
+pausing are not model tools: the NI page owns every write. The handlers survive as `tools.INTERNAL_NI_TOOLS`
+and `INTERNAL_NI_PREVALIDATE` for the routes and tests; a fabricated call to a retired name has no executor
+and is answered inline with `cannot run tool '<name>'`.
 
-`NI_WRITE_TOOLS = {create, update, set_enabled, run_now}` joins
-`UNATTENDED_NEVER_AUTO`. None of the NI write tools are ever rememberable
-(consent.py returns `None` for unlisted egress tools by default — leave them
-unlisted on purpose).
+`NI_WRITE_TOOLS = {run_ni_item_now}` joins `UNATTENDED_NEVER_AUTO`; none are rememberable. Create and update
+carry a pure pre-park `prevalidate` that runs the same checks as the handler. Item ids are validated as
+UUID-shaped before an approval card can park, and a miss returns the real card list. `create_ni_item` refuses
+`http_json` sources: the flow is the only door for them (§26).
 
-Propose-time validation (S6, field-blocking defect fix 2026-09-13):
-`create_ni_item` and `update_ni_item` carry a pure pre-park `prevalidate`
-that runs the same spec/scene/preview-bind checks the handler runs. A
-malformed draft is bounced INLINE to the model with the validator's exact
-message plus a pointer to `read_ni_spec_guide` — no card parks, the user is
-not asked to approve a spec that would fail post-approval, and the model
-gets the error in time to retry. Store-visible checks (composite depth,
-source-change re-consent) still run at execute time.
+## 10. HTTP surface
 
-The creation consent law: the ActionCard for `create_ni_item` must show the source
-URL host + path unmissably and the user must have picked the source in
-conversation before the card is parked. Approving the card is what moves
-`draft → commissioning`.
+All handlers answer 423 when locked. Desktop-local means the launcher token or a loopback browser session;
+writes are audited.
 
-## 10. HTTP surface (v1)
+Reads: `GET /api/ni/board` (every item: plaintext state and freshness, the decrypted bound payload from
+`preview` for drafts else `latest` ok or `last_good`, `flow`, `actions`, `awaiting_yes`, `shell`, `born`,
+`needs_credentials`, `needs_params`, `c2_ok`, `fit`, `interpretation`, `query.coverage`, `brief`, and for
+page-browser cards `rendered`, `render`, `draft`, `preview`); `GET /api/ni/items/{id}` (spec with secrets as
+names, health, runs); `GET /api/ni/items/{id}/flow` (the per-item poll: `{id, state, flow, awaiting_yes,
+actions}`, strictly read-only); `GET /api/ni/items/{id}/image` (§24); `GET /api/ni/notices` (§17); `GET
+/api/ni/findings`; `GET /api/ni/library`; `GET /api/ni/mcp-servers`; `GET /api/ni/items/{id}/export-template`.
 
-- `GET  /api/ni/board` — all items: plaintext state/freshness + decrypted bound
-  payload (`preview` for drafts, else `latest` ok / `last_good`).
-- `GET  /api/ni/items/{id}` — spec (secrets as names), health, run history.
-- `POST /api/ni/items/{id}/validate` — C2 verdict `{ok: bool, note?: str}`.
-  Refuses 409 unless the item is currently `commissioning`. On a card awaiting the
-  user's YES (§33) ok=true is the YES and ok=false re-lands the source pick without
-  that source (response `repick: "repick" | "relocate"`).
-- `POST /api/ni/items/{id}/commission` — the Activate button on the drafted
-  card: `draft` → `commissioning`. Refuses 409 unless state is `draft`, and
-  409 with a clear detail when any secret param is still unfilled. Response
-  `{"state": "commissioning"}`.
-- `POST /api/ni/items/{id}/run` — manual refresh (engine path, same guards).
-  Refuses 409 for `draft` and `broken`, and 409 when paused (`enabled=false`).
-- `PATCH /api/ni/items/{id}` — position/display/enabled (UI edits).
-- `DELETE /api/ni/items/{id}`.
-- `PUT  /api/ni/items/{id}/credential` — enter a secret param value
-  (desktop-local, body `{name, value, host}`); stores under `ni:<id>:<name>`,
-  host-bound (host IDNA-lowercased at store time so it matches
-  `urlparse().hostname`). Secrets never travel through chat or tool args.
-- All handlers 423 → the standard locked contract; literal paths before `{id}`
-  (schedule_routes ordering comment).
+Item writes: `POST /validate` (the C2 verdict; §33 for Keep and "try another source"), `POST /commission`,
+`POST /activate` (§35), `POST /switch-feed` (§35), `POST /run` (409 for draft, broken and paused), `PATCH` (position, display, enabled, title, `interval_minutes`), `DELETE`, `PUT /credential` (`{name,
+value, host}`, host-bound under `ni:<id>:<name>`, never through chat), `PUT /param`, `POST /refine`, `POST
+/repair-policy`, `POST /brief-summary` (§37), `POST /l2-proposal/apply` and `/dismiss` (§23),
+`POST /apply-template-update` (§20).
 
-## 11. History (v2)
+Creation flow: `POST /api/ni/intake {request, source_url?, allow_duplicate?}` (the composer; §29),
+`POST /flow/retry`, `/flow/cancel`, `/flow/pick-source`, `/flow/access`, `/flow/fix`, `/flow/answer`.
+Library and MCP management routes are under `/api/ni/library/*` and `/api/ni/mcp-servers`.
 
-Optional spec field:
+## 11. History
 
-```json
-{"history": {"track": {"priceLog": "price"}, "max_points": 100}}
-```
+`{"history": {"track": {"priceLog": "price"}, "max_points": 100}}`.
 
-- `track`: name → pipeline-output path (§4.1 grammar). ≤ 4 series; values must be
-  numeric at run time (non-numeric = run failure `history_type`). Series names
-  share the output namespace rules (no `item`, no collisions with pipeline
-  outputs).
-- After every SUCCESSFUL run (commissioning included), the engine appends
-  `{"t": "<iso8601 UTC>", "v": <number>}` per tracked series and trims to
-  `max_points` (≤ 500, default 100), storing all series in the sealed
-  `ni_snapshots` slot `history` (AAD `ni_snapshot:<id>:history`). Failed runs
+- `track` maps a series name to a pipeline-output path. At most 4 series, numeric at run time (else
+  `history_type`). A name must not collide with a pipeline output or be `item` or `history`.
+- After every successful run (commissioning included) the engine appends `{"t": "<iso8601 UTC>", "v": number}`
+  per series and trims to `max_points` (at most 500, default 100) in the sealed `history` slot. Failed runs
   append nothing.
-- The binder exposes each series as `history.<name>` (a list of `{t, v}`) to
-  `$bind`, `spark.points`, and `delta_prev`. `history.*` paths are read-only
-  inputs — extract/transform outputs cannot be named `history`. A series' `name`
-  also must not collide with any pipeline output (the tracked PATH points at an
-  output; the NAME is a separate namespace entry).
-- Tracked series with no points yet are **seeded as empty lists** for the binder,
-  so a spark over `history.<name>` binds to `[]` on the first run (C1) and
-  renders as an empty placeholder — an item charting its own history must be
-  able to commission. `delta_prev` likewise never fails on an empty series (§4.2).
-- Deleting the item deletes the slot (cascade); a source-change rewind KEEPS
-  history (same subject, new plumbing) unless the user deletes the item.
-- Renaming or removing a tracked series drops the old series on the next successful
-  append — retention guarantees the SAME names across rewinds, not renamed ones.
+- The binder exposes each series as `history.<name>` (a list of `{t, v}`) to `$bind`, `spark.points` and
+  `delta_prev`. A series with no points yet is seeded as an empty list, so a chart over its own history can
+  commission.
+- Deleting the item deletes the slot. A source-change rewind keeps history. Renaming or removing a series
+  drops the old one on the next append.
 
-## 12. Alerts (v2)
+## 12. Alerts
 
-Optional spec field — the same closed condition grammar as §5 `when`, promoted:
+`{"alerts": [{"name": "price-drop", "left": {"$bind": "delta.value"}, "op": "lt", "right": 0, "message":
+"{{title}}: price fell to {{price}}", "cooldown_minutes": 60}]}`.
 
-```json
-{"alerts": [{"name": "price-drop", "left": {"$bind": "delta.value"}, "op": "lt",
-             "right": 0, "message": "{{title}}: price fell to {{price}}",
-             "cooldown_minutes": 60}]}
-```
+- At most 5 rules; `name` matches `[a-z0-9-]{1,40}` and is unique; `left`, `op`, `right` are exactly the §5
+  conditions; `message` interpolates the run's outputs plus `{{title}}` (plain text, at most 500 characters);
+  `cooldown_minutes` is clamped to at least 5 (default 60).
+- Evaluated after every successful bind on live items. Edge-triggered: a rule fires on the false-to-true
+  transition, never again until it has been false at least once, and never within its cooldown. Per-rule state
+  lives in the sealed `alert_state` slot. Renaming a rule resets its state.
+- A fired alert, and every `broken` transition, posts to the NI carrier row (a reserved schedule id,
+  `neural-interface`), riding the existing badge, chat notice and /info archive. A rule whose binds cannot
+  resolve fails the run (`alert_bind`): alerts are part of the contract surface.
 
-- ≤ 5 rules; `name` = short slug (charset `[a-z0-9-]{1,40}`, unique per item);
-  `left`/`op`/`right` exactly as §5 conditions; `message` is a template
-  interpolated against the run's outputs plus `{{title}}` (plain text, ≤ 500
-  chars bound); `cooldown_minutes` clamped to ≥ 5, default 60.
-- Evaluated by the engine after every successful bind, on LIVE items only.
-  **Edge-triggered**: a rule fires only on the false→true transition of its
-  condition, and never again until it has been false at least once — and never
-  within its cooldown. Per-rule state (`active: bool`, `last_fired: ts`) lives in
-  the sealed `alert_state` snapshot slot; plaintext columns carry nothing about
-  alert rules or their names.
-- A fired alert (and every `broken` transition) posts to the **NI carrier row**:
-  a third reserved schedule id (`_CARRIER_IDS` pattern, id `neural-interface`,
-  title "Neural Interface") via `schedules.record_run`-style writes — riding the
-  existing unseen badge, the chat `### Scheduled Item ###` injection, and the
-  /info archive with zero new notification plumbing. Alert body = the bound
-  `message`; broken body = "<title> is broken — open Neural Interface, or ask me
-  to fix it." Host-free, as always.
-- The evaluation is deterministic (pure function of run outputs + stored state);
-  a rule whose binds cannot resolve marks the RUN failed (`alert_bind`), exactly
-  like a scene bind failure — alerts are part of the contract surface, not
-  best-effort.
-- Renaming an alert rule (changing its `name` slug) resets its per-rule
-  `alert_state` — the new name has no prior `active`/`last_fired` record, so a rule
-  whose condition is already true at the next run may fire immediately. Accepted
-  behavior: the operator saw the rename in the approved update card.
+## 13. `llm` pipeline stage
 
-## 13. `llm` pipeline stage (v2b — the ONE deterministic-core exception)
+`{"op": "llm", "instruction": "...", "output": {"summary": "string", "count": "number"}}`. The one
+deterministic-core exception.
 
-```json
-{"op": "llm", "instruction": "Summarize the headlines in one sentence each.",
- "output": {"summary": "string", "count": "number"}}
-```
+- At most one per item, anywhere in `pipeline`. `instruction` is user-visible, at most 2000 characters, free of
+  `{{param:}}`. `output` is a flat closed map of at most 6 fields, types `string | number | boolean`
+  (strings at most 2000 characters; `max_chars` 1..2000 clips them; `optional: true` is for string outputs
+  only).
+- The current pipeline value is serialized (at most 8 KB, truncation marked), fenced and heading-forgery
+  neutralized, and sent with the instruction to the `ni` route. Local models only: a non-local model fails the
+  run with `llm_requires_local`, never a cloud fallback. The call carries no tools. The reply must be a single
+  JSON object matching `output` exactly (strict parse, exact keys, finite numbers). One retry appends a fixed
+  generic sentence, never the raw parse error. A second failure is `llm_output` and `last_good` keeps
+  rendering.
+- Optional stage: any soft failure (no local model, a busy slot, an error, a bad reply) yields empty outputs and
+  the run continues. It waits at most 1 s for the local-model slot (`LocalBusy` becomes a soft `llm_error`), and
+  `run_item` tolerates the `llm_requires_local` or `llm_unrouted` refusal when every llm stage is optional.
+- Engine: items with an llm stage clamp `interval_minutes` to at least 5, at most one such item runs per pass,
+  and they require `gateway.local_available()` and a closed breaker.
+- Monitor hash: on a live llm-stage card the engine hashes the stage's source; unchanged bytes skip the model
+  (`llm_state`). The hash records the `spec_rev`, so turning a summary on again runs the model.
+- Quote grounding (`ni.ground_llm_outputs`): every number an llm string output states must appear literally in
+  the fetched page text (comma and space insensitive); a value with an ungrounded number is replaced with "".
+  Word paraphrases are not policed. Previous values are kept in `llm_state.values` for run continuity.
+- Honesty: the board row carries `interpreted: true` and the card shows an "Interpreted" chip. A flow shell does
+  not wear the chip.
+- Contract: llm outputs are contract-checked for shape and type; their values are non-deterministic.
 
-- Position: anywhere in `pipeline`, executed in order like any stage. At most ONE
-  llm stage per item.
-- `instruction`: user-visible spec text, ≤ 2000 chars, `{{param:}}`-free.
-- `output`: flat closed map, ≤ 6 fields, name rules as other outputs (no
-  collisions, no reserved names); types ∈ `string | number | boolean`
-  (strings bound ≤ 2000 chars). The stage's outputs join the pipeline namespace
-  like extract outputs.
-- Execution: the current pipeline value is serialized (≤ 8 KB excerpt, truncation
-  marked) and sent WITH the instruction to the `ni` route (or the item's `model`
-  override) — **local models only**: if the resolved model is not local
-  (`gateway.is_local` false), the run fails with class `llm_requires_local` —
-  never a cloud fallback, the selfreview precedent. The model call carries NO
-  tools; the data excerpt is fenced and heading-forgery-neutralized (claudecli
-  precedent) — injection containment is the output channel: the reply must be a
-  single JSON object matching `output` exactly (strict parse, exact keys, type
-  check; **`number` values must be finite** — `NaN`/`±Infinity` are refused so a
-  non-finite value never reaches the contract check or the sealed snapshot,
-  D4 audit 2026-09-09); one retry appends a FIXED generic sentence asking again
-  for the exact schema (never the raw parse error — safer: no payload fragments
-  can re-enter the prompt via the error message, D9 audit 2026-09-09); a second
-  failure raises `llm_output` and `last_good` keeps rendering.
-- Engine discipline (§8 additions): items with an llm stage clamp
-  `interval_minutes` to ≥ 5; at most `_MAX_LLM_ITEMS_PER_PASS = 1` such item per
-  pass; the pass requires `gateway.local_available()` for them (busy slot ⇒ the
-  item simply stays due — not a failure) and respects the scheduler breaker.
-- Honesty: the board row for such an item carries `"interpreted": true` and the
-  card shows an "Interpreted" chip — the user can always see which cards contain
-  a model's reading of the data rather than pure arithmetic.
-- Contract note: llm outputs are contract-checked like any output (shape/types),
-  which bounds drift; their VALUES are inherently non-deterministic — bounds in
-  the contract apply if present.
+## 14. L1 self-repair
 
-## 14. L1 self-repair (v2b — local-model spec repair, egress-inert by construction)
+Trigger: an item reaches `failing` with a spec-shape failure class (`extract_miss`, `transform_type`,
+`contract_violation`, `bind_type`, `when_type`, `history_type`, `alert_bind`, `llm_output`) and
+`repair_policy.l1` is true. Never for transport classes (`fetch_failed`, `redirect refused`, `secret_*`,
+`llm_requires_local`) or `param_empty`.
 
-Trigger: an item reaches `failing` (≥ 3 consecutive failures) with a
-**spec-shape** failure class — `extract_miss`, `transform_type`,
-`contract_violation`, `bind_type`, `when_type`, `history_type`, `alert_bind`,
-`llm_output` — and `repair_policy.l1` is true. Never for transport classes
-(`fetch_failed`, `redirect refused`, `secret_*`, `llm_requires_local`): those are
-L0's domain (backoff) or the user's (credentials).
+- One attempt per failure streak: the sealed `_l1_last_attempt` must predate the current `first_failure_at`.
+  It survives reverts and trial clears; the streak marker resetting on success, update or commission is what
+  grants the next streak a fresh attempt. Requires a local `ni` route, `local_available()` and a captured
+  `contract` (otherwise the streak continues toward `broken`).
+- `_l1_trial` must be `{"rev_before": int >= 1}` and `_l1_last_attempt` an ISO-8601 string. Any user or agent
+  update strips `_l1_trial` (a user edit voids the trial, so a later revert can never restore a pre-update
+  revision or its consent).
+- Model input (fenced, neutralized, no tools): `goal`, the current extract and transform stages, the failure
+  class and detail, the captured contract, and at most 4 KB of the failing run's raw payload.
+- Model output, the entire repair surface: a JSON object with optional `extract` (full replacement paths map)
+  and/or `transform` (full replacement apply list, closed ops). Never `source`, `url`, `headers`, `schedule`,
+  `scene`, `llm.instruction`, `alerts` or `params`. Anything else, an invalid spec or non-JSON means the
+  attempt failed with no change.
+- `apply_repair(item_id, candidate, expected_rev=...)` rechecks `spec_rev` under `_SPEC_LOCK`; a concurrent user
+  update aborts it with `spec_changed`.
+- Under the tick, a repair needs a closed breaker, the pass's shared llm slot, and at most one repair per tick.
+  A manual run bypasses this (the click is the consent).
+- Trial: the repaired stages apply as a revision with origin `repair_l1`, keeping `contract`, `_c2_ok`, state
+  and counters (a repair never triggers re-consent). The next run is the trial: success with the contract
+  satisfied sticks, clears counters and posts a carrier notice ("<title> repaired itself - data mapping
+  updated."); failure reverts to the pre-repair revision. The revert holds `_SPEC_LOCK`, strips `_l1_trial`
+  inline, and records `repair_reverted` with `bad_rev_before`, `missing_prior` or `revert_unavailable` rather
+  than wedging.
+- Attempts write `ni_runs` rows (`repair_applied`, `repair_reverted`, `repair_failed`).
 
-- **One attempt per failure streak**: sealed spec field `_l1_last_attempt`
-  (system-written, like `_c2_ok`); an attempt is allowed only when it predates
-  the current `first_failure_at`. `_l1_last_attempt` is KEPT across a revert
-  (§14 trial-failure), a manual `_c2_ok` reset, and even a `_l1_trial` clear —
-  the streak marker itself (`first_failure_at`) resets on success/update/commission,
-  and that reset is what lets the next streak get a fresh attempt (D1 audit
-  2026-09-09). Requires a local `ni` route + `local_available()` (else silently
-  waits — the streak persists, so the attempt fires on a later pass). Also
-  requires the item's `contract` to be captured (non-null): with no contract
-  there is nothing to repair against, so `_maybe_repair_l1` bails silently and
-  the streak continues toward `broken` (D7 audit 2026-09-09).
-- **Sealed system-only keys** (`_l1_trial`, `_l1_last_attempt`): `validate_spec`
-  shape-checks them so an agent-authored spec cannot smuggle arbitrary shapes
-  through the sealed body — `_l1_trial` must be `{"rev_before": int>=1}` and
-  `_l1_last_attempt` must be an ISO-8601 string (D1 audit 2026-09-09).
-- **`update_spec` semantics for trial markers**: any user/agent update strips
-  `_l1_trial` (a user edit supersedes any in-flight trial — the trial is void;
-  carrying it forward would let the NEXT failure's revert restore a PRE-UPDATE
-  revision, silently undoing the user's edit and — worse — re-instating the old
-  source URL + old `_c2_ok` + old `contract`, bypassing re-consent). D1 audit
-  2026-09-09. `_l1_last_attempt` stays (see above).
-- **Model input** (fenced + neutralized, NO tools): the item's `goal`, the
-  current `extract`/`transform` stages, the failure class + detail, the captured
-  `contract`, and a ≤ 4 KB excerpt of the failing run's RAW payload. All four
-  fenced blocks (stages / contract / raw payload) ride the same
-  heading-forgery + triple-backtick neutralizer as §13 (D8 audit 2026-09-09) —
-  contract keys are payload-derived, so a fetched string could otherwise
-  forge a `### ...` section boundary or close the surrounding fence through
-  the sealed contract.
-- **Model output — the entire repair surface**: a JSON object with optional
-  `"extract"` (full replacement paths map, §4.1 grammar-validated) and/or
-  `"transform"` (full replacement apply-list, closed ops only). Nothing else:
-  never `source`, `url`, `headers`, `schedule`, `scene`, `llm.instruction`,
-  `alerts`, `params`. Strict parse + full spec re-validation; a reply that
-  touches anything else, fails validation, or isn't JSON = repair attempt failed
-  (recorded, no spec change).
-- **TOCTOU guard on apply** (D3 audit 2026-09-09): `apply_repair(item_id,
-  candidate, expected_rev=...)` reads `spec_rev` at the START of the attempt
-  and re-checks under `_SPEC_LOCK` at write time; a mismatch (a concurrent
-  user update landed while the multi-second model call was in flight) aborts
-  the apply and records `repair_failed` with error `spec_changed`. The trial
-  is NOT stamped, so the (already-superseded) failure ladder keeps its own
-  bookkeeping intact.
-- **Engine discipline for repair fires** (D5 audit 2026-09-09): under the tick
-  path, a repair attempt is subject to the same local-model discipline as an
-  llm-stage item — the scheduler breaker must be closed, the pass's shared
-  llm slot must be free, and at most ONE repair may fire per tick. A fired
-  repair consumes the pass's llm slot; two failing items in the same pass
-  therefore see only the first repair (the second stays failing and picks up
-  the next pass with a free slot). Manual `POST /api/ni/items/{id}/run`
-  bypasses this discipline — it is user-invoked and singular; the user's
-  click is the consent that a single local model call is welcome.
-- **Trial semantics** (improvements.py discipline): the repaired stages are
-  applied as a revision with origin `repair_l1` — via a dedicated store path that
-  bumps `spec_rev` and records the revision but **keeps `contract`, `_c2_ok`,
-  state, and failure counters** (the contract IS the repair target; a repair
-  must NOT trigger re-consent — it cannot touch consent-bearing fields by
-  construction). The next engine run is the trial: success **and** contract
-  satisfied ⇒ repair sticks, counters clear, a carrier notice posts
-  ("<title> repaired itself — data mapping updated."); failure ⇒ automatic
-  revert to the pre-repair revision, `_l1_last_attempt` stands (no second
-  attempt this streak), the ladder continues toward `broken`. The revert
-  path holds `_SPEC_LOCK` and strips `_l1_trial` INLINE — never re-entering
-  a lock-taking helper — so a pruned/malformed `rev_before` or a corrupt
-  sealed revision records `repair_reverted` with a diagnostic `error`
-  (`bad_rev_before` / `missing_prior` / `revert_unavailable`) and clears the
-  marker rather than wedging the scheduler (D2 audit 2026-09-09).
-- Repair attempts and their outcomes write `ni_runs` rows (status
-  `repair_applied` / `repair_reverted` / `repair_failed`) — visible in the item's
-  run history. Everything is auditable: the revision spine holds the before/after.
+## 15. `http_page` and `internal.kb`
 
-## 15. `http_page` and `internal.kb` sources (v2c)
+`http_page`: `{"type": "http_page", "url": "https://example.com/status", "headers": {...}}`, with the URL,
+param, header, credential and redirect rules of `http_json`. Text is fetched through netguard (8 MB) and
+extracted in the subprocess jail (§16). Payload `{"text", "title"}` (text at most 200 KB). A page source may
+also carry `render: "browser"` and `sites` (§35). Compiled page cards add the `graph_extract` first-stage op:
+a page is read into a deterministic PageGraph (`pagegraph.py`: JSON-LD, OpenGraph, feed autodiscovery, h1-h3
+outline, bounded typed tables, data-bearing JSON blocks), and the card's values are closed selectors
+(`title`, `meta{key}`, `entity{etype, field}`, `outline{index}`, `table_cell`, `table_lookup`, `data_leaf`) a
+model picked from a code-enumerated menu. A selector that no longer resolves is graph drift and Fix recompiles.
 
-`http_page`:
-```json
-{"type": "http_page", "url": "https://example.com/status",
- "headers": {"X-Api-Key": {"$secret": "ni:<item_id>:api_key"}}}
-```
-- URL/param/header/credential/redirect rules are IDENTICAL to `http_json` (§3
-  — frozen scheme+authority, percent-encoded params, host-bound https-only
-  secrets, `allow_redirects=False` whenever any header rides).
-- Fetch via netguard with text/HTML content types, 8 MB cap. The body is then
-  **extracted in a subprocess jail** (§16) — HTML parsers are historically
-  vulnerable and this is the one place we parse hostile markup. Pipeline
-  payload: `{"text": str, "title": str}` (text ≤ 200 KB post-extraction).
+`internal.kb`: `{"type": "internal.kb", "query": "...", "limit": 5}`. Zero egress; runs the user's knowledge-base
+hybrid search. `limit` is clamped 1..10. Payload `{"results": [{"title", "snippet", "doc_id"}]}` (snippets at most
+500 characters). Imported-vault content keeps its third-party status; the pipeline treats the bytes as
+untrusted.
 
-`internal.kb`:
-```json
-{"type": "internal.kb", "query": "quarterly spending", "limit": 5}
-```
-- Zero egress: runs the knowledge-base hybrid search on the user's own library.
-  `limit` clamped 1–10. Payload: `{"results": [{"title", "snippet", "doc_id"}]}`
-  (snippets ≤ 500 chars each). Requires the unlocked KB; locked ⇒ the engine
-  isn't running anyway. Imported-vault content keeps its third-party status —
-  the pipeline treats every source's bytes as untrusted, this one included.
+## 16. Subprocess jail
 
-## 16. Subprocess jail (v2c)
+For parse steps over hostile input (`http_page` extraction, `jail_extract`). The child is `sys.executable -c`
+importing only the extractor, with a stripped environment (no `SMARTBRAIN_*`, no `ANTHROPIC_*`, minimal PATH),
+a private cwd and `start_new_session=True`. Input goes over stdin; output is one size-capped JSON object on
+stdout; stderr goes to devnull. Resource limits come from `resource.setrlimit` (CPU, address space, no cores;
+POSIX only). A watchdog kills the process group at the deadline. Timeout, crash or malformed output is the
+run-failure class `extract_jail`. The parent validates the payload as a closed set, so a compromised child
+cannot widen it. A busy extractor slot is a capacity outcome (`jail_busy`).
 
-For parse steps over hostile input (today: `http_page` extraction). Contract,
-modeled on claudecli.py's process hygiene:
+## 17. Notices endpoint and tray notifications
 
-- Child = `sys.executable -c` entry importing only the extractor; **stripped
-  environment** (no `SMARTBRAIN_*`, no `ANTHROPIC_*`, minimal PATH — the
-  claudecli `_cli_env` discipline), private cwd, `start_new_session=True`.
-- Input over stdin (bytes), output = one JSON object on stdout (size-capped);
-  stderr goes to devnull — NOT merged into stdout (one dependency warning on a
-  merged stream would corrupt the JSON parse forever; an unread pipe could fill
-  and wedge the child). The failure class comes from exit/timeout/parse state
-  alone.
-- Resource limits in the child via `resource.setrlimit` (CPU seconds, address
-  space, no core files) — platform-guarded (the `resource` module is
-  POSIX-only; on Windows rely on the watchdog alone, and note it).
-- Watchdog timer kills the whole process group (`os.killpg`) at the deadline;
-  always reaped. Timeout/crash/malformed output ⇒ run failure class
-  `extract_jail` — never an exception past the engine's bookkeeping.
+`GET /api/ni/notices?limit=N` is desktop-local and unlocked-only. It returns the newest carrier-row entries
+`[{id, kind: alert|broken|repaired|proposal, body, ts}]`, newest first, limit at most 20. Kind derives from the
+carrier run status (`complete` is `alert`; unknown statuses read as `alert`). Bodies are sanitized at write
+time (alert messages by the interpolation guard; titles by newline collapse and a leading `#` quote). The
+launcher polls every 60 s, treats 423, connection failure or non-200 as skip, de-duplicates by highest-seen
+id, posts at most 3 notifications per poll ("...and N more on your Neural Interface."), and a locked vault
+produces none.
 
-## 17. Notices endpoint + tray notifications (v2c)
+## 18. Source catalog: the SmartBrain Library
 
-- `GET /api/ni/notices?limit=N` — **desktop-local** (Desktop authority: the
-  launcher's local token or a loopback browser session — R14), unlocked
-  only (423 otherwise). Returns the newest NI carrier-row entries
-  `[{id, kind: "alert"|"broken"|"repaired"|"proposal", body, ts}]`, newest
-  first, limit clamped ≤ 20. Kind derives from the carrier run status
-  (`complete`→`alert`, `broken`, `repaired`, `proposal` — §23's "fix ready to
-  review"; unknown statuses read as `alert`). The §20 library block/rollback
-  notice posts under status `broken` — same kind, reusing the launcher's
-  existing tone + dedupe; the launcher's per-kind title switch falls back to
-  "SmartBrain alert" for kinds it doesn't know, so `proposal` surfaces without
-  a launcher rebuild. Bodies are sanitized at WRITE time: alert messages by the §12
-  interpolation guard, and broken/repaired notices by the same newline-collapse
-  + leading-`#` quote applied to the embedded item TITLE when the carrier row is
-  posted (titles are user/agent-authored spec text and these bodies render
-  inside chat's `###`-delimited notice wrapper).
-- The native launcher polls the endpoint unconditionally every 60s; a 423
-  (locked), connection failure, or any non-200 reads as "skip" — which covers
-  healthy+unlocked in one probe. It surfaces NEW
-  entries via the existing `stack.Notify` (macOS/Linux; Windows has no Notify
-  implementation yet — documented gap). De-dup by highest-seen id in memory
-  (the `lastNotifiedVersion` idiom); at most 3 notifications per poll, extras
-  collapse to "…and N more on your Neural Interface."
-- A locked vault produces no notifications at all (the endpoint 423s) — tray
-  notices never leak sealed content past the unlock boundary.
+There is no built-in catalog. Sources come from the SmartBrain Library (§19, §20, §30 to §32), a signed
+collection of source records with declared answers. Search results and pasted links are offered as links or
+read through the open paths (§33).
 
-## 18. Source catalog (RETIRED 2026-09-28 — replaced by the SmartBrain Library, §30)
+## 19. Template pack format
 
-The curated ground for "AI suggests, user picks" (creation-flow law, §9).
-
-- v2c ships a **bundled** catalog: `app/smartbrain_3000/data/ni_catalog.json`,
-  in-repo (reviewed = trusted), loaded read-only at import. Shape:
-  `{"version": 1, "sources": [{"id", "title", "host", "url_template",
-  "docs_url", "auth": "none"|"key", "category", "notes"}]}` — every
-  `url_template` must pass the §3 URL-shape rules (literal https authority;
-  `{{param:...}}` only in path/query) and is validated by a test against the
-  real validator.
-- New OBSERVE tool `list_ni_catalog(category?)` — read-only, no egress —
-  returning the entries so the drafting agent suggests from vetted ground
-  first; live web research remains the labeled fallback. Suggested-source
-  provenance in chat: catalog entries are described as "from SmartBrain's
-  vetted catalog"; researched ones as "found via web search".
-- The remote signed catalog PACK (seq, Ed25519, pinned key, update checks) is
-  deliberately deferred to Phase 3 — it is the same trust machinery as the
-  template Library and ships once, together.
-
-## 19. Template pack format (v3 — the Global Library container)
-
-A **template** is an item spec with its slots empty; a **pack** is a signed,
-versioned collection of templates. The trust machinery is the vault subscription
-model reused: Ed25519 over canonical JSON, fingerprint display law, TOFU pin,
-monotonic seq, rollback refusal, KeyChanged blocking.
-
-Envelope (canonical JSON per vault_format's `canonical()` — sorted keys, no
-floats, duplicate-key rejection; signed over `b"sb-ni-pack-sig:v1\n" +
-canonical(payload)`):
+A template is an item spec with its slots empty; a pack is a signed, versioned collection. Trust machinery is
+the vault subscription model: Ed25519 over canonical JSON (sorted keys, no floats, duplicate keys rejected),
+fingerprint display law, TOFU pin, monotonic seq, rollback refusal, KeyChanged blocking.
 
 ```json
-{"sb_ni_pack": {
-   "version": 1,
-   "pack_id": "<uuid, stable for the pack's lifetime>",
-   "seq": 3,
-   "published_at": "2026-09-09",
-   "publisher": {"label": "SmartBrain project", "pubkey": "<b64 Ed25519>"},
-   "templates": [{
-      "id": "<slug, unique in pack>",
-      "title": "…", "goal": "…", "category": "…", "tags": ["…"],
-      "spec_template": { <§2 spec: params present with kind+label but EMPTY
-                          values; secret params carry the "ni:self:<name>"
-                          placeholder; contract null; repair fields absent;
-                          repair_policy absent (installer's local choice —
-                          Phase 4b D2c audit 2026-09-11); no credentials,
-                          no personal data> },
-      "preview_payload": { <bound scene, dummy data — §5-valid> },
-      "notes": "one honest sentence"
-   }]
- },
+{"sb_ni_pack": {"version": 1, "pack_id": "<uuid>", "seq": 3, "published_at": "2026-09-09",
+  "publisher": {"label": "...", "pubkey": "<b64 Ed25519>"},
+  "templates": [{"id": "<slug>", "title": "...", "goal": "...", "category": "...", "tags": ["..."],
+    "spec_template": {"...": "§2 spec: params with kind and label but empty values; secret params carry the 'ni:self:<name>' placeholder; contract null; no repair fields, no repair_policy, no credentials or personal data"},
+    "preview_payload": {"...": "bound scene, dummy data"}, "notes": "one honest sentence"}]},
  "sig": {"alg": "ed25519", "value": "<b64>"}}
 ```
 
-- Verification order on every fetch (vault_sync §5 discipline): shape/bounds
-  guards → `pack_id` matches the pin → signature against the PINNED key over the
-  exact served bytes → `seq >` pinned = update, `==` up-to-date, `<` = rollback
-  refusal. A different key = KeyChanged: reported, never applied, source blocked
-  until the user re-trusts with the exact offered key (passphrase re-auth,
-  vault precedent).
-- Bounds: ≤ 200 templates/pack, pack ≤ 2 MB, every `spec_template` passes the
-  FULL §2 validator (with empty param values allowed) and every
-  `preview_payload` the §5 bound-scene validator AT INSTALL and AT PACK LOAD —
-  the signature is never a validator bypass (P5).
-- The publisher's label is decoration; the FINGERPRINT (`SB-XXXX-…`, same
-  derivation as vaults) is the identity shown in trust UI. First contact PINS
-  the pack's ``publisher.pubkey`` (TOFU, vault-manifest precedent); every later
-  fetch is verified against that pin — the pubkey a future pack CLAIMS is
-  never consulted for the pin.
-
-## 20. Library source, install, and fleet healing (v3)
-
-- **One library source in v1** (the official), stored like a vault subscription:
-  sealed source record `{url, publisher_pubkey, pack_id, seq, added_at,
-  last_checked, blocked}` — TOFU-pinned on connect. Connect/disconnect are
-  desktop-local + explicit UI acts (feeds law). The official URL is prefilled,
-  never hardcoded-trusted: the pin still happens on first fetch.
-- **Install** (UI act, not chat): pick a template → the install sheet shows
-  title, goal, EVERY source host+path unmissably, required params → user fills
-  params (secrets via the credential path, never chat) → item created in
-  `draft` with sealed provenance `_template = {pack_id, template_id, seq,
-  spec_hash}` → the user's explicit **Activate** (commission) is the consent
-  event, same as any draft. Installing never auto-runs anything. `repair_policy`
-  is FORCED at install time to the safe default `{l1:true, l2_frontier:false}`
-  regardless of what a template ships (Phase 4b D2c audit 2026-09-11 — L2
-  opt-in is the installer's local `/repair-policy` act, never a pack setting).
-- **Fleet healing**: when a pack update changes a template (spec_hash differs),
-  every item carrying that `_template` provenance shows "Template update
-  available" on its card. Applying is per-item and user-driven: the diff is
-  shown (source changes highlighted), acceptance re-enters
-  `draft → commissioning` (a template update is NEVER silently applied and
-  NEVER inherits standing consent — the admin fixed the class; each user still
-  approves their instance). Param values and credentials carry over; `_c2_ok`,
-  contract, and trial markers reset (§6/§14 laws).
-- **Update checking**: piggybacks the engine tick at low frequency (24h default,
-  1h floor, vault_sync cadence discipline; manual "Check now" in the UI).
-  Library check failures are host-free statuses; dead-host escalation as vaults.
-- **Rollback vs. unreachable** (M3 audit 2026-09-09): a validly-signed OLDER pack
-  is NOT unreachable — the host answered. The source's `last_checked` still
-  advances (stopping the 30s refetch loop) and the status reads "host is serving
-  an older pack (v{remote} < pinned v{pinned})"; the consecutive-failure counter
-  and the `unreachable` escalation stay UNTOUCHED. `KeyChanged` blocks the same
-  way and does not count toward unreachable either.
-- **State-transition notice** (LOW#5 audit 2026-09-09): the first tick to
-  transition to `blocked` (KeyChanged) or rollback (older pack) posts ONE carrier
-  notice on the Neural Interface feed ("Library updates are blocked — open
-  Neural Interface → Library."). Subsequent ticks under the same state post
-  nothing — the pin persists the last state so restarts don't re-fire either.
-
-## 21. Export-as-template + submission (v3)
-
-- `GET /api/ni/items/{id}/export-template` (desktop-local): returns the §19
-  template JSON for the item — sanitizer strips: secret VALUES (secret params
-  reset to the `ni:self:` placeholder), string/number param values (emptied,
-  label kept), `contract`, `_c2_ok`, `_l1_*`, `_l2_*` (Phase 4b D2c audit
-  2026-09-11 — `_l2_proposal` / `_l2_last_attempt` are per-item engine state,
-  never a template's business), `repair_policy` (installer's local choice; the
-  install path forces the safe default `{l1:true, l2_frontier:false}` and the
-  template ships with none), `_template`, and (H2 audit 2026-09-09) rewrites
-  this item's `ni:<item_id>:<name>` refs (header `$secret` values and secret
-  param values) back to `ni:self:<name>` so the emitted template installs
-  cleanly for the next subscriber and never carries the original item's UUID.
-  The exporter REFUSES:
-  - `internal.schedule` sources — machine-local schedule id is meaningless
-    elsewhere;
-  - `internal.kb` sources (M6 audit 2026-09-09) — `query` is personal search
-    text; recreate as a template manually;
-  - any spec whose WHOLE substituted URL (path + query) OR its percent-decoded
-    form OR any `llm`-stage instruction contains an entered credential VALUE
-    (M5 audit 2026-09-09 — widened from "URL query only" so a credential pasted
-    into a path segment or inside a model instruction is caught).
-  Note: the credential-substring guard is belt-and-braces; the primary rule is
-  `$secret` discipline (credentials ride `{"$secret": "ni:..."}` refs, never
-  plain literals). Base64-encoded credentials are OUT OF SCOPE for the guard.
-  Items created BEFORE the `preview_data` slot existed (pre-Phase-3) refuse
-  export with a clear message naming the cause; recreate them in the current
-  app first (LOW#7 audit 2026-09-09).
-- Submission is a GitHub PR to the registry repo (file layout mirrors the pack:
-  one JSON per template + CI that validates every template with the app's own
-  validators). Only the operator (publisher-key holder) merges, signs, and
-  publishes the pack to the landing site (vault publish workflow, second key
-  `ni:publisher_ed25519` in the publisher volume — separate rotation domain
-  from the vault key).
-
-## 22. `mcp_tool` source (v4a — outbound MCP, the named philosophy extension)
-
-SmartBrain's MCP has been inbound-only by design. This section extends it the one
-way the operator approved: SmartBrain may CONSUME servers the user explicitly
-configures — never ambient `.mcp.json`, never discovery, never tool listings fed
-to models. The payoff: databases and the whole MCP ecosystem become card sources
-while credentials stay in the USER'S OWN server process (SmartBrain never holds a
-DB password).
-
-**Server registry** (NI-scoped v1):
-- Sealed store (feeds convention) of user-configured servers:
-  `{id, label, transport: "stdio"|"http", command?: str, args?: [str],
-  url?: str, enabled}`. CRUD is **desktop-local UI only** — no agent tool creates
-  or edits servers (the feeds "explicit UI act" law; a server config is
-  execution/connection authority).
-- `stdio`: SmartBrain launches the user's command per fetch — stripped
-  `SMARTBRAIN_*`/`ANTHROPIC_*` env (credential firewall), fresh process group,
-  watchdog kill + reap (claudecli hygiene), never persistent in v1.
-- `http`: connects to the URL the user typed. **This path deliberately does NOT
-  ride netguard** — the entire point is the user's own loopback/LAN server, which
-  netguard categorically (and rightly) blocks for anonymous fetches. The
-  consent-scoped exception lives HERE ONLY: the address was typed by the user in
-  a desktop-local act, is frozen thereafter, and nothing model-authored can ever
-  reach this code path with a different address. Redirects are refused by
-  constructing our own `httpx.AsyncClient(follow_redirects=False)` and passing it
-  in (the mcp package's default client hardcodes `follow_redirects=True`), so a
-  3xx surfaces as a plain transport error → `mcp_unavailable` before any request
-  re-issues to a rewritten host. Bounded timeouts + progressive 200 KB result cap
-  as below.
-
-**Result posture** (no raw byte-count read guard):
-- SmartBrain does NOT try to bound the raw MCP framing before parsing — the wall-
-  clock timeout is the containment. A hostile server is the user's own configured
-  code; making that assumption explicit is the point of the consent-scoped
-  exception above.
-- Per-item text cap: EACH `content` text item is truncated at 200 KB standalone
-  before joining, and the running joined size is tracked as we iterate so the
-  walk stops the moment the joined text hits 200 KB. A pathological many-item
-  result can't grow the pipeline past the payload ceiling.
-
-**Source spec**:
-```json
-{"type": "mcp_tool", "server_id": "<registry id>", "tool": "query",
- "arguments": {"sql": "SELECT count(*) FROM orders"}}
-```
-- `tool` + `arguments` are FROZEN literal JSON (no `{{param:}}` in v1); any
-  change is a source change → re-consent. The create/install consent surface
-  shows `MCP: <server label> → <tool>` plus the full frozen arguments,
-  unmissably (the frozen-statement law from the design's db_query discussion:
-  the string the user approved is the only thing that ever runs).
-- Execution: one `tools/call` per engine run (MCP client from the already-shipped
-  `mcp` package — client code only, no server ambient config). Result content
-  items of type text are joined; if the joined text parses as JSON, the payload
-  is `{"data": <parsed>, "text": <raw ≤200KB>}`, else `{"text": ...}` —
-  deterministic either way. Errors map to host-free classes (`mcp_unavailable`,
-  `mcp_tool_error`, `mcp_timeout`).
-- Injection rules: server tool DESCRIPTIONS are never fetched into any prompt or
-  spec; the user picks the tool by NAME. Results are untrusted data — every
-  existing containment (P1-P7, output-channel law) applies unchanged.
-- Engine discipline: 20s call deadline inside the pass budget accounting;
-  per-run connect/spawn + teardown; failures ride the normal health ladder.
-
-## 23. L2 frontier repair (v4b — park-only, the ladder's last rung)
-
-When L1 has exhausted its one attempt in a failure streak (attempted and
-failed/reverted) and the item still fails, a FRONTIER model may propose a fix —
-under the strictest consent in the system:
-
-- **Gates (ALL required)**: `repair_policy.l2_frontier` true on the item
-  (per-item opt-in, default false; settable only via the tool chokepoint's
-  approval card OR the desktop-local `POST /api/ni/items/{id}/repair-policy` —
-  a template pack MAY NOT ship `repair_policy` and the export sanitizer strips
-  it, so repair policy is ALWAYS the installer's local choice, Phase 4b D2c
-  audit 2026-09-11); the Claude Code provider connected (its own serve-time
-  consent gate — a 403 skips silently); L1 EXHAUSTED this streak — either
-  `repair_policy.l1` is false (L1 will never fire, so exhausted by definition;
-  Phase 4b D6 audit 2026-09-11) OR `_l1_last_attempt` predates the streak
-  marker `first_failure_at`. Honest limitation: with `l1=true` and no local
-  model available, L2 stays gated until L1 gets a turn (the fix is to disable
-  L1 explicitly, not to widen the gate); one L2 attempt per streak
-  (`_l2_last_attempt`, same predating rule as L1).
-- **What is sent** (same envelope as L1, claudecode containment applies): goal,
-  current extract/transform stages, real failure class + detail, the contract,
-  and the ≤4KB fenced+neutralized raw-payload excerpt — all four read from the
-  sealed `last_failure` snapshot the run-failure path seals for spec-shape
-  failure classes (Phase 4b D5 audit 2026-09-11; absent slot degrades to
-  class-only, matching the prior empty-string behavior). NEVER vault/KB content,
-  never secret values, never headers/URLs beyond what the spec's own stages
-  contain (they contain none). Consent scope (Phase 4c audit 2026-09-11
-  finding #6): items whose source is `internal.*` seal the failure with an EMPTY
-  excerpt — `internal.ni` carries other cards' data and `internal.kb` carries
-  library content, neither of which this item consented to egress; the L2 prompt
-  for such items rides on class+detail only.
-- **What comes back**: the L1 closed schema — `{extract?, transform?}` only,
-  full candidate re-validation. Anything else = attempt failed, recorded.
-- **PARK-ONLY**: a valid proposal is NEVER applied. It is stored as sealed
-  `_l2_proposal = {stages, created_at, model}` on the item, surfaced on the /ni
-  card as "Fix proposed — review" with a stage-level diff and Apply / Dismiss,
-  plus a carrier notice ("<title>: a proposed fix is ready to review."). Apply
-  = the SAME trial discipline as L1 (revision origin `repair_l2`, contract as
-  the pass bar, auto-revert on the next failure); Dismiss clears the proposal
-  (no re-propose this streak). Apply REFUSES 409 when the item is `broken` —
-  the fix path is edit → re-commission; a stale proposal is dropped on the
-  broken hop (Phase 4b D4 audit 2026-09-11). A user spec edit voids a pending
-  proposal (the §14 D1 law); a clean run resets the streak AND voids the
-  proposal (Phase 4b D8 audit 2026-09-11 — a resolved item would otherwise
-  keep the "Fix proposed" chip forever); a failed trial's revert now carries
-  `_l2_last_attempt` onto the restored spec (Phase 4b D1 audit 2026-09-11 —
-  the one-attempt-per-streak marker survived the revert path, closing an
-  unbounded per-Apply re-fire).
-- **Engine hygiene**: the frontier call takes minutes (claudecode floor 300s) —
-  it must NEVER run inside the tick pass. The tick only marks eligibility; the
-  call runs on a single bounded daemon worker (one in flight process-wide,
-  agent_routes._spawn precedent), which writes the proposal when done. App
-  shutdown abandons it harmlessly (proposal generation is idempotent per
-  streak).
-- Every attempt/outcome is an `ni_runs` row (`repair_l2_proposed` /
-  `repair_l2_failed`); Apply/Dismiss are audited.
-
-### 23.1 Re-research proposals (S9)
-
-A card with a sealed `recipe` (the researcher's, plan 6.1) adds two things to the ladder.
-
-- **`constraint_drift`.** After a successful fetch and pipeline, `_finalize_run` re-runs, on
-  the fresh outputs, the verifier checks that passed at Keep (`ni_refresh.drift_reasons`:
-  place, window, threshold, compare, empty; the recipe's own `verification` is the record of
-  what passed). A failing one fails the run with status `constraint_drift` (`ni.CONSTRAINT_DRIFT`):
-  failure streak, backoff and `last_good` as for any failure; no L1 (not a spec-shape class), no
-  stage-patch L2. A spec with no `recipe` skips the check entirely.
-- **Parked re-research.** `_collect_l2_candidate` also marks a card when `ni_refresh` says its
-  failure may ask for a new source and `ni_research_flow.research_plan` is `cloud` (the v2 flow,
-  research not off, the card's own `_model_consent` equal to the cloud route). The same
-  single-flight L2 worker then runs `ni_research_flow.reresearch`: the researcher on
-  `recipe.question` with the Library only and the card's current source withheld. A proposal is
-  sealed as `_l2_proposal = {spec, origin: "research", reason: constraint_drift|source_dead,
-  created_at, model}` (a whole replacement card carrying the old `_model_consent`, `_born` and
-  `repair_policy`) in place of `stages`. It is never applied by code. Apply swaps the card
-  through `apply_repair(replace_spec=True)`: the old `contract` and `_c2_ok` are not carried
-  (the next clean run captures a new contract); the §14 trial and auto-revert apply.
-- **Triggers** (`ni_refresh.TRIGGER`, by `recipe.tier`): `curated` asks only once the card is
-  `failing` (the backoff has walked; no local repair applies to these statuses);
-  `verified_endpoint` and `page_reading` ask on the first `constraint_drift`
-  (`degraded` or `failing`) and, for a dead source (`fetch_failed`), once `failing`.
-- **Bounds.** The durable record is the rev-preserving sealed marker `_research_last_attempt =
-  {at, streak, outcome: started|proposed|declined, declines}` (modelled on `_l2_last_attempt`:
-  written by `reresearch` before the model call, carried through `_revert_l1_trial_if_active`,
-  `apply_repair` and `update_spec`, stripped on export and install, refused in template packs).
-  `ni_refresh.may_research` reads it, never the pruned `ni_runs` ring (`repair_research_*` rows
-  stay as telemetry). No second attempt within 24 hours of a start; no further attempt in a
-  streak (`streak` = `first_failure_at`) that already parked a proposal (a Dismiss is final until
-  the streak resets); after each decline in a streak the wait is 1, 2, 4 days, capped at 7.
-  Process-wide, `take_budget` spends one of `SMARTBRAIN_NI_RERESEARCH_DAILY` / meta
-  `ni_reresearch_daily` (default 10, `0` = off) per UTC day from the meta counter
-  `ni_reresearch_count` (`day:n`); `_research_eligible` reads it before the card is marked.
-  Research off, ask or local never sends anything. `recipe.sources[].scope` (optional) records the
-  Library scope the place check had at Keep; the refresh re-check passes it back.
-
-## 24. `http_image` source + `image` scene node (v4c — the pixel channel)
-
-Cards can watch an IMAGE the user consented to: a weather-radar frame, a webcam
-still, a status badge, a comic. Pixels are fetched, sealed, and re-served
-same-origin — the only CSP-legal path (`img-src 'self' data:`), and remote
-images never reach the page.
-
-`http_image`:
-```json
-{"type": "http_image", "url": "https://radar.example.com/latest.png",
- "headers": {"X-Api-Key": {"$secret": "ni:<item_id>:api_key"}}}
-```
-- URL/param/header/credential/redirect rules IDENTICAL to `http_json` (§3, one
-  shared validator). Fetched via netguard with image content types, 4 MB cap,
-  wall-clock deadline (§15 drip-host rule).
-- The body must sniff as a real raster: magic-byte allowlist PNG / JPEG / GIF /
-  WebP — the served Content-Type header is IGNORED (attacker-controlled); the
-  SNIFFED type is what gets stored and later served. Anything else = run
-  failure `image_type`. No SVG (scriptable), no decoding/re-encoding in v1
-  (the app never parses the raster — the browser does, sandboxed by the page).
-- Bytes are sealed into the `image` snapshot slot (AAD-bound like every slot);
-  the pipeline payload is metadata only:
-  `{"image": {"bytes_len": int, "format": "png"|"jpeg"|"gif"|"webp"}}` —
-  pixels never enter the pipeline/scene/model surfaces.
-
-`image` scene node (un-reserved in v4c, server AND client):
-- Bound form written BY THE SERVER only:
-  `{"type": "image", "src": "/api/ni/items/<id>/image?v=<created_at>", "alt": str≤200}`
-  — the binder injects the item's OWN route; a spec's image node carries only
-  `alt` (plus optional `when`), never a src. Client validator refuses any src
-  that is not exactly the same-origin `/api/ni/items/` image path.
-- `GET /api/ni/items/{id}/image` (unlocked; 404 when no image): decrypts and
-  serves the sealed bytes with the SNIFFED content type,
-  `Cache-Control: no-store`, and the standard hardening headers. Registered
-  before the SPA catch-all like every /api route.
-
-## 25. `internal.ni` composite source (v4c — cards over cards, depth-1)
-
-```json
-{"type": "internal.ni", "items": {"stock": "<item-id>", "spend": "<item-id>"}}
-```
-- ≤ 5 referenced items, alias keys follow output-name rules. Zero egress.
-- **Depth-1 by construction**: a referenced item whose own source is
-  `internal.ni` is refused at create/update AND at run time (a later edit could
-  create the cycle) — class `composite_depth`.
-- Runtime payload per alias:
-  `{"<alias>": {"title", "state", "payload_at", "history": {name: [{t,v}]}}}`
-  — the referenced item's HISTORY SERIES (the numeric substance) plus health
-  metadata. Bound scenes/pixels of other cards are NOT exposed (presentation
-  is not data); a missing/never-run referenced item yields empty history +
-  state, never a failure (composites degrade, they don't break).
-- History `{t,v}` lists are ordinary list-of-objects: the existing aggregates
-  (`sum/avg/min/max/count` with key "v") and `spark` bind them directly —
-  cross-item math needs no new pipeline vocabulary.
-- Consent: the create/install card lists every referenced item BY TITLE
-  (promoted line: "Combines: <title>, <title>"); referenced-item DELETION
-  leaves the composite degrading gracefully (empty series) with its health
-  chip telling the truth. Referenced items' own consent is untouched — a
-  composite grants no new egress to anyone.
-
-## 26. Recipes (RETIRED 2026-09-28 — replaced by the SmartBrain Library, §30)
-
-Field lesson (2026-09-13): the engine is deterministic; the AUTHORING edge was
-not — a model writing extract paths against a response shape it has never seen
-fails most of the time. Recipes make the primary creation path deterministic.
-
-- A **recipe** is a complete, tested item template living in the catalog: the
-  §19 template shape (spec_template with param slots + preview_payload) plus
-  catalog metadata (host, category, notes, auth) and an optional
-  `sample_response` (a trimmed REAL response the pipeline was written against).
-  The bundled catalog upgrades from URL templates to recipes; the same §19/§2
-  validators apply at import and in tests.
-- **One-door law (2026-09-14)**: the `create_ni_item_from_recipe` tool is
-  RETIRED from the model registry. Field lesson: two coexisting authoring
-  doors meant the model picked the legacy one mid-flow and created a card
-  with an EMPTY `symbol` param — Finnhub answered sentinel zeros for
-  `?symbol=` and the card commissioned a lying $0.00 quote. Recipes now
-  install ONLY through the flow (§29): `match_recipe` → `confirm_source`
-  pause (the approval card renders the recipe's `url_template` verbatim) →
-  `confirm_ni_flow_source` → deterministic handoff. The handoff fills param
-  slots by CODE where derivable (a `symbol` slot takes the same corroborated
-  ticker token that matched the finance recipe); anything code cannot derive
-  stays empty ON PURPOSE — the landing rule then forces `draft` and the
-  card's needs_params affordance asks the user (never a guessed value, never
-  a model blank). `ni:self:<name>` refs rewrite to `ni:<item_id>:<name>` at
-  handoff (install-path parity). The pending-tile `recipe_url` side-channel
-  survives for historical tiles only.
-- The guide + tool descriptions make the flow the ONLY path for `http_json`;
-  `create_ni_item` REFUSES `http_json` sources at prevalidate and remains the
-  door for the source types the flow does not build (model, internal.*,
-  mcp_tool, http_page, http_image, computed) — §27 governs the http_page
-  long tail, and the create-time netguard precheck now covers the whole
-  http_* family.
-- Proving: repo tests validate every recipe structurally (never network);
-  `tools/ni-library/prove.py` fetches each recipe's endpoint LIVE and runs its
-  pipeline end-to-end — run before releases and nightly in the future registry
-  CI. A recipe that stops proving gets fixed or pulled; subscribers heal per
-  §20.
-
-## 27. Sample-grounded freeform authoring (the long tail)
-
-When no recipe fits, blind drafting is forbidden by protocol:
-
-- New OBSERVE tool `derive_ni_paths`: `{sample: <JSON ≤32KB>, want?: str}` →
-  DETERMINISTIC code walks the sample and returns candidate leaf paths with
-  types + example values (§4.1 grammar, ready to copy into extract stages).
-  No model in the loop — transcription replaces imagination.
-- Mandated flow (guide + descriptions): fetch ONE real sample via the existing
-  approval-gated web_fetch → `derive_ni_paths` → build extract stages ONLY
-  from offered paths → create.
-- C1-failure feedback: `read_ni_item` on an item whose `last_failure` slot is
-  populated returns the bounded, provenance-labeled excerpt (http sources
-  only, §23 internal.* rule) so a fix conversation corrects paths against the
-  REAL payload instead of guessing again.
-
-## 28. Item journal + cloud-path session continuity
-
-**Item journal** (per-item memory for any later model, any later session):
-- New sealed snapshot slot `journal`: an append-only list (pruned to newest
-  20) of DETERMINISTICALLY composed entries
-  `{ts, kind: created|updated|param_changed|commissioned|c2_wrong|repaired|
-  reverted|source_changed|recipe, summary}`. Summaries are built from
-  structured facts by code (plus the user's own C2 notes verbatim); models
-  never write journal entries. Written at each lifecycle event by the store/
-  tool layer; cascades on delete; excluded from export.
-- `read_ni_item` returns the journal (after the provenance line) plus two new
-  deterministic fields: `state_explanation` and `user_next_action` — exact
-  strings per state+condition (e.g. commissioning + missing credential →
-  "waiting for the user to add the '<label>' key on the card; you cannot do
-  this for them — do not describe this card as live"). The model reports
-  state truth instead of inventing it.
-
-**Cloud-path session continuity** (claudecode + any session-capable CLI):
-- Today every agent-loop step spawns a stateless CLI process — slow, and the
-  model re-reads the whole transcript each step. A turn-scoped session fixes
-  both: step 1 opens a session (flags VERIFIED against the live CLI before
-  implementation), steps 2..N resume it sending only the delta, and the turn's
-  end (or its watchdog) DELETES the session artifacts. Containment unchanged:
-  same empty-toolset agent, `--setting-sources ""`, strict MCP, stripped env;
-  session files live only inside our private 0700 dir and never survive the
-  turn. Stateless per-call remains the fallback when the flags are missing.
-
-## Status truth (amendments to §10/§6 — the card must never lie)
-
-- Board rows add: `needs_credentials: [labels]` (secret params whose key is
-  absent from the store) and the existing last_status/consecutive_failures are
-  RENDERED: a commissioning/degraded/failing card states plainly what happened
-  ("First run failed — couldn't find the expected data (extract_miss), 4
-  attempts; last tried 2m ago") instead of "Waiting for the first run…".
-- Cards with `needs_credentials` show an **Add key** entry point (host-bound
-  credential modal — the previously missing UI); any item declaring a
-  secret-kind param lands in `draft` (the chat create tool has no SecretStore
-  in its ToolContext by design, so it cannot honestly know whether the
-  credential has been entered — draft is the honest landing), and `ni:self:`
-  is rewritten at create for install parity.
-- `create_ni_item` refuses a title that case-insensitively matches an existing
-  item unless `allow_duplicate: true` — the error names the existing card and
-  points at `update_ni_item`.
-- **needs_params (2026-09-14)** — the unfilled-slot posture, four layers deep:
-  a `{{param:X}}` that resolves to empty/None raises `param_empty` at
-  `substitute_params` (the engine NEVER fetches `?symbol=`); the landing rules
-  (`_initial_ni_state` / flow `_landing_state`) force `draft` while any
-  referenced non-secret param is empty; the commission route 409s naming the
-  param; board rows add `needs_params: [{name, label}]` and the card renders
-  a **Fill** affordance (Desktop-local `PUT /api/ni/items/{id}/param`; secrets
-  are refused there — they belong to the credential PUT). `param_empty` is
-  NOT L1-repairable: only the user can supply the value.
-- **item ids are never invented (2026-09-14)**: every item-addressed NI tool
-  prevalidates `item_id` as UUID-shaped (a slugged title bounces BEFORE an
-  approval card parks), and an execute-time miss returns the real card list
-  (id = title) so the model self-corrects in one step.
-
-## 29. The NI Flow Engine (deterministic creation, POC-validated)
-
-Field verdict (2026-09-13): the chat agent as ORCHESTRATOR is the flakiness —
-same request, same model: 16 minutes / ~10 approvals / 0 working cards via chat
-orchestration vs 4 seconds / 0 interventions / 10-of-10 diverse cases via the
-flow POC. Code owns the sequence; models fill exactly two narrow, validated
-blanks. The POC harness and its 10-case matrix are the acceptance bar.
-
-**States** (a flow record rides the item's journal + a sealed `flow` snapshot
-slot): `intent → source → confirm_source? → sampling → mapping → assembling →
-awaiting_credential? → ready(draft/commissioning per existing landing rules)`,
-plus terminal `unsupported(reason)` and `failed(class)`. The flow runs on a
-background worker (single-flight per item, L2-worker pattern); the draft card
-appears immediately and shows the live flow state; the tick never runs flows.
-A boot-time sweep (`_sweep_ni_flow_shells`, called from the NI tick) fails any
-non-terminal record older than 1h to `failed(stale)` so a worker that died
-between ticks never leaves a "Preparing card…" shell rendering forever (M3
-audit 2026-09-13).
-
-**Stages** (M = one bounded model call, closed schema, retry once; C = pure code):
-1. **Intent (M#1)**: request → `{kind: external_data|computed_only, subject,
-   cadence_minutes (default 15), wants[], threshold|null, display_hint}`.
-   `computed_only` routes to the computed source (below) when servable, else
-   `unsupported` with an honest sentence.
-2. **Source (C)**: consent-first ordering (C2 audit 2026-09-13). A user-
-   consented `known_url` (start_ni_flow / resume_ni_flow with a source_url)
-   ALWAYS wins and skips recipe matching — the frozen `spec.source.url`
-   equals the fetched URL byte-for-byte (invariant assertion). No known URL ⇒
-   recipe match over the catalog with a category-corroborated ticker heuristic
-   (a bare ALL-CAPS token no longer promotes past the threshold). Recipe hit
-   ⇒ the flow PAUSES in `confirm_source` with the recipe's `url_template` +
-   `title` sealed in the record; `confirm_ni_flow_source` (REVIEWED) is the
-   resume — the promoted "Fetches: <url>" line on that card is the operator's
-   consent, so the "no fetch until one is confirmed" pledge is literally true.
-   Recipe miss ⇒ pause in `source` with the `awaiting_pick` marker so chat
-   can surface candidates (consent moment #1 unchanged).
-3. **Sampling (C)**: one consented fetch; **deterministic downsampling** (every
-   list trimmed to 2 exemplars; re-trim to 1 if still >30KB) before derive.
-4. **Mapping (M#2)**: the menu is **pre-filtered by CODE to the field's expected
-   type** (harvested requirement — the model chose "°C" over 25.7 until the menu
-   forbade it); the model SELECTS paths only; code verifies membership + type,
-   retries once, else flow `failed(mapping)`. Fetched example strings in the
-   menu are newline-neutralized so a JSON body's `\n` cannot smuggle a fake
-   candidate line the model might parse as a real path.
-5. **Assembly (C)**: pipeline + scene built by code from templates per
-   display class (value/list); list exemplar paths generalized
-   (`hits[0].title` → repeat over `hits`, `item.title`). Typed output
-   verification against the sample. **Display degradation policy**: an
-   unsupported display_hint (map, …) proceeds with the supported form and
-   records an honest journal note; a list-class scene with extra wants also
-   notes the dropped fields. Never fails the flow.
-6. **Handoff (C)**: existing create landing rules verbatim (secret params ⇒
-   draft + awaiting_credential surfaced on the card; else commissioning).
-   The seal stamps a `_born` marker (M1 audit 2026-09-13; closed enum
-   `flow|recipe|chat`) — the §29 door reader (`is_flow_or_recipe_born`)
-   reads that spec-shape truth instead of a prunable journal entry (25-entry
-   churn used to defeat the door). Consent moment #2 is unchanged: the
-   approval card / Activate.
-
-**Model resolution** (C1 audit 2026-09-13): `run_flow` resolves its model
-LIVE via `gateway.resolve_model("ni", gateway.load_routes(store.conn))` with
-chat/agent fallbacks. **Local-preferred**: when the ni-resolved model is
-cloud AND a local chat/agent route exists, the flow prefers the local one —
-flows are frequent + cheap, and cloud stays fine when it's all the user has.
-No `flow-model` placeholder anywhere in the source (a grep test enforces it).
-
-**Chat's role shrinks to the front door**: a `start_ni_flow` REVIEWED tool
-(request text + optional source the user already named). Freeform
-create/update of source+pipeline on flow- or recipe-born cards is CLOSED —
-fixes re-enter the flow at **Sampling only** via `remap_ni_item` (H2 audit
-2026-09-13; never re-enters intent or recipe matching, always fetches the
-item's OWN frozen `spec.source.url`). Params, cadence, scene tweaks stay
-directly editable. A remap that fails on an item with a renderable payload
-does NOT mask the tile — `board_flow_field` returns None for a terminal
-flow record whenever the tile has a preview/latest/last_good snapshot.
-
-**Awaiting-credential cleanup** (H1 audit 2026-09-13): the flow's
-`awaiting_credential` slot is DROPPED as soon as every declared secret has a
-value in the SecretStore (checked at the credential PUT) OR the user
-Activates the card (commission route). Read_ni_item's `state_explanation`
-names the paused states so a chat model relays "waiting for you to approve
-fetching <host>" (confirm_source) / "waiting for a source pick" (source) /
-"needs your API key" (awaiting_credential) with the right resume tool.
-
-**Grammar additions this phase**:
-- `where` transform (list filtering): `{fn: "where", field, key, op:
-  lt|le|gt|ge|eq|ne|starts_with, value}` — closed ops, §5 condition
-  semantics (`starts_with`: string prefix), serves threshold intents ("above
-  magnitude 5") and prefix-coded categories.
-- `computed` source v1: `{type: "computed", compute: "days_until", date:
-  "YYYY-MM-DD"}` — zero egress, pure clock; payload `{days: int}`. Preview
-  computes the REAL day count at finalize (never a bare `0` on a future date).
-- `_born` sealed spec key (closed enum `flow|recipe|chat`): stamped at
-  create/finalize, validated by `validate_spec`, refused inside template
-  packs (`ni_library.parse_pack` + `_TEMPLATE_STRIP_KEYS`), stripped on
-  export. The §29 door reads it first, journal is fallback.
-- `_model_consent` sealed spec key (ruling 2, 2026-09-24): the non-local
-  'provider/model' id this card's owner allowed to BUILD it. When the flow's
-  resolved model is not local and differs from the card's consent, `run_flow`
-  stops before any model call with an answerable `unsupported` terminal whose
-  question is `model_consent` `{model, local, prompt}`; `/flow/answer`
-  `allow` stamps the consent on the record (`_finalize` seals it into the
-  spec, so Fix/refine don't re-ask), `local` builds with the first local
-  ni/chat/agent route. The route-side helper (`default_call_model`) uses an
-  unconsented cloud model never — it falls back to the local route. Refused
-  in template packs, stripped on export. The engine's llm stage stays
-  local-only regardless.
-
-**Testing contract (release gates)** (audit 2026-09-13):
-- `app/tests/fixtures/ni_flow/` holds the recorded 10-source corpus; the
-  pytest suite drives every flow stage END-TO-END against recordings with
-  the two model calls injected from recorded-correct selections (model-free,
-  deterministic, runs on every PR).
-- A phrasing matrix (≥5 paraphrases per case) exercises intent parsing in
-  the live-model suite.
-- Chaos drills: field renamed in a recording ⇒ mapping verification fails
-  ⇒ flow reports, never thrashes; source down ⇒ `failed(fetch)` honestly.
-- `tools/ni-flow-eval.py --engine` (M2 audit 2026-09-13) is the LIVE release
-  gate: 10-case matrix driving `ni_flow.run_flow` directly against a
-  bifrost-backed model + real sources. Required 10/10 before any NI release
-  tag, alongside prove.py. The old `--live` mode is retained for parity but
-  is NOT the release gate — it runs the eval's own graduated flow, not
-  the shipped engine. Docstring is honest: no CI wires this file up (CI
-  runs the pytest suite only); the module `ni_flow` is imported at top
-  level (`--engine` requires it).
-
-**Flow-tool wait + directives (2026-09-14)** — the abandonment fix: the
-worker-spawning flow tools (`start_ni_flow` / `resume_ni_flow` /
-`remap_ni_item`) WAIT a bounded few seconds (`_FLOW_WAIT_SECONDS`, 8s, 0.25s
-poll) for the flow to settle and return the REAL resulting state plus a
-`next_step` directive (ready / confirm_source / source / awaiting_credential /
-failed / unsupported each carry a specific instruction; a timeout says "call
-read_ni_item — do NOT research sources or create anything else meanwhile").
-Field lesson: the fire-and-forget `{started: true}` result left an async gap
-the chat model filled by web-searching Alpha Vantage and re-creating the card
-through the legacy recipe tool. The engine settles in 2-4s live, so the
-common case now has no gap at all. `start_ni_flow.request` is documented as
-the user's words VERBATIM (never paraphrase, never change a number — the
-intent stage's only input); the request text stays visible on the approval
-card so a distorted cadence is catchable at consent time.
-
-**Geocode-with-consent (2026-09-15, operator-approved)** — "allow the geocode,
-but only with user consent." A recipe may declare `geocode_fills` (closed map:
-geocode result field latitude/longitude → a declared non-secret param), and
-the intent schema gains an optional `place` (string|null, ≤120, same M#1
-call — no new model blank). When a matched recipe has fills, an empty target
-slot, and a named place, the `confirm_source` pause seals a `_geocode`
-disclosure `{query, host}` (host is the code literal
-`geocoding-api.open-meteo.com`, never data). Consent is the EXISTING confirm
-moment covering both fetches, both visible: the flow-tool result carries
-`geocode_lookup`/`geocode_query`, the approval card's promoted line reads
-"Fetches: <recipe url> · Looks up "<place>" to fill the location", and
-`confirm_ni_flow_source` REFUSES a confirm whose args do not echo the sealed
-query verbatim (args are display, never authority — execution always reads
-the sealed value). After approval, code performs the one lookup (percent-
-encoded query into the fixed endpoint, netguard-fetched), fills the
-coordinate params, and hands off; any failure degrades to empty slots →
-draft + `awaiting_params` → the card's Fill affordance. Flow-record
-transitions carry sealed underscore extras forward (`_recipe_id` /
-`_geocode` / `_remap`) — a note appended during a pause used to wipe them.
-
-**Case-matrix wave (2026-09-15)** — grammar + authoring + testing contract:
-- §4.2 transforms gain `offset(field, value)`: ADDS the numeric constant to a
-  numeric field; non-numeric ⇒ `transform_type` (same class as `scale`).
-  C→°F composes as `scale(t, 1.8)` then `offset(t, 32)`.
-- §29 freeform assembly authors two deterministic post-mapping artifacts:
-  a °F conversion when the ORIGINAL request matches `fahrenheit|°\s*F\b` and
-  a mapped field's name contains `temp` (value class; appends scale+offset);
-  and a §12 alert when the intent carries a numeric `threshold` AND the
-  request carries a direction word (below/under/drops/falls/less than → lt;
-  above/over/exceeds/rises/more than → gt) AND the class is value. Honest
-  flow notes both times. List-class thresholds stay `where` filters. The
-  flow-authored alert omits `cooldown_minutes` (engine's ≥5 clamp applies);
-  `left` binds the first numeric mapped field.
-- §29 display class: the DATA decides list-vs-value — a `list` hint whose
-  picked mapping paths carry no `[N]` step degrades to the value card with
-  an honest note (crypto-pair / sunrise-times live-gate lesson).
-- Testing contract: the case list lives in
-  `app/tests/fixtures/ni_flow/cases.json` (docs/internal/ni-cases.md is the
-  taxonomy map; the registry is the machine truth). The eval's recorded /
-  chaos / phrasings / engine modes AND `test_ni_case_registry.py` all load
-  it; `load_registry` rejects unknown keys and unknown `engine_state`
-  values. BY-DESIGN rows (`expected.engine_state` failed / source) PASS the
-  engine gate on state match — the honest refusal IS the feature; the C2
-  frozen-URL invariant applies to settled rows only. `--record --only <id>`
-  refreshes a row's fixture from the live source (`--record-all` guards
-  wholesale rewrites). `cadence_free_phrasings` rows gate kind+validity but
-  not cadence equality ("every morning" legitimately moves the cadence).
-  The lifecycle matrix (ni-cases.md §C, L1–L12) lives in
-  `app/tests/test_ni_lifecycle.py`, model-free through the real tool
-  registry and routes.
-
-**C2-feedback wave (2026-09-15)** — the accepted-action-with-invisible-effect
-class (field: three "Looks right" taps logged as three 200s on a card that
-would not change for 30 minutes):
-- F1: the ok=true C2 verdict KICKS THE C3 PROOF RUN synchronously (shared
-  `_execute_manual_run` body with /run, same L7 double-run guard + carrier
-  posting). The validate response reports the post-run `state` (often
-  already `live`) and a `run` outcome; a kick failure degrades honestly and
-  never masks the recorded verdict. ok=false rewinds to draft and never runs.
-- F2: board rows expose `c2_ok` (the sealed `_c2_ok` attestation) — after
-  the tap the card shows "Confirmed — verifying…" instead of re-asking, and
-  the frontend toasts the outcome.
-- F3: recipe matching discloses wants the recipe cannot serve — sealed as
-  `_uncovered_wants` on the confirm record, noted on the flow, surfaced as
-  `not_covered` in the flow-tool result, and the confirm directive tells the
-  chat to SAY SO (proceed without it, or a fresh flow with another source —
-  never a post-hoc source swap, which the §29 door refuses after a paid
-  approval tap; the guide now forbids proposing one at all).
-- Marker-drift fix: `_append_note` carries the current `error` marker
-  through its transition — a note appended during a paused state used to
-  wipe `awaiting_confirm`/`awaiting_pick` (the underscore-extras lesson,
-  error-field edition).
-
-**Remap/shell wave (field 2026-09-15)** — the second NVDA test round:
-- W2: `spec._shell` marks a flow's not-yet-finalized placeholder (validated
-  boolean-true-or-absent; forbidden in template packs like `_born`).
-  Commission REFUSES a shell ("creation never finished — retry in chat or
-  delete"); board rows carry `shell` and the card hides Activate. Field: a
-  failed flow's shell was Activated, the placeholder model source ran, and a
-  "Commissioning · ok" card rendered "Preparing card…" forever.
-- W1: shell titles bound to one readable line (a request paragraph was the
-  card name); a finished flow still titles from `intent.subject`.
-- R1/R2: remap sampling now runs the item's own source EXACTLY as the engine
-  would — params substituted, `$secret` headers resolved host-bound via a
-  desktop-wired secrets provider (`ni_flow.set_secrets_provider`, installed
-  at app startup; same trust position as the scheduler — used ONLY to
-  re-sample an item's own already-consented source; the §9 firewall on the
-  chat/tool context is untouched). The remap of a keyed recipe card used to
-  fetch the literal `{{param:symbol}}` template with no auth → FetchError.
-  The remap FINALIZE preserves the sealed source (template + headers) and
-  params — the rebuilt spec used to strip the credential header. A remap of
-  a post-draft card lands commissioning (its credential gate already
-  passed); unfilled params refuse the remap up front.
-- R3: the flow-born source-edit refusal and the guide now distinguish "fix
-  broken extraction → remap" from "different data → NEW card via
-  start_ni_flow" (a remap can never add fields the source does not serve),
-  and forbid confirm_ni_flow_source after a resume.
-
-**Card-consent wave (2026-09-15, operator: "bulletproof and deterministic")**
-— the last model-dependent hand-off removed. Field: on v0.15.0 the engine
-paused correctly at ``confirm_source`` and the CHAT model still wandered
-(researched docs, tried a second flow — bounced by the duplicate guard),
-stranding a healthy pause. Now the pause renders its OWN consent on the
-tile, from code alone:
-- ``board_flow_field`` carries the sealed disclosure on a confirm pause —
-  ``source_url`` verbatim, ``recipe_title``, ``geocode_query``/``host``,
-  ``not_covered`` — and the card shows "Fetches: <url>" with
-  [Approve source] / [Not this source].
-- ``POST /api/ni/items/{id}/flow/confirm-source`` (desktop-local, audited
-  as a user consent event): re-reads the SEALED record itself (no body URL —
-  nothing can drift from what the card displayed) and runs the continuation
-  synchronously (handoff + consented geocode). ``.../flow/decline-source``
-  is the honest terminal: ``failed(declined)``, never a fetch, the shell
-  keeps refusing commission. Both 409 without a pending pause (raced second
-  taps included).
-- The chat tool ``confirm_ni_flow_source`` remains as an alternative
-  surface with its display-enforcement rules; the guide + next_step now
-  direct the model to point the user at the CARD first. A wandering model
-  can no longer strand a consent — the affordance exists the moment the
-  flow pauses.
-
-**Approve-resume + matcher-precision wave (field 2026-09-16)** — the root
-cause of every "I couldn't reach the model" report: a tool error AFTER
-approval raised HTTP 502 from ``/api/agent/pending/{id}/approve``, which the
-frontend blanket-maps to the model-unreachable sentence AND which skipped the
-turn resume — so every deliberate post-approval guard (duplicate title,
-confirm-not-pending, flow-born refusals) killed the turn, hid its own
-guidance from the model, and masqueraded as a model outage identically on
-local and cloud models. Fixed: a tool error on approval is a RESULT — 200
-``{status: "errored", result: {error}}``, stored for the parked turn
-(``agent.resume_turn`` feeds it to the model verbatim), scheduled turns
-resumed; 502 stays reserved for the gateway actually being unreachable.
-Matcher precision, two deterministic gates: a FIXED-subject recipe (no
-fillable params) matches only on a DISTINCTIVE title word (generic overlap —
-"price", "rate" — can never elect Bitcoin for "Google stock"; the field run
-sealed exactly that card), and the ticker bump applies only to recipes with
-a ``symbol`` param.
-
-**NI Foreman P0 — chat-transport hygiene (2026-09-16, the fabrication
-incident)**. Field: a cloud model wrote fenced tool calls AND fabricated
-"### Tool result" blocks as prose; the SPA's default streaming path finalized
-it verbatim (its only tool detection was the reply's FIRST character), zero
-executions, and the user was told a card was live that never existed.
-Platform fixes (benefit every tool, not just NI):
-- The streaming route watches the growing tail for tool/fabrication
-  vocabulary mid-stream (stops emitting, swallows to end), probes the FINAL
-  text with ``agent.text_tool_probe`` before finalizing as prose, and on any
-  hit diverts to run_turn with the EXACT captured reply primed — never a
-  resample (the old suppress-fallback could produce a materially different
-  second answer). The client already discards the partial draft on pending.
-- ``agent.sanitize_sealed_markers``: model-authored sealed-channel vocabulary
-  ("### Tool result", "### Scheduled Item") is excised VISIBLY
-  ("[unverified model-authored status block removed]", fabricated payload
-  block dropped with its heading) at every run_turn return site and the
-  stream's done frame. Code-authored channels keep the truth monopoly.
-- Text-call recovery accepts every observed spelling ("name"/"function"/
-  "tool" × "arguments"/"parameters"/"args"), known-tool gate unchanged.
-- Flow step hygiene: temperature pinned 0 (non-claudecode), timeout 60s→300s
-  (cold-local-load parity), and an EXPLICIT ni route now wins even when cloud
-  (local preference applies only to the fallback path).
-This is P0 of the NI Foreman redesign (docs/internal/ni-cases.md companion;
-operator-ruled manager/step-agent architecture): P1 = /ni composer intake,
-P3 = complete card surfaces (source-pick, edit), P2 = NI write tools leave
-the model registry (chat keeps read + run-now).
-
-**NI Foreman P1 — the composer (2026-09-16)**: creation without chat.
-``POST /api/ni/intake {request, source_url?, allow_duplicate?}``
-(desktop-local, audited) = the /ni composer's submit: shell card FIRST
-(instant acknowledgment, before any model call), then the standard
-single-flight flow worker; every later step is a card affordance. Duplicate
-titles 409 naming the existing card; a user-supplied source_url is
-shape-validated here and netguard-fetched at sampling as always.
-``POST /api/ni/items/{id}/flow/retry`` re-runs a TERMINALLY failed shell's
-flow with the same sealed request — a fetch-class failure drops the failed
-URL (fresh source resolution); any other failure keeps the user's URL
-(their consent). Running flows and finalized cards refuse (409). The board
-copy and empty state now point at the composer, not chat.
-
-**P1-warts wave (field 2026-09-17)** — the first two fully successful field
-creations surfaced five refinements:
-- W-D: product/tech vocabulary joined the ticker stopwords ("create new NI
-  item ... GOOG" filled symbol=NI → a REAL NiSource quote on a GOOG card).
-- W-E consent-what-runs: the confirm pause SEALS the request-derived param
-  fills (``_fills`` on the record); the card renders the FILLED URL
-  ("symbol=GOOG") + the fill values; the handoff applies the SEALED values
-  first (request-derived fill covers only still-empty slots) — what the user
-  saw is exactly what runs.
-- W-F credential reuse: at finalize, a keyed card whose secret is absent
-  reuses another card's SAME-host, same-name credential via the desktop
-  secrets provider — copy-based under the new item's own key (item scoping +
-  K2 loader intact), journaled, all-or-nothing; different hosts never reuse.
-- W-A: the unfinished-shell copy renders only for terminal/absent flows
-  (it used to contradict the consent block mid-pause); W-B label fix; W-C
-  Finnhub recipe now serves ``open``.
-- W-G board polish: grid aligns start; cadence+freshness meta line; footer
-  condensed with a native details overflow for Pause/Repair/Delete.
-
-**NI Foreman P2 — capability deletion (2026-09-17)**: the model registry
-keeps exactly four NI tools — ``list_ni_items`` / ``read_ni_item`` /
-``list_ni_catalog`` (OBSERVE) and ``run_ni_item_now`` (REVIEWED egress) —
-and ``NI_WRITE_TOOLS`` shrinks to ``{run_ni_item_now}``. Every other NI
-tool (create/update/delete/set_enabled, the flow trio, remap, derive,
-spec-guide) left the registry: a fabricated call now has NO executor — the
-loop answers ``cannot run tool '<name>'`` inline, nothing parks, and the
-turn continues (pinned in test_agent). The handlers survive as
-``tools.INTERNAL_NI_TOOLS`` (name → handler) +
-``tools.INTERNAL_NI_PREVALIDATE`` (name → prevalidate), the in-process/test
-factory the routes and suites drive — models cannot reach either. The
-retired names also left ``_OBSERVE_READONLY``. Chat's state-literacy texts
-now speak card language (Approve source / Fill / Fix / the composer) —
-chat reads and explains; the NI page owns every write.
-
-**NI Foreman P3 — complete card surfaces (2026-09-17)**: the last chat-only
-moments become card affordances, all desktop-local + audited:
-- ``source`` pause: ``board_flow_field`` now carries ``suggestions`` from
-  ``ni_flow.suggest_recipes`` (deterministic scorer over the signed catalog,
-  subject-precision gate, top 3, display-filled URLs) and the card renders
-  vetted picks + a paste-a-URL form. ``POST .../flow/pick-recipe`` routes a
-  tap into the STANDARD confirm_source pause (sealed intent + recipe; the
-  Approve-source card takes over — no fetch on the tap); ``POST
-  .../flow/pick-source`` resumes sampling with the user's pasted URL (their
-  paste is the consent; shape-validated here, netguard at fetch, 409 unless
-  paused at ``source``).
-- ``POST .../flow/fix`` = the card's Fix button on failing/broken/degraded
-  cards: ``ni_flow.begin_remap`` (shared entry with the retired chat tool)
-  re-enters sampling against the item's OWN frozen URL — http_json only,
-  unfilled params refuse, ``_remap`` record, ValueError guidance surfaces
-  as 409.
-- Edit modal on the card's ⋯ menu: PATCH gains ``title`` (≤300; sealed spec
-  rewrite, attestations preserved, journaled "renamed to …") and
-  ``interval_minutes`` (1..10080; operational cadence — attestations
-  preserved, store floor re-clamps, journaled).
-
-**G1 — the Master skeleton + oversight plane v0 (2026-09-20, design rounds
-7-8)**. The generalization rebuild begins: execution stops being "a pipeline
-with branches" and becomes contracts + moves + a ledger, with watchers above.
-- ``ni_master.py``: the closed move set (advance/retry/reroute/ask_user/
-  research/degrade/finish/park), the ten-part anatomy (understand/plan/locate/
-  authorize/acquire/shape/judge/present/prove/sustain — G1 maps today's
-  stages onto it; PLAN/LOCATE/JUDGE interiors land G2/G3), the append-only
-  ``_ledger`` on every flow record (one ``_transition`` hook covers every
-  stage entry and terminal), and the **single-writer law**: terminal card
-  copy (a user-facing ``reason`` sentence, an optional closed-kind
-  ``question``, ``reopen`` affordances) is derived in ONE place and rendered
-  verbatim by the board.
-- **No-dead-end law** (the four field confusions, structurally closed): every
-  terminal surface must carry a reason + a question or reopen — property-
-  tested over the whole state×class×shell space with a law backstop for
-  error classes that don't exist yet. Shells are EXEMPT from H2 terminal-slot
-  hiding (their only "payload" is the sample preview; hiding the terminal
-  there erased the truth); finalized tiles keep H2.
-- **Forks, not deaths**: decline-source re-enters the ``source`` pick pause;
-  ``POST .../flow/reopen`` gives failed shells the same road; a computed ask
-  without a date terminates ANSWERABLE (``_question`` stamp → the card asks,
-  ``POST .../flow/answer`` validates YYYY-MM-DD, stamps ``_supplied`` — the
-  user's typed date is the truth, never a model's — and re-runs the worker).
-- **Oversight plane v0** (``ni_watch.py``, migration 41 ``ni_findings``):
-  W-CREATE rides the NI tick — absorbs the M3 stale sweep, audits the
-  dead-end law over live records (a violation = HIGH finding + carrier row),
-  clusters same-class failures across cards (≥3 in 24h = class-break
-  candidate). Findings are code-authored host-free strings (last_status
-  posture), edge-triggered by open-finding dedupe, surfaced on Settings →
-  Status with a Dismiss; ``GET /api/ni/findings`` + resolve route,
-  desktop-local.
-- Field regressions: the 2026-09-17 round is pinned in
-  ``test_ni_field_regressions.py`` — every ask asserts its card-state truth
-  (reason/question/reopen), model-free.
-
-**G2 — the judgment steps (2026-09-20, rounds 7-8 wave 2)**. The parts that
-needed judgment get judgment — bounded, schema-validated, code-checked:
-- **P8 JUDGE (M-VERIFY)**: after assembly the flow judges the BUILT preview
-  against the goal (request + subject/wants/threshold) — one bounded call,
-  closed `{serves, gaps[], wrong[]}` reply, data-fenced payload. A ``wrong``
-  verdict earns ONE re-pick with the findings fed into the same closed menu
-  (``stage_mapping`` gains ``feedback``); the re-pick ships ONLY if the judge
-  scores it strictly better, else the first build is kept and the doubt noted
-  (trial-and-revert — the live probe caught a misfiring judge making the card
-  WORSE before this rule). Judge hallucination containment in CODE: a
-  ``wrong`` claim must name a displayed payload key; cadence-vocabulary
-  ``gaps`` ("5-minute interval data") are filtered — the refresh schedule is
-  the engine's job. A judge error is always advisory (never fails a build);
-  ``gaps`` ride the notes as "this card won't include: …". Mapping exhaust on
-  the first pass also rides the feedback loop once (2×2 bounded attempts)
-  before the honest ``failed(mapping)`` — absorbs the local-model temp-0
-  variance class the live gate exposed.
-- **Threshold-over-recipe routing**: a threshold ask over a fixed template
-  (no ``where`` op) no longer hands off verbatim — the confirm continuation
-  re-dispatches the APPROVED filled URL into freeform sampling
-  (``_threshold_route_url`` guards: numeric threshold, no template filter, no
-  headers, zero unresolved placeholders) with ``_reuse_intent`` so the sealed
-  intent is not re-derived. The quakes M2.5-for-M5 field failure now builds a
-  real filtered card.
-- **M-AFFINITY + synonyms**: the coverage matcher gains a code synonym table
-  (magnitude↔mag, location↔place, temperature↔temp, lat/lon, count) killing
-  the false "won't include: magnitude, location" disclosure, plus a bounded
-  model prune at pause time (may only CONFIRM coverage, validated as a subset
-  of the asked-for spellings; any error keeps code's answer). Wording is now
-  honest: "this card won't include: …" — the SOURCE provided those fields all
-  along.
-- **US units at source**: the open-meteo recipe's URL gains
-  ``temperature_unit``/``wind_speed_unit`` params; ``_unit_fills_for`` seals
-  fahrenheit/mph at the PAUSE when the request says °F or the place carries a
-  US state suffix (celsius/kmh otherwise) — the fills render on the consent
-  card (consent-what-runs), land as ordinary params (Fill-editable), and the
-  geocode country is deliberately NOT consulted (it resolves after approval —
-  too late to change what was consented).
-
-**G3 — LOCATE: the words path reaches sources (2026-09-21, rounds 7-8 wave
-3a)**. The HN field failure's class closed: "SHIPPED" now means resolves
-FROM WORDS, not works-when-handed-a-URL.
-- **Catalog promotion**: the proven eval endpoints become signed recipes —
-  ``hn-front-page``, ``iss-position``, ``crypto-price-eth-usd``,
-  ``github-repo-stars`` (owner/name as SEPARATE params — param values are
-  percent-encoded by design, a combined slug cannot ride one slot),
-  ``sunrise-sunset`` (geocode_fills, same shape as open-meteo). Templates
-  were GENERATED by running ``assemble_from_mapping`` over the recorded
-  fixtures — the catalog entry is exactly what the flow itself would build.
-  ``people-in-space`` was dropped honestly: open-notify has no TLS endpoint
-  and the catalog is https-only by test (the shape validator tolerates http;
-  the vetted catalog does not).
-- **Live prover as gate**: ``tools/ni-library/prove.py`` runs all recipes and
-  caught a REAL class break — frankfurter.app 301'd to api.frankfurter.dev/v1
-  (recipe + eval row updated). Exactly the W-TEST oversight class, run
-  manually until that watcher lands.
-- **Relevance floor**: ``suggest_recipes`` drops candidates under
-  ``_SUGGEST_MIN_SCORE`` (4 = two title-word hits or category+word) — a tides
-  ask now gets an honest empty list + paste-a-URL, never noise.
-- **Deterministic resolution suite**: ``test_g3_words_resolve_to_promoted_
-  recipes`` pins words → recipe id for every promoted ask (model-free), and
-  unrelated asks pin match=None + suggestions=[].
-- S2 live research (LOCATE's research strategy) stayed DARK through this
-  wave pending the consent ruling; the round-10 Search Platform P1 section
-  below LIT it (search-reads-pages ruling), on this catalog + relevance
-  floor as its deterministic ground.
-
-**G4a — SUSTAIN.refine: the note acts (2026-09-21, rounds 7-8 wave 4a)**.
-The last original field failure (°F note ignored) closes as machinery:
-- ``ni_flow.begin_refine(store, item, note)`` — deterministic routing over a
-  closed rule set: a cadence note updates ``interval_minutes`` directly (no
-  worker); a source-change note re-enters the ``source`` pick (new consent as
-  ever); everything else re-enters sampling on the item's OWN frozen source
-  with ``_refine_note`` sealed on the remap record. Guards mirror
-  ``begin_remap`` (http_json only, params filled); other source types refuse
-  with composer guidance — honestly, never silently.
-- **The note joins the goal**: ``_run_remap`` appends the sealed note to the
-  request, so the °F/threshold authoring regexes read it AND the P8 judge
-  verifies the rebuilt card AGAINST it. The user's words drive the rebuild;
-  models serve them. (M-DELTA's classification slot stays reserved — the
-  deterministic router + note-augmented judge cover the observed field
-  classes; a model classifier joins only if the field shows misroutes.)
-- Surfaces: ``POST /api/ni/items/{id}/refine`` (desktop-local, audited) + a
-  ``Refine…`` card-menu modal; the C2 "Something's wrong" note now CALLS
-  ``begin_refine`` automatically — the modal's promise is finally true, and
-  its copy says exactly what happens.
-- End-to-end pin: a °F note on a °C weather card re-samples and ships a
-  pipeline carrying scale+offset (``test_g4a_fahrenheit_note_authors_the_
-  conversion_end_to_end``); field regressions 5/5b split the honest-refusal
-  (model source) and rebuild (http_json) classes.
-
-**M-RANK — LOCATE's real interior (2026-09-21, the field verdict)**. The
-operator's diagnosis was exact: resolution ran on a keyword scorer under the
-round-7 architecture's names, and "show me the price of NVDA" scoring ZERO
-was the proof. ``locate_rank`` replaces it as the authority:
-- One bounded call: the NEED (request verbatim + subject/wants/threshold)
-  against the CODE-BUILT corpus (id | title | category | notes per catalog
-  row, capped 40). Closed reply ``{best, confidence: high|medium,
-  alternates[≤3]}`` — ids only, every id validated against the catalog; an
-  invented id poisons the whole reply. The model can never name a URL or a
-  new source; a high pick lands the STANDARD consent pause (exact URL, user
-  decides); medium seals ``_ranked`` on the source pause and the card renders
-  the model's candidates as its suggestions; best=null → honest empty pick.
-- Any rank error → the deterministic keyword scorer (now the FALLBACK and
-  the recorded/offline path — scripted suites and the recorded gate ride it
-  by construction, so zero test churn).
-- **The resolve gate** (``ni-flow-eval.py --resolve``): a 16-row paraphrase
-  matrix run LIVE — every covered ask must reach its recipe at high
-  confidence in every phrasing; uncovered asks must never high-match
-  (medium suggestions are safe: the user vets). First live run: 16/16,
-  including four stock phrasings with no keyword overlap at all. Runs
-  before every NI release tag alongside --engine.
-- Param FILLS stay deterministic (W-D stopwords, W-E sealed fills) —
-  selection is semantic, execution values remain code-derived and
-  consent-displayed.
-
-**Claims audit + fix wave (2026-09-21, pre-round assurance)**. Operator
-mandate: verify BUILT vs CLAIMED before the next field round — no more
-"I never built it". An independent adversarial audit (10 tasks, probes run
-against the real engine) produced the ledger; every field-relevant finding
-is FIXED and pinned:
-- **Retry never worked** (the flagship no-dead-end affordance): the route
-  cleared the flow slot then spawned; run_flow crashed "no flow record" on
-  every tap forever — masked by a route test whose mocked worker never ran
-  the real body. Fixed: retry RE-SEEDS the record with the sealed request;
-  the regression drives the REAL route + the REAL run_flow continuation.
-  Consent guard added: a URL from a record that died at confirm_source was
-  never approved — retry drops it (the latent bypass the fix would have
-  armed).
-- **The 1h sweep executed live consent pauses** (source/confirm_source) —
-  "creation stalled" on a card that was just waiting for the user, approval
-  destroyed, bogus finding filed. All user-gated pauses now exempt.
-- **The mid-rank locating window rendered the full pick card** ("No vetted
-  source matched" while M-RANK was still running) and its taps corrupted the
-  live flow. The pick affordances (board + both routes) now require the real
-  ``awaiting_pick`` marker; the window shows "Finding a source for this…".
-- **Refine/fix during an active build** silently lost the note → both now
-  409 "busy building" while a flow record is non-terminal.
-- **Coverage lied in both directions**: false-covered ("ethereum price"
-  claimed served by "price") and false-missing ("Berlin weather" flagged on
-  the Berlin card). Distinctive-token coverage: every non-generic token must
-  be served by outputs, synonyms, the recipe's own title, or the consented
-  place; generic tokens never carry coverage alone.
-- **Judge disclosures were invisible on /ni** (flow-slot notes hidden at
-  ready) → gaps/doubts now journal (History shows them).
-- **Blind reasons**: classes the flow writes (assembly/derive/busy/worker/
-  remap) joined the reason map; a calendar-invalid date (2026-13-45) now
-  terminates ANSWERABLE with the date question instead of dying at assembly.
-- Route-side pick-recipe pause now runs the M-AFFINITY prune (a
-  ``default_call_model`` helper); worker-refused starts surface honestly
-  ("starts as soon as a build slot frees up") instead of false success
-  toasts; non-shell terminal cards render Fix/Refine instead of nothing;
-  ``question.prompt`` renders; stale chat-era copy swept (pick label, empty-
-  state CTA, duplicate-title message, pause note).
-Known-and-accepted for the round (documented, not hidden): compound asks
-build the best single card with the unserved half disclosed at consent
-(true decomposition = PLAN, the next milestone) — superseded 2026-10-13 by
-the G2 honest stop below; model-ish asks land the
-pick pause rather than an honest "cards can't write content yet" (PLAN's
-route classes); deeper build-slot queueing beyond honest copy.
-
-**Locate: places and compound asks (Round 20, G1+G2 — 2026-10-13, after the
-sealed set G read).** Four silent wrongs came from place resolution ("how many
-quakes … hit Alaska" ran at Many, Louisiana; "hurricanes in the Atlantic" at
-Atlantic, Iowa; two-place compares sealed one city). The rules, all in
-`library_resolve.Resolver.by_name` / `library_index.named_place`, closed data:
-G1b a bare ONE-WORD place alias written lowercase names a place only with a
-cue — the ask capitalises it (ALL-CAPS codes count: "NYC"), names its own
-state, or a place-cue word (in, near, at, around, for, from, to, of) sits
-right before it; a prominent place (`BARE_PLACE_RANK` 5.0: the pack's rank is
-~log10 population, so 100,000 people or more) is its own cue ("seattle
-weather tomorrow") unless the ask names some other state (G1a: "mobile …
-across illinois" is not Mobile, AL, and the named state is the place — the
-state-scoped sources serve it); the intent's own place text is resolved with
-`cued=True` (the model named it, so a lowercase "galveston" hint still
-resolves). G1c a closed `REGION_WORDS` table (Atlantic, Pacific, Gulf of
-Mexico, Caribbean, Arctic, Great Lakes, Gulf Coast, East/West Coast, Midwest,
-Northeast, Southeast, Southwest, Pacific Northwest, New England …) is vetoed
-before scoring — a region is never a point place; "Midwest City" and
-"Atlantic City" are longer aliases and still resolve. G2 two independently
-cued places (or a place and a state that does not contain it) joined by a
-comparison word (or, vs, versus, compared with/to, against, than) give
-`named_place` the status `compound`; `candidates()` offers nothing with the
-closed reason "this compares two places; one source answers one place" and
-the flow stops honestly with links; `_validate_intent` accepts `place` as a
-list of ≤ 3 short strings and routes to the same stop (set F's compares had
-failed at that stage). Measured on pack_f: the labeled locate set unchanged
-(103 / 108), 25 of the 350 asks of sets A–G change and every one is a G1/G2
-class, 61 constructed probes 61 / 61, 14 lowercase big-city asks all resolve.
-
-**G4b — the page door (2026-09-21, field round 2)**. The activity log
-rewrote the "web search is failing" report: EVERY URL the operator pasted
-was a normal webpage (nhc.noaa.gov/gtwo.php, spacinsider.com/news,
-usharbors.com) and the JSON-only pick refused each one. The Phase-2c
-machinery (netguard page fetch + subprocess-jailed extraction) and the §13
-llm stage (local-only, one per pipeline, "Interpreted") existed with no flow
-door — now doored:
-- ``_sample_and_map``: a decode-class fetch failure on a CONSENTED url (the
-  paste/pick was the consent) routes to ``_build_page_card`` — never on a
-  remap (a JSON card whose source starts serving HTML fails honestly, never
-  silently converts).
-- ``_build_page_card``: jailed ``{text, title}`` → a CODE-BUILT llm stage
-  (instruction from the WANTS verbatim, ≤6 string outputs, no params) → the
-  stage runs once for the preview → P8 judge verifies against the goal
-  (gaps journal) → sealed spec = ``http_page`` source + the one llm stage +
-  a value scene. The engine re-runs the same jail + local llm on schedule.
-  Flow-boundary law: every exception class inside the door lands
-  ``failed(fetch|assembly)`` — never a raise.
-- ``xml-not-json`` case REPURPOSED: live = ``ready`` (the door built an
-  interpreted card from the real BBC RSS in the engine gate, 20s end to
-  end); hermetic modes = ``failed`` via the new per-mode
-  ``expected.recorded`` registry key (page path stays unrecorded — the
-  pytest harness stubs the jailed fetch under a save/restore so nothing
-  leaks between rows).
-- Catalog +1: ``nhc-atlantic-storms`` (NHC CurrentStorms.json, keyless
-  government JSON — the hurricane ask resolves from words, live-proven; a
-  live storm "Fay" was on the feed at generation time). GDELT was evaluated
-  for the news class and REJECTED for the vetted catalog: a 5-second global
-  rate limit flaps gates — news pages ride the page door instead.
-- Composer copy: "paste any web page or API URL".
-
-**Grounded-monitor wave (2026-09-22, field: Wallace Creek + Hermes-comparison
-adoptions 1-3, operator-approved)**:
-- **Page-door trigger fixed at the root**: production fetches raise
-  ``netguard.FetchError`` (wrapping everything), so the door's
-  exception-name match NEVER fired outside tests — the operator's pasted
-  tide page failed on v0.21.0 with the JSON sentence. ``FetchError`` gains a
-  STABLE ``kind`` ("not_json" on invalid-JSON + content-type refusals; the
-  message text remains a non-contract), and the door keys on it. Security
-  refusals carry no kind and never page-retry. Regression raises the exact
-  production exception; the Wallace URL was verified live end-to-end
-  through the real fetcher.
-- **(1) Monitor-hash**: on a LIVE llm-stage card the engine hashes the
-  fetched source (canonical JSON) and, when unchanged vs the sealed
-  ``llm_state`` slot, skips pipeline+model entirely — run row status
-  ``unchanged``, ``clear_failures("ok: unchanged")`` keeps cadence/streak
-  semantics, zero model calls. Commissioning ALWAYS runs full (C1-C3
-  integrity).
-- **(2) Quote-grounding** (``ni.ground_llm_outputs``): every NUMBER an
-  http_page llm card displays must appear in the page text
-  (comma/space-insensitive); an invented figure is dropped to "" and the
-  fields are journaled ("unverified reading dropped"). Words may
-  paraphrase; numbers may not. Deterministic — no model.
-- **(3) Run continuity**: previous values (sealed ``llm_state.values``)
-  ride the stage INPUT as ``_previous`` (stripped from outputs before
-  contract/bind — shape never drifts), so re-reads dedupe and frame deltas.
-- New sealed slot ``llm_state`` {src_hash, values} joins ``_SLOTS`` (cascade
-  covered by the wildcard snapshot delete).
-
-**Search Platform P1 — search + page graph + evidence (2026-09-22, round 10,
-operator-approved plan)**. The reusable page-understanding platform, phase 1
-of 4 (P2 compiler, P3 browser ladder, P4 platform spread follow). Operator
-rulings encoded: search-reads-pages consent (searching inherently includes
-reading/using the results; the TAP stays the consent for the recurring
-source), safe search ALWAYS ON with no off switch, acceptance = external
-rate frameworks (W1/W2/W3), never named asks.
-
-- **S — search hardened** (`search.py`): safe-search flags forced on per
-  provider (DDG `kp=1` on both endpoints, SearXNG `safesearch=2`, Brave
-  `safesearch=strict`; Tavily has no flag) PLUS `_safe_filter`, a local
-  word-boundary host+title floor applied to EVERY provider's results —
-  defense in depth, and Tavily's only line. No configuration can disable
-  any of it. Rider: the configured-service branch of the `web_search` tool
-  now carries the same external-provenance tag the keyless branch always
-  had (`tools._web_search`).
-- **G — page graph** (`pagegraph.py`, NEW platform module): any fetched page
-  becomes a deterministic PageGraph `{url, fetched_at, render_mode, text,
-  title, entities[], tables[], feeds[], meta{}, outline[]}`. ALL parsing
-  runs inside the subprocess jail (`jail_extract._GraphParser`: JSON-LD —
-  including `@graph` unwrap — OpenGraph/description meta, RSS/Atom
-  autodiscovery, h1-h3 outline, bounded typed tables); the parent validator
-  (`jailrun._validate_payload`) accepts the graph keys as a CLOSED set — a
-  compromised child cannot widen the payload. The engine's
-  `_fetch_http_page` still slices to `{text, title}` (page-card contracts
-  unchanged); graph consumers call `pagegraph.fetch_page_graph`.
-- **E-lite — evidence-based source ranking** (`ni_flow`): on a FULL catalog
-  miss (M-RANK empty-candidates branch AND scorer miss both route through
-  the shared `_pause_source_pick`; `suggest_recipes` empty), CODE searches
-  the user's OWN words (`_s2_queries`: request verbatim; subject+place only
-  under strict containment), hygienes rows (`_s2_search_candidates`:
-  https-only, titled, oversize-dropped — never truncated — one per host,
-  cap 10), fetches the top 4 pages (`_s2_evaluate`, search-reads-pages
-  ruling) into PageGraphs and scores what each page actually CONTAINS
-  (`pagegraph.graph_fitness`: structure-weighted, generic-token-proof;
-  evidence lines lifted VERBATIM from the page's own entities/tables —
-  grounded by construction). `rank_web_rows` (locate_rank's sibling — ids
-  only, validated, ANY failure → fitness order) orders the corpus; ≤3 rows
-  seal as `_ranked_search` `{title, host, url}` — snippets and evidence
-  are rank-time only, NEVER sealed. AMENDED 2026-10-05 (§33 "Library cards; web as links"): the board
-  renders sealed rows verbatim as `kind:"link"`, `found:"page"` suggestions
-  (title + host, nothing read off the page); a tap on one never builds — the
-  pick route refuses it (409) and `run_flow` re-lands the pause. The same
-  page PASTED by the user builds (held for YES, §33). Unfetchable pages stay offerable
-  unscored (bot-blocks are P3's fix). Search failures NEVER fail a flow —
-  zero rows, raising provider, or unwired provider all land today's plain
-  pause byte-identically.
-- **Provider seam**: `set_search_provider` mirrors the secrets provider;
-  `main.py` wires a per-call factory (configured chain when unlocked via
-  `state.dbx` + secret store, KEYLESS DDG floor otherwise — search works on
-  a locked box). `ni_flow` never imports `search` (duck-typed).
-- **Acceptance framework (external anchors, rates not named asks)**:
-  **W1** seed lives (`test_pagegraph.py`): extraction fidelity over
-  recorded pages (SWDE genre — event/`@graph`/plain/hostile classes) with
-  hand-verified ground truth, growing a row per page-template class.
-  **W2** (live benchmark slice, per release) begins with P3. **W3**
-  (operator-authored blind corpus, novel at test time) gates each
-  milestone. `--s2` on the eval tool is a MACHINERY smoke (keyless search →
-  hygiene → evidence on uncovered asks, PASS ≥2/3 with rows; evidence
-  counts diagnostic-only) — explicitly not acceptance.
-
-**Search Platform P2 — compiled page cards (2026-09-23, round 10)**. The
-platform's differentiator: a page card no longer needs a model every tick.
-- **Selector grammar** (`pagegraph`): closed kinds `title`, `meta{key}`,
-  `entity{etype, field}`, `outline{index}`, `table_cell{table,row,col}`,
-  `table_lookup{table, where, equals, take}` — `validate_selector` is the
-  single check (seal time, pipeline validation, library import). Addressing
-  is SEMANTIC where it can be: `table_lookup` keys on header NAMES and a row
-  key cell, `entity` on schema.org `@type`, so row/column reorders and extra
-  entities don't break a card. A selector that no longer resolves raises
-  `GraphDrift` — never a guessed value.
-- **Menu** (`enumerate_menu(graph, wants)`): code enumerates every
-  addressable value WITH its current value (≤80 entries; each table's share
-  capped at 20 so one big table can't starve entities/meta/title; row keys
-  matching a want token come first so row 150 of a list page is reachable;
-  only grammar-valid selectors are emitted — unnamed columns are skipped).
-- **Compiler** (`ni_flow.compile_page_program`): the model returns menu IDS
-  per want (M-RANK containment — never a selector, never a URL); ids are
-  validated; code re-executes the assembled program against the graph
-  (verify-by-execution); ALL-OR-NOTHING — one uncovered want → None. Pages
-  with no data-bearing layer (only title/headings) skip the model call.
-- **Tiers in `_build_page_card`**: one jailed read (`_fetch_http_page(...,
-  full=True)`) → tier 1 compiled (`graph_extract` stage, P8 judge must pass;
-  no `llm` stage → no Interpreted chip; values verbatim from the page) →
-  tier 2 interpreted (the G4b llm card, unchanged) when the compiler returns
-  None or the judge rejects the compiled reading (noted on the record).
-  Round 20 (B3a, §35): between the read and the tiers the page-browser ladder
-  may spend ONE visit — a JS shell in the static read, a plain 403 handed
-  over by the sampling door, or a compile miss on a script-heavy page
-  (`want_miss`, adopted only when the rendered page compiles); the rendered
-  graph then feeds both tiers and the card seals `render` + `sites`.
-- **Engine**: `graph_extract` is a new pipeline op — first stage only,
-  `http_page` source only (validate_spec coupling). `_fetch_source` passes
-  `full=True` only for graph_extract pipelines, so interpreted cards keep the
-  `{text, title}` payload their llm stage and monitor hash were built on.
-  `_apply_graph_extract` → `run_program`; drift → `NIError("graph_drift")` →
-  normal failure ladder, last_good keeps rendering.
-- **Drift recovery**: the card's Fix (`begin_remap`) now accepts `http_page`
-  cards; remap's page door fires when the card's OWN frozen source is a page
-  (an http_json card that starts serving HTML still fails honestly) and
-  `_remap_intent_from_spec` reads wants from `graph_extract`/`llm` output
-  names. Same consented URL, no new consent. (Automatic recompile — see the
-  2026-09-23 section below.)
-- **Jail capacity** (found by the live probe): tables now keep 500 rows
-  (was 40 — a list page's row 150 was invisible to the whole platform), and
-  the child's `_fit_output` halves table rows under a 900 KB soft budget
-  (then drops graph layers) so the 1 MB pipe can never fail the text path.
-- `graph_extract` is deliberately NOT in the model-facing spec guide:
-  selectors are only ever picked from the code-built menu.
-- Live debug probe (not acceptance): Wikipedia tallest-buildings, country
-  population (Iceland, row ~180) compiled correctly from table structure;
-  python.org/downloads (no addressable data layer) fell to the interpreted
-  tier as designed.
-
-**Engine-run fix + drift recompile (2026-09-23)**. Found while building the
-recompile rung: **every flow-built value card with a text field has failed
-its first engine run since #425** — `value_scene` bound every field into a
-`number` node, and the engine's post-bind check (`_enforce_bind_types`)
-rejects a string there (`bind_type`), so such cards never passed C1 and
-never went live. Scope: API cards with any string-typed field (`status`,
-`time`, `name`, `location`, …), every interpreted page card (G4b) and every
-compiled page card (P2). Numeric and list cards were unaffected. The
-creation-time preview binds without the type check, which is why those
-cards LOOKED built.
-- **Fix**: `value_scene(fields, labels, types)` — string fields bind into a
-  text node (`role: value`); numbers stay number nodes. `assemble_from_mapping`
-  passes the reconciled field types; both page-card tiers pass all-string.
-  Cards built before the fix carry the old scene: **Fix** rebuilds them
-  (http_json and http_page both accept Fix). A C1 failure stays
-  `commissioning` (§6), and the card's Fix rendered only for
-  failing/broken/degraded — so those stuck cards had NO Fix until the
-  week-long broken rule; the Fix condition now also covers
-  `commissioning` with `consecutive_failures > 0` (end-to-end pin:
-  `test_fix_rebuilds_a_card_stuck_by_the_old_scene`).
-- **The gap that hid it — closed**: every flow test stopped at "card built"
-  and the live `--engine` gate graded only `flow_state == ready`. Now (1) a
-  hermetic **engine-run matrix** (`test_engine_run_*`) builds each value /
-  text-field / list / compiled-page / interpreted-page card through the REAL
-  flow and runs the REAL `ni.run_item` on it — proven to fail on the unfixed
-  code (3 of 5) and pass on the fix; (2) `--engine` runs every `ready` row's
-  built card once through the real engine (netguard fetch, jail, local model
-  via `_EvalGateway`) and fails the row unless that run is `ok`.
-- **Drift recompile rung** (completes the P2 "recompile on drift" item):
-  `_maybe_repair_l1(..., graph=)` — a compiled card failing `graph_drift`
-  recompiles against the page graph THIS tick already fetched (no new
-  egress; selectors only — source/scene/schedule untouched), behind every
-  L1 gate (l1 on, `failing`, contract present, one attempt per streak,
-  local model only, the tick's repair slot). `_attempt_graph_recompile`
-  reuses the shared core (`pagegraph.compile_program`, moved out of ni_flow
-  so ni can call it without a cycle — creation behaviour unchanged except
-  one hardening: each want line in the prompt is whitespace-collapsed, so a
-  user's want can't forge a prompt line). No
-  judge runs unattended, so three deterministic gates precede the trial:
-  the captured contract; **value-kind continuity** (`pagegraph.value_kind`:
-  empty/time/date/numeric/text) against the card's build-time
-  `preview_data` — a TIME may not become a HEIGHT because the model picked
-  the neighbouring column (enforced only where the reference value is
-  non-empty); and an unchanged program is refused. Applied via
-  `apply_repair(origin="repair_l1")`: the next tick blesses the trial
-  ("repaired itself") or auto-reverts it. Failure reasons are
-  `call_failed | recompile_no_program | recompile_unchanged |
-  recompile_no_reference | recompile_value_kind | recompile_contract |
-  invalid | spec_changed`.
-- **`_born` survived no remap** (found by the stuck-card remedy test): a
-  remap rebuilds a FRESH spec and `_finalize(born=None)` never carried the
-  marker, so every Fix/refine since M1 dropped the §29 door's spec-shape
-  truth (falling back to the prunable journal) — API cards too, proven on
-  unfixed main. `_finalize` now carries the prior marker when `born` is None.
-
-**The frame and the verify step (2026-10-03, Rounds 14–18).** The blind runs
-of 2026-09-29 traced most wrong cards to one gap: the steps after intent
-re-derived what the ask wants from raw words, and nothing checked the build
-against the ask before handoff. The flow now carries a FRAME from stage 1 to
-the handoff, and a deterministic check stands where the judge was removed.
-- **Frame fields (stage 1, code only).** `intent.frame_kind` is code's parse
-  (`library_index.frame_kind_from_text`, a closed cue table) over the Library
-  kinds (`current_value | next_event | schedule | forecast | result | trend |
-  ranking | latest_items | alerts | status | count`); words that state no
-  kind leave it null — the model is not asked for one. (Live 2026-10-04: the
-  model's fallback guess "latest_items" for a bare "gas prices" gated locate,
-  verify and the page shape check, shipping Colorado's natural-gas dataset;
-  across the dev + holdout asks with no stated kind, no guessed kind ever
-  improved the first Library row.) The intent carries no window since
-  Round 20 (Q3b): the asked stretch is the query layer's `time` (§36), bound
-  at the declared build with the answer's direction (a stretch behind us
-  included); the page path reads the recognizers' explicit phrase
-  (`ni_flow._ask_window`) as the engine's closed legacy `window` (`now |
-  today | tonight | tomorrow | weekend | dow:<mon..sun> | next_days:N |
-  next_hours:N`) for its freshness and day checks. (Until Round 20 a
-  code-only regex parse, `_window_from_text`, set `intent.window`.)
-- **Locate gets the frame.** `_library_candidates(request, intent)` passes
-  `hint={subject, wants, place, frame_kind}` (no window since Round 20 —
-  locate never read it) to
-  `LibraryIndex.candidates` from the pick pause and from
-  `reenter_source_pick` (a Library that fails, a `TypeError` inside it
-  included, offers nothing — it is never retried without the hint). When
-  locate offers no row (it found no source about the ask; its skip reasons
-  are not read), the web stage runs. Rows carry `categories`, `scope`
-  (`place` | `global`), the reading `label` and a same-host `lookup`; a row
-  whose lookup leaves its host is dropped.
-- **Seal.** `seal_library_pick` also seals `_library_format` (what the row
-  promised), `_library_provider`, `_library_scope`, `_library_lookup`, the
-  tapped row's reading (`_library_label`, "Miami Marlins (mlb)") and
-  `_library_readings`: the readings of every non-place row of the pick,
-  kept across re-picks (how the Library read the ask's named subjects;
-  locate checked each row it offered against them).
-- **Sampling (C12/C13).** A sealed same-host lookup runs first
-  (`library_resolve.resolve_lookup` over the flow's own fetcher — NWS points
-  → its forecast grid); the final address replaces `_library_url` and is
-  the card's frozen source. A step off the host, or a lookup that fails,
-  moves on. A Library row that promised JSON and answers with a page
-  (`not_json`) moves on with "did not return its data" — it never becomes a
-  page card.
-- **Verify (C8, `_verify_frame`, before `_handoff` on every declared-answers
-  build).** Deterministic, no model. Refused when (a) the source's
-  categories share no top level with the ask's — only when the Library's
-  classify of the ask AND of the intent's subject + wants are both
-  non-empty and both disjoint from the source's, and the source isn't known
-  by every naming word of the subject (its name, its example asks, the
-  values its address took: "oil stocks report" is an example ask of the
-  EIA's petroleum stocks, though "stocks" classifies as markets) unless the
-  intent itself names the asked kind ("weather": "KC storms tonight" stays
-  refused on the hurricane list); (a2) the source is about a different
-  named subject (`_other_subject`, below); (b) the ask names a place
-  (the intent's place, only when the user's words say it), the category's
-  policy is about places or unknown, and the address never took it (not
-  offered for the place, no geo parameter, coverage doesn't name it); (c)
-  the chosen answers can't be this kind of question — a next event needs a
-  time still to come (an observation's own "as of" doesn't count; the
-  build adds the source's event time when the chosen answers lack one), a
-  result needs a score; rows whose cells hold the month and the day as
-  numbers carry a date (USNO's moon phases and seasons); (d) an older
-  record's answer is labeled for another day than the asked window ("High
-  today" for "on Saturday"); (e) nothing chosen speaks to the words the
-  user asked about and an asked want is unanswered; (f) a topic word of
-  the subject is filed only under subcategories the source isn't, and none
-  of its own words (name, description, entity, example asks, answers) say
-  it. A topic word is one the taxonomy uses on its own — a subcategory's
-  name ("TV shows"), a one-word keyword, or a multi-word keyword said whole
-  ("red" alone isn't "red flag warning": the Red Sox' scores stand). A
-  refusal re-lands the pick without that source ("<provider> doesn't
-  answer this (<reason>)"), then the web, then an honest `unsupported`; it
-  never hands off. A place-free source under a place-free policy ships with
-  "<provider> isn't specific to <place>"; when the Library's taxonomy
-  carries `expects`, the components no answer of the source reports are
-  named ("this source doesn't report: wind").
-- **Second review round (2026-10-04).** The source-level checks (category,
-  other subject, place, stray topic) run before EVERY build path — the
-  model-mapping fallback included, which a source whose declared answers
-  don't fit the response used to reach unchecked (AMENDED 2026-10-05, §33:
-  a tapped Library row never reaches the mapping path any more — a misfit
-  moves on — so that call site, and the mapping path's fix8
-  `_source_contradicts_place` check, are gone; the function stays for its
-  tests and the gate). Two refusals join (e):
-  every want the user said is unanswered refuses even when a subject word
-  overlaps ("gas inventories" on retail gas prices); and a general source
-  (no `coverage.entity`, no geo parameter) refuses a named topic none of its
-  own words, readings or filters take ("latest news on Ukraine" on top
-  headlines). A named topic comes from THREE places in the user's raw words:
-  (a) the validated intent `names` — a narrow closed blank the local model
-  fills (people, companies, organizations, agencies, places, products, teams,
-  events; each entry must be a case-insensitive whole-word substring of the
-  ask or code drops it as a hallucination); (b) capitalized tokens that aren't
-  at the sentence start — mid-sentence caps are always proper; (c) all-caps
-  acronyms of two or more letters that aren't a stop word ("FDA", "SEC",
-  "TSA") — proper even at the sentence start. A sentence-initial capitalized
-  word is a name ONLY when the intent named it: phones auto-capitalize every
-  ask, and without a corroborating model name "Biggest earthquakes today"
-  ships the same source as the lowercased variant. Review-5 (2026-10-04) adds
-  the `names` field; the suffix / topic lookalike heuristics are removed. A
-  list-entity source (a city's local news) still refuses another named outlet
-  or team. Generic quantity wants (level, value, number, amount, worth,
-  reading) are answered by a source's main value. `_other_subject` subtracts
-  only the readings this source took
-  or covers, never another row's. A `{param}` value filled into a host must
-  be a plain host (no credentials, port, fragment or IP literal; a feed path
-  keeps its query); a value a same-host lookup pulls is a bounded id
-  (`[A-Za-z0-9,._:-]{1,64}`, never `.`/`..`). A plain 401/403 drops that
-  address only; a challenge or 429 drops the host (B3a: a plain 403 on a
-  pasted link or a page card's Fix — no challenge, not a JSON refusal —
-  reaches the page door's one page-browser visit instead of failing; a 429
-  or a challenge never does). A non-401/403/429 fetch
-  failure (404, 5xx, timeout) on a picked Library row and a page-fetch
-  failure in `_build_page_card` hand over to the next row of the pick —
-  "couldn't be fetched — pick another source" — with a web search only when
-  the dropped row was a Library row; a pasted link / Fix still fails
-  honestly (`_move_on` returns None for a URL that wasn't a pick row). A
-  mapped card whose judge flagged EVERY said want as a gap ("won't include:
-  current_price" when the user asked for the price) refuses and moves on —
-  the pick was wrong, not a useful disclosure; same posture as the
-  declared-answers path's all-wants-unanswered refusal.
-- **Locate runs on the keyword frame.** The hybrid ranking (`library_embed`:
-  route and source asks embedded by a LOCAL model, never a cloud one) is
-  built but not wired: on 95 clean labeled asks (no overlap with the
-  Library's example asks, enforced by the Library's overlap gate) keywords
-  picked 76 right / 2 wrong / 1 missed, the embedder 75 / 3 / 3, and the
-  embedder as a reorder only 76 / 2 / 1 — no gain for a ~4.8k-text build on
-  the local model. It is wired again only when it measures better on a
-  larger clean set.
-- **Plurals and siblings (locate words round, 2026-10-07/08; SET C's links and the Metro tap).**
-  The keyword fold handles `-ies` ("heat advisories in Arizona" classified to nothing because
-  "advisories" folded to "advisorie", never the keyword "advisory", and went to links; so did
-  "coastal flood advisories for Long Island"). A source filed under a SIBLING subcategory of the
-  asked top category is a different kind of data unless the ask gives evidence for it: its own
-  words (name, description, examples, entity, answer labels and words) explain every word that
-  named the asked subcategories, or it takes an entity the ask names outright (a spelled code —
-  "delays at ORD"; a named team — "Dodgers score last night"), as opposed to one read off a city
-  word ("Washington" → DCA, cued by "delays"). "any delays on the Washington Metro right now" says
-  "delays" and "metro"; FAA airport status says "delays" but never "metro", so it is no longer
-  tapped for a Metro ask (SET C: an honest-empty card from the wrong source); "how's the Nasdaq
-  doing" keeps the Nasdaq Composite index (its name says the asked word). Measured on the 148-row
-  labeled locate set against the pinned pack: unchanged (103/108 admitted, the same two
-  pre-existing place rows), and against the Library's words-round pack (sun rise, advisories /
-  watches, GDP naming and kinds): unchanged; the Library's own lookup eval stays 46/46.
-- **Named subjects (review round, 2026-10-03; `_other_subject`).** A source
-  with a declared `coverage.entity` is about that subject: it serves the ask
-  when the ask names it (the entity's capitalized / numbered words, its
-  name, or its example asks' words that aren't the words of its kind:
-  "baseball" names MLB, "jobs" payrolls); otherwise only when every naming
-  word the user said is among its own words and it isn't bound to one region
-  (`coverage.geo` like `US-CA`: "subway delays" isn't BART's). Even when
-  named, another one of its kind refuses it: another number ("2 year
-  yield" on the 10-year) or — when the ask doesn't call it by its proper
-  name — a one-word keyword of its subcategory none of its words say
-  ("wmata" on the CTA's alerts; never a word of the subcategory's own name,
-  "inflation" on the CPI). Words the pick's readings name (a team the
-  Library resolved: "New York Yankees") were checked by locate and don't
-  count. A source whose address a resolver filled from the subject (a team,
-  a ticker) is "about the named subject" only when that resolver is one the
-  policy of a category the subject + wants classify as resolves ("Phoenix"
-  fills a ballclub; "the space station over Phoenix" is sky data), and its
-  reading must hold every naming word of the subject ("Miami Marlins" for
-  "Inter Miami" → refused; an acronym of the reading counts: "epl").
-- **Windows that hold (review round, D5).** A name with a day word is no
-  window ("Saturday Night Live", "Monday Night Football", "Black Friday",
-  "Super Tuesday", "Cyber Monday", "Good Friday", "Fat Tuesday", …) — since
-  Round 20 (Q3b) the recognizers read the ask with the intent's proper names
-  masked (`recognize.name_masks`, §36; the removed window parse masked a
-  fixed list of them).
-  Since Round 20 (Q3b) the query layer picks the answer, and what holds for
-  the asked stretch is the build's time binding (§36): a slow-moving value
-  (no weather-like `measure`: a moon phase, a weekly price, a jackpot)
-  declared `today` / `latest` stands for tonight, `latest` for this week
-  (next_days ≤ 7); a list with no time cell for now / today / tonight /
-  this week (all `approximated`); day rows answer tonight with today's row.
-  A stretch only ever ahead (tomorrow, next days / hours, upcoming) never
-  cuts rows that all lie in the past (`ni.rows_all_past`: FRED's
-  observation dates) — the card shows the latest rows instead of nothing;
-  today, tonight, a weekday or the weekend over past rows is cut as a span
-  read back (a weekday or weekend is the latest past one), and a count
-  always cuts.
-- **Page path (C9–C11).** `_s2_evaluate` drops pages `pagegraph.readability`
-  can't read (challenge, JS shell, modal, binary), marks the subject's own
-  site official (`pagegraph.first_party` over the subject and the user's own
-  words, the Library's `official_hosts` when it has them) and puts it first
-  only with evidence its page serves the ask (`pagegraph.authority_leads`; a
-  zero-evidence official page ranks by fitness like any other), and weighs
-  fitness by `refreshability`; the rank prompt shows an authority column. `_build_page_card` wraps the jail payload with
-  `graph_from_extract`, skips a page with no want/subject word before any
-  model call (`page_verify.has_evidence`), and runs
-  `page_verify.verify_page_reading` on BOTH tiers; the judge's
-  `serves:false` / `wrong` binds in the interpreted tier too. Any refusal,
-  and an llm reply that won't parse, moves on to the next page of the pick
-  (never a re-search that offers it again); a pasted link ends honestly.
-  fix7-page (2026-10-04) adds four class fixes to the gate: (a) a reading
-  that is a whole-word substring of the page's own title (digits riding
-  along) is chrome, not a value — Yahoo "S&P 500 INDEX (^SPX)" refuses;
-  (b) a list / collection entity's own `name` is a label FOR the list, not
-  an item in it — findarepo's `ItemList.name` refuses on both tiers; (c)
-  a current/status/schedule reading that is a bare clock timestamp parsed
-  past now refuses, unless the reading itself names a status word (a burn
-  ban's "As of 8/11/26, outdoor burning is prohibited" still ships); (d)
-  a 'right now' ask against a page carrying no freshness signal (no
-  `dateModified` within 48 h, no `article:modified_time`, no 'as of' /
-  'updated' / 'N minutes ago' phrase, no today's date) refuses — the
-  intent's `window` rides through `_page_reasons`.
-- **Harness.** `tools/ni-live-e2e.py` records every tapped reading (label,
-  filled params, scope) and the flow's notes for each ask.
-
-## 30. The SmartBrain Library replaces the built-in catalog (2026-09-28)
-
-The 12 bundled recipes (§18, §26) and everything that existed only for them
-are removed: `ni_catalog.py` + `data/ni_catalog.json`, M-RANK over the catalog
-(`locate_rank`), the keyword scorer (`match_recipe` / `suggest_recipes`), the
-`confirm_source` pause and its Approve / Not-this-source card, the recipe
-geocode two-step, unit fills, threshold-over-recipe routing, the
-`not_covered` disclosure, the `list_ni_catalog` and `confirm_ni_flow_source`
-tools, the pick-recipe / confirm-source / decline-source routes, and
-`tools/ni-library/prove.py`.
-
-The source step is now one pause (`_pause_source_pick`): SmartBrain Library
-candidates whose parameters all fill from the user's words seal as
-`_ranked_library` (≤3, provider + authority + the reading when the words fit
-several); when the Library has none, S2 web search runs as before; otherwise
-the plain pause (paste a link). A tap is the consent and a Library tap is
-recorded as a Yes. Re-entering the pick (refine asking for another source)
-re-offers the Library's rows. A flow record a pre-Library build left at
-`confirm_source` re-lands as the pick pause (board read or the tick sweep).
-Cards already built from recipes keep working: their specs are self-contained
-and the `recipe` born marker stays readable.
-
-
-## 31. The user's own key and contact email for Library sources (2026-09-28)
-
-- **Library side.** `library_resolve.candidate_urls` no longer refuses a source whose
-  parameter fills `from: vault_key`: it returns the address WITHOUT the key plus
-  `needs_key: {in: query|header, name, prefix, docs_url}` (`key_placement`; a key in
-  the path is refused — it would sit in logs). `contact_ua` sources carry
-  `needs_contact`. `library_index.candidates` keeps gathering keyed sources but stops
-  on `limit` keyless ones and orders keyless first; exact lookup ties break
-  keyless-first, prior, id (same in the Library's `build.lookup`).
-- **Spec.** `http_json` gains `secret_query: {<query name>: {"$secret": "ni:<id>:<name>"}}`
-  (≤2, https-only, validated closed) and `contact_ua: true`.
-  `ni.http_request_parts(source, item_id, secrets)` is the one request builder for the
-  engine AND the flow's first sample: `$secret` headers + `secret_query` resolved
-  through `_load_credential` (host-bound, https-only, item-scoped); `contact_ua` adds
-  the user's email to the honest User-Agent (`NIError("contact_missing")` when unset).
-  Any header or key ⇒ redirects refused. `rewrite_self_refs` / `rewrite_refs_to_self`
-  cover `secret_query`.
-- **Flow.** A tap on a Library row that needs a key or email seals `_access` (bound to
-  that exact URL) and pauses at `awaiting_access` (question `give_access`) — nothing is
-  fetched. `POST /api/ni/items/{id}/flow/access {key?, email?}` (desktop-local, audited
-  without values) stores the key as `ni:<id>:api_key` bound to the host (header prefix
-  such as `Token ` prepended) and the email as SecretStore `contact:email`, then starts
-  the worker. A same-host `api_key` another card holds is reused. Sampling
-  (`_fetch_with_access`) and assembly attach the key only when the URL equals the
-  sealed `_access.url`; the built spec carries refs and an `api_key` secret param,
-  never a value.
-- **Library API client** (`library_client.py`). A Library tap queues a vote
-  `{source_id, "yes", app_version}`; the add form's `suggest` queues the record with
-  parameter values, headers, tier, origin and votes removed. A sealed outbox (reserved
-  row, slot `outbox`, ≤200, oldest votes dropped first) is sent by the scheduler pass
-  `_auto_send_library_outbox` (≤10 per tick, backoff 15 min doubling to 24 h, drop on
-  400/413/415/422 or after 8 tries). `SMARTBRAIN_LIBRARY_API=""` switches sending off.
-
-
-## 32. Cards built from a Library source's declared answers (2026-09-29)
-
-- **Record field.** A curated Library record may carry `answers` (Library spec v1.1):
-  `value` (one path; type `number` | `text` | `time` | `date` | `count`; `unit` or
-  `unit_path`; `codes: wmo_weather`; a `time` may say `utc: true` — its zoneless values are
-  UTC, not the source's local clock), `list` (rows at `path`, 1–4 row cells relative to
-  one item, `newest_first`, `may_be_empty`, `filter: {path, equals}` where `equals` is a
-  `"{param}"` or a short fixed value the response uses, e.g. `"Final"`) and
-  `columns` (2–4 parallel arrays, `limit`). Paths may hold whole `{param}` segments,
-  filled at build as quoted keys (§4.1): `near_earth_objects.{date}` →
-  `near_earth_objects["2026-09-27"]`.
-  `LibraryIndex.answers(id)` returns them; `ni_flow._clean_answer` drops any answer
-  that breaks the closed shape (the rest still serve).
-- **Spec v1.2 — what an answer delivers (2026-10-03).** Optional, closed: a value's
-  `window` (`now | today | tonight | tomorrow | latest`, the newest reading not tied to
-  the clock) and `measure` (`temperature | feels_like | precip_chance | precip_amount |
-  conditions | thunderstorm | snow | wind | humidity | waves | swell | wave_direction |
-  water_temp | alerts | kp | uv | air_quality | tide | sunrise | sunset`); a list's or
-  columns answer's `axis: {cell, step: day|hour|period}` (the cell is one of its own
-  time/date cells: the rows are indexed by time and can be cut); `tbd_if: {path, equals}`
-  on a `time` value (path from the root) or a list row's `time` cell (row-relative) —
-  `equals` is `true` or a flag word ("TBD", "TBA").
-- **Spec v1.5 — the values a text cell holds (Round 20, Q3d).** `codes` names a cell's code
-  table: `wmo_weather` on a `number` value or cell (the engine's `label` step, `ni.LABEL_TABLES`),
-  or, on a `text` value, list row cell or column, a Library code table
-  (`taxonomy/codes/<name>.json`, a slug `[a-z][a-z0-9_]{0,39}`) packed as
-  `library_codes(name, value)` — `nws_event` (the NWS alert event types, 112 values) on
-  `properties.event` of `nws-alerts-point`, `nws-alerts-state` and `nws-tropical-alerts-point`.
-  `_clean_answer` keeps a table on its cell type only (`_codes_ok`: a text table on a number, or
-  `wmo_weather` on a text, skips the answer as an unknown table always did — before v1.5 the
-  reader dropped those three NWS answers outright). A text table adds no pipeline step
-  (`_cell_ops`, `_build_value_answers`) and reports no sky (`_covers_measure` counts
-  `wmo_weather` only); its values are a row filter's evidence (§36).
-  `LibraryIndex.code_values(name)` reads them (at most 1,000, cached per installed pack); a pack
-  older than v1.5 has no `library_codes` and reads as empty, never an error — its answers carry
-  no text table either, so the build is unchanged on it.
-- **Seal.** A Library tap (`pick_flow_source` and `tools/ni-live-e2e.py`, both through
-  `ni_flow.seal_library_pick`) seals `_library_source`, `_library_url` and
-  `_library_params` (the values the URL was filled with — candidate rows now carry
-  `params`, never the key slot) next to `_format`.
-- **Pick by the frame (C7).** Since Round 20 (Q3b) the query layer picks (§36): the plan's
-  `ir.answer` is the answer (value companions from `ir.select`, ≤4), and the build binds the
-  IR's `time` to it — a value declared for the asked stretch (`now` also takes `latest`;
-  `today` takes `now` and `latest`), rows whose axis can cut it, a list with no time cell for
-  now / today / tonight / this week. A measure the ask names ("wind") that no declared answer
-  reports, or a stretch the chosen answer cannot show, is nothing — the next source,
-  "<provider> doesn't give <the weekend>" / "doesn't report wind", never the headline answers
-  instead. A count is the IR's code-owned `agg`. (Until Round 20, `select_answers` scored the
-  answers by the ask's words under window / count / existence rules.)
-- **Build.** `_sample_and_map` on a fresh build (never a remap) whose fetched URL equals
-  `_library_url` builds from the answers before any derive / mapping call: the query
-  layer's choice (above), `{param}` segments filled, then extract + typed
-  transforms (`number`, `time`, `date`, `count`, `label`, `zip` + `top_n` (7 daily /
-  12 hourly), `reverse`, `where` eq for a filter, the IR's row filters as `where` ops —
-  §36). `unit_path` is read once and frozen
-  as a literal (number node `unit`; a row suffix in list scenes). The pipeline runs on
-  the sample, every shown value is typed-checked, and the draft spec validates and
-  binds. A list fits when every cell is present in SOME row; a row missing a cell shows
-  "—" there (a cell missing from EVERY row is drift: the run fails, repair fires). A
-  `may_be_empty` list counts its rows and shows "No <label> right now" while empty.
-  With a window and an `axis`, the engine's `window` transform (keyed by the axis cell,
-  `zone` extracted from the source's top-level `timezone` / `utc_offset_seconds`, plus
-  `utc` / `unless` / `step` carried from the axis cell — F3/F9/F11 2026-10-04)
-  replaces `top_n` and runs before the cells' conversions, so "this weekend" stays Sat +
-  Sun on every refresh. "Today" is the source's today (its named zone, else the offset
-  of the row nearest now) — except that a UTC stamp (`Z` / `+00:00`) with no zone named
-  says when, not where: its day is the user's (MLB / NHL starts; at 21:30 in New York
-  "today" keeps tonight's 9:40 PM game). The axis cell's `utc: true` flag rides onto the
-  window op so a zoneless time declared UTC is a UTC instant (TheSportsDB `strTimestamp`,
-  SWPC `time_tag` — a zoneless 03:00 is 8 PM PDT, kept by `tonight` in LA). A row whose
-  `tbd_if` flag is set becomes a day row on its written date (`unless` on the window op):
-  an MLB TBD start sentinel 07:33Z never slips into `tonight`. On an hour-step axis
-  `today` / `tonight` floor at the current hour FOR FORECAST-STYLE SERIES (columns kind
-  — hourly weather); event / schedule / result lists (list kind) keep the whole asked period
-  (R4-6 2026-10-04 / R5-4 2026-10-04: `_window_op` with `floor_hour=False` keeps `step="hour"`
-  and marks `floor: false` on the op; the engine's `window` transform honors the flag without
-  rewriting the step, so the dawn rule still fires on hour axes). A next-event list (R5-1
-  2026-10-04) still floors — "when is the next tide today" at 22:30 cuts the morning low.
-  `tonight` before 06:00 is the current night (now..06:00) on any hour-step axis, regardless of
-  `floor`. Day-step rows keep the whole date even when the cell has a clock. A next-event /
-  schedule list on a time axis with no asked window still gets a forward cut (`upcoming`) every
-  run: rows from now − 15 min on (`ni._UPCOMING_GRACE`), the same floor `next_event_stale`
-  judges a "next" card by, so a kept row is never refused and an event 50 minutes past is never
-  "next"; on an explicit day / night window (`today`, `tonight`) the stale-first check does NOT
-  fire for a schedule — "MLB schedule today" at 10 PM intentionally shows the Finals from
-  earlier (R4-6); it DOES fire for a next_event (R5-1) so "the next tide today" never leads
-  with a past tide.
-  The engine clock is the user's zone as the DESKTOP reports it (`meta user:timezone`,
-  loaded at unlock); R4-3 (2026-10-04): a REMOTE device may SEED the zone when none is
-  stored yet so a headless / LAN-only / phone-only install still runs on the user's
-  calendar instead of UTC — `meta user:timezone_by` records which authority last wrote
-  (`desktop` | `remote`) so a desktop handshake always overrides and a remote probe
-  never overrides a desktop-set value.
-  Day rows answer "tonight" as today; a window ahead over rows that all lie in the past
-  isn't applied (the latest rows show). `tbd_if` also becomes the `time` transform's
-  `unless` (a value's flag is extracted as `<name>_tbd` when the sample carries it): the
-  card shows the date + "time TBD". For a next-event / schedule ask, a value answer's
-  time node is marked `next`, so a time that has passed shows "no current prediction".
-- **Nothing here → the next source.** When the response holds none of the chosen answers
-  (TheSportsDB listing no games) or an asked value is missing (a buoy not measuring waves),
-  the pick re-lands on the other offered sources with "<provider> has nothing for this right
-  now" (web search when none is left). With no other source, an asked value that's missing
-  falls back to the source's other `primary` answers, named "not reported by this source
-  right now"; otherwise the card ends honestly (`unsupported`). Any other misfit notes "the
-  Library's declared answers didn't fit…" and moves on to the next source (§33, amended 2026-10-05: a
-  tapped Library row is never model-mapped).
-- **Verify replaces the judge.** The build is deterministic, so the P8 judge doesn't run
-  (its gap guesses were false on cards that showed the very thing); `_verify_frame` (§29
-  "The frame and the verify step") checks the build against the ask's frame instead and
-  refuses what can't answer it. The note says "built from the Library's declared answers:
-  <labels>" plus, computed by code, "this source doesn't report: <want>" for a want the
-  user's own words named that no declared answer speaks to (a filled value — the URL's
-  params only; a place the address never took is not filled) and for the subcategory's
-  `expects` components none of the source's answers reports.
-- **Bare lists.** The engine now wraps a bare-list response as `{"items": [...]}`
-  before the pipeline, exactly as the flow samples it (no path can address a bare
-  list root, so no existing card changes).
-- **Place-row scoping (fix6-rows, 2026-10-04).** A list whose row declares a cell naming a place
-  (`port`, `station`, `city`, `state`, `county`, `country`, `location`, `site`, `place`, `venue`,
-  `airport`, `region`) is scoped to the ask's named place like an entity-filled answer is scoped
-  to its `{param}`: `_try_answers_build` calls `_scope_rows_to_place(answer, sample, place)`,
-  which finds the first row whose place cell matches (case-folded exact, else starts-with) and
-  seals a `where eq` filter with that row's exact value onto the answer. No row names the place
-  → the source has nothing for it ("CBP border wait times has nothing for Pembina") and the next
-  source runs. A source already filled from a geo parameter (lat/lon/zip/station) stays off the
-  scoping (its rows describe where each row lives relative to its city — "4 km W of Yountville,
-  CA" is not what the ask filters on). "San Ysidro border wait" ships only San Ysidro's rows;
-  "flu levels in Texas" ships only Texas rows on the model-mapping path (handled in parallel).
-- **No page browser for a declared build (Round 20, B3a).** A tapped Library row never renders:
-  a row that answers with a page moves on (C12) and a refusing row moves on as before. The page
-  browser (§35 B3a) serves only a pasted page link and a page card's Fix.
-
-## 33. Open paths wait for the user's YES (operator ruling 2026-10-04)
-
-"Hold open paths for a YES." Across three sealed blind runs every confidently wrong card came
-from the two open paths; every card built from a Library source's declared answers was right.
-AMENDED 2026-10-05 ("Library cards; web as links", below): the flow no longer builds from a web
-search result or a Library source without declared answers, so a link the user PASTES is the only
-new card that reaches the page / mapping paths and waits for the YES. Cards held before the
-amendment keep their hold and their YES / NO.
-
-- **Seal.** `_finalize` seals `_built_from: {path, host, title}` (closed; `ni._validate_built_from`)
-  on every flow build: `declared` (the §32 declared-answers build — `_handoff(path="declared")`),
-  `page` (an `http_page` card, compiled or interpreted tier) or `mapping` (the model-mapping path:
-  a harvested dataset, a Library source without declared answers, a pasted JSON link, and every
-  remap / Fix). `host` is the fetched URL's host; `title` is the page's own title, else the title of
-  the pick row the user tapped (Library or web), else "". Computed cards seal nothing. Export
-  strips it (`_EXPORT_STRIP_KEYS`), template packs may not carry it (refused at parse, stripped at
-  install), so a template can neither claim nor shed it. No migration: a card without the marker
-  (every card built before the ruling) is never held.
-- **Held.** `ni.awaits_yes(item)` = state `commissioning` AND `_built_from.path` ∈ {page, mapping}
-  AND no `_c2_ok`. Held cards land `commissioning` like every card (§6) and differ only in: the
-  due query skips them (no cadence fetch until the YES); the board shows the reading the flow
-  found (`preview`; a manual run's ok `latest` wins) with `awaiting_yes: {from: page|dataset,
-  host, title}`; the chat status tool says the card waits for the user's YES. live still needs
-  `_c2_ok`, which only `POST /validate ok=true` writes — scheduler, manual run, repair (L1/L2 keep
-  state + attestations), export/import, template install and template update never set it, and
-  `update_spec` strips it. A card past commissioning (live / degraded / failing) already had its
-  YES and is never re-held by an edit; a Fix / remap or a source-changing edit returns it to
-  commissioning and therefore to the YES.
-- **YES** = the C2 verdict (`/validate ok=true`): `_c2_ok` sealed, the C3 kick runs at once
-  (contract captured), and `last_checked` is cleared so the C3 proof runs on the next tick
-  (a held card had no C1 run before the YES) → live.
-- **NO** = `/validate ok=false` on a held card: a `c2_wrong` journal row ("user said no to the
-  reading from <host>"), state `draft`, then `ni_flow.decline_reading`: the declined URL joins the
-  flow record's `_declined` (≤10, never offered on this card again — `_pause_source_pick` and
-  `_pause_with_web` filter it) and the per-pick seal (`_library_*`, `_access`, `_format`) clears.
-  Other offered rows left → the pick re-lands at once (`repick`, via `_repick_without`); none left
-  or a pasted link → the flow re-runs from the user's words with the declined address excluded
-  (Library → web → paste-a-link; `relocate`). The next pick builds a fresh card that waits for
-  its own YES (or goes live as before if it is a declared build). Never a dead end.
-- **Card (/ni).** Health chip "Needs your OK"; dashed border (not live yet); the reading renders
-  as the card's own scene; under it "Is this what you asked for?", "From the web page <host> —
-  <title>" / "From the dataset <host> — <title>" (`awaitingYesSource`, web/src/lib/ni/flow.ts),
-  and **Yes, that's it** / **No, try another source**; the footer says "not updating yet".
-  While a flow speaks on a draft (the re-pick after NO) Activate and the preview tag hide.
-- **Live harness.** `tools/ni-live-e2e.py` reports a held card as `awaiting-yes` and prints its
-  reading (the preview scene's words), host, title and kind, so a human judges whether the YES
-  would be right; declared cards report as before.
-
-### Amendment — "Library cards; web as links" (operator ruling 2026-10-05)
-
-Across the last two sealed blind runs 9 of 15 readings pulled from web pages / datasets were wrong
-even behind the YES gate. This release, cards are built only from Library sources that DECLARE their
-answers (§32); everything else is offered as a link, named honestly, with nothing read off it.
-
-- **Rows.** `_library_candidates` marks each row (`_mark_links`): `answers: true` when
-  `_library_answers(source_id)` is non-empty (a tap builds); otherwise `answers: false` plus `page` —
-  the page a person opens about the source (`_human_page`: the record's `access.docs_url`, else
-  `provider.url`; never the API address / `url_template`, a machine file (`.json`, `.yaml`, `.xml`,
-  `.zip`, `.csv`, feeds…) or a terms / legal / policy page). A row with no such page is dropped.
-  Buildable rows come first. A row sealed before the ruling carries no mark and counts as buildable
-  (`_buildable`); the build below still moves on from a source without answers.
-- **Pause.** Any buildable row → the Library pick as before (its link rows ride along, no web
-  search). None → S2 runs (unchanged ranking: `_s2_evaluate` + `rank_web_rows`) and ≤3 pages seal
-  as `_ranked_search {title, host, url}` (no evidence) next to the Library's link rows; nothing
-  found → the plain pause, note "no SmartBrain Library source answers this yet". A move-on with no
-  buildable row left searches the web the same way (`_move_on`, links carried).
-- **Board.** `suggestions`: buildable Library rows `kind:"library"` (as before), then
-  `{kind:"link", found:"dataset", title, host, url: page}`, then `{kind:"link", found:"page",
-  title, host, url}`.
-- **Never built.** `POST …/flow/pick-source` answers 409 ("that page is offered as a link —
-  SmartBrain can't keep a live card from it yet; open it, or paste a link to the data") for a URL
-  that is a link row (a web row's url, a dataset row's page or API url) unless the body says
-  `pasted: true` (the card's paste form): then `ni_flow.mark_pasted` seals `_pasted` and it builds
-  like any pasted link (held for YES). `run_flow` itself re-lands the pause for a link-row URL that
-  isn't `_pasted` — the live harness, a retry and the chat resume tool can't build one either.
-  Only buildable rows seal a Library pick (`seal_library_pick`, vote).
-- **Build.** A tapped Library row builds ONLY from its declared answers: `_try_answers_build`
-  → None (no answers, or they don't fit the response) moves on ("doesn't declare its answers" /
-  "didn't fit its declared answers"); "nothing for this right now" with no other row ends
-  `unsupported`; a Library row that answers with a page (`not_json`, any format) moves on — never a
-  page card. The model mapping path now serves only a pasted JSON link and Fix / remap.
-- **Card (/ni).** `pickRows` (web/src/lib/ni/flow.ts) splits the rows: Library sources are tap
-  buttons; links render under "Pages that may help — SmartBrain can't keep a live card from these
-  yet:" as plain `<a target="_blank" rel="noopener noreferrer">` rows (title, then "host · dataset"
-  / "host · web page", `linkWhat`). Heading: "From the SmartBrain Library — tap the one that fits:" /
-  "No SmartBrain Library source answers this yet." / "… — paste a link to the data:". The paste
-  form sends `pasted: true`.
-- **Live harness.** `tools/ni-live-e2e.py` taps only `kind:"library"` rows; a pause that offers
-  only links reports outcome `links` and prints each as `host — title`.
-
-
-## 34. Form scenes (Round 19, phase 1a-2 — the `ni_forms` engine designs the card)
-
-Every card the flow builds — a Library source's declared answers (§32), a pasted dataset on
-the mapping path, a page card (compiled or interpreted), the computed countdown — now seals
-ONE scene node of type `form`. The old template scenes (`value_scene` / `list_scene`, the
-display-class pick and the map/image → value degrade) are gone from the flow; hand-authored
-`stack` scenes (chat, templates) keep the §5 grammar. The engine lives in
-`smartbrain_3000/ni_forms` (Phase 1a-1); this section is the product contract around it.
-
-- **Sealed node (closed; `ni._validate_form`).** A `form` node is a LEAF (no children, no
-  `when`; a `repeat` whose template is a form is refused at validation):
-  `{type: "form", form, variant, params, record: {kind, fields: [{name, label, path, type,
-  role, unit?, currency?, scale?, precision?, wallclock?}], rows: str|null}, spans: {desktop,
-  phone}, design: {designer: "model"|"rules", pick, second: null | {id, form, variant,
-  params, spans}, fallback?: true, gates?: [str]}, frame?: {kind, wants}}`. `form` ∈ `ni_forms.types.FORMS`;
-  `type` / `role` ∈ `ni_forms.types.FIELD_TYPES` / `ROLES` (imported lazily — one source of
-  truth); ≤8 fields; `rows` names the pipeline output holding the list rows (`"rows"`), `null`
-  for value answers; spans are `ni_forms.spans` keys (`d1x1`, `p2x1`…). `design.second` is the
-  runner-up sealed whole, so it can be chosen later without a refetch. `frame` (fix round 1a-5,
-  2026-10-07; optional — absent = legacy node) is the ask's frame the design was made under:
-  `kind` ∈ `ni_forms.types.QUESTION_KINDS` | null (the flow's `intent.frame_kind`, code-parsed)
-  and `wants` (≤8 of the intent's wants, ≤40 chars each); the bind re-enumerates under the same
-  prior. `design.fallback: true` marks the universal fallback (no form survived: a plain `table` /
-  `kv_grid`, see below).
-- **Build (design time, once).** `ni_flow._form_node` → `ni_forms.form_scene.form_scene(chosen,
-  outputs, title, ask, now, source_url, cadence_s, rows_output_name, call_model, viewer_tz)`:
-  `record.from_answers` turns the SAME answers the pipeline was built from (value answers under
-  their output names; a list / columns answer with each cell's row `key` — the cell path for a
-  list, the zipped slug for columns — and its unit resolved once) plus the sample outputs into a
-  `DataRecord` (value → `measure`, one row; list → `events` when a time cell sits on a declared
-  axis, else `records`; columns → `series` on an axis, else `records`). Types follow the
-  declaration (`number` + unit → `currency` / `percent` / `quantity` with the lexicon unit id,
-  `time` → `datetime`, `date`, `count` → number, `codes` → text; text with ≤12 distinct values
-  → `category`; a blank string is a missing cell), roles follow the shape (value: a
-  coordinate → `lat`/`lon` when the ask is about a place — where / location / position /
-  coordinates / map / track — else `ignore`; a text longer than a short phrase (>36 chars) →
-  `text_body`; the first other field a form can lead with, preferring one whose sample cell
-  is filled → `measure`; a later time that is the reading's own stamp (window `now`, or
-  named as_of / updated / timestamp) → `as_of`; the rest `secondary`. Rows: the first text
-  column whose values tell the rows apart → `name` (else the first text) — a
-  status/severity/state label → `status` — other texts → `kind` when a closed vocabulary, else
-  `meta`; first time → `time`/`date`, first number → `value`, later numbers `secondary`,
-  coordinates `lat`/`lon`). Labels
-  are the pack's / the user's words (`label_src: lexicon`, so they may be shown as facts). A
-  candidate with no lint-clean phone span seals the full-width phone span of its height (the
-  bind counts that lint). Then `profile → enumerate →
-  present`: PRESENT runs through the flow's own `call_model` (the ni route, the model-consent
-  gate, the 300 s timeout — `FormBuild.call_model`); with one candidate, no model, an invalid
-  reply or a transport error the rules floor picks. The pick's `(form, variant, params)` and its
-  default desktop + phone spans are sealed; `now` is the sample's fetch instant (`FormBuild.now`,
-  never the clock inside `ni_forms`). The mapping path builds a small answer-shaped `chosen`
-  from its mapped fields; page cards one text value answer per want (the user's words as
-  labels); the countdown one count. `display.size` = `display_size_for_span(spans.desktop)`:
-  1×1 small, 2×1 wide, anything larger `large`; the flow's shell stays small.
-- **Time cells.** The pipeline's `time` / `date` transforms still emit display text, and that
-  text now keeps its instant (`ni._TimeText.moment`; `local_date` anchors a day at local
-  midnight). The record stores the instant (ISO 8601 Z) or the calendar day (`YYYY-MM-DD`) and
-  the forms format it; a zoneless string with no instant attached is never guessed (empty
-  cell). `Context.card_tz` is the source's zone when the pipeline extracted an IANA `zone`
-  output (`card_tz_src: data`), else the user's zone (`ni.user_timezone_name()`, UTC until the
-  desktop / a remote device reports one); `Context.as_of` is the `as_of` field's value or None.
-- **Bind (every run, no model).** `bind_scene(scene, outputs, history=…, image_ref=…,
-  form_ctx=ni._form_bind_context(spec, fetched_at))` — the same seam the engine's run
-  (`run_item` stamps `fetched_at` after the fetch), the flow's preview bind (`_finalize`, at the
-  sample's fetch instant) and the C2 kick use. `form_ctx` = `{source_url, fetched_at,
-  viewer_tz, title, ask, cadence_s}` from the sealed spec, so the shell prints the same title /
-  host / cadence every time. `ni._bind_form`: `record.from_spec` re-reads the sealed field specs
-  by `path` (types and roles are never re-derived — a sealed `text` stays `text` whatever the
-  sample would suggest); the §11 history slot (`history.<name>_h`) becomes `parts["series"]`; a
-  sealed `rows` output that is not a list raises `bind_type` (the repeat bind's contract, kept); a
-  measure record whose `measure` cell is empty, or a sealed row field gone from EVERY row, raises
-  `extract_miss` (a sparse row or a blank secondary keeps its blank cell);
-  under `ni_forms.llm.no_model()` the engine re-profiles + re-enumerates and takes the candidate
-  matching the sealed `(form, variant, params)` — when the data drifted past it, the rules
-  floor with `design_needs_attention: true` on the bound node; the sealed desktop and phone
-  spans are laid out. Bound node (what the snapshot holds and the client paints):
-  `{type: "form", form, clir: {desktop, phone}, summary, hash, lint: {red, amber, codes},
-  design: {designer, pick}, design_needs_attention?: true}` — `ni._enforce_form_shape` runs
-  `check_clir` on both CLIRs; `hash` is the desktop CLIR's canonical sha256 (monitor-hash /
-  cache); `summary` is the form's code template; `lint.codes` (≤12 distinct issue codes over
-  both spans) and `design` (the sealed designer + pick id) make a live read diagnosable without
-  probes (fix round 1a-5; both optional for payloads written before it). Two binds of one run's
-  outputs at one fetch instant hash the same.
-- **History (§11).** `_handoff` seals `history: {track: {<name>_h: <output path>}, max_points:
-  200}` for every numeric `measure` field (≤4) — the track name is the output's name with `_h`
-  (a track may not collide with a pipeline output), `record.history_key` names it on both sides.
-  Rows-shaped records track nothing. The stat's sparkline accrues from the card's own refreshes.
-- **C2 presentation (`presentation_id`).** `POST /api/ni/items/{id}/validate {ok, note?,
-  presentation_id?: "pick" | "second"}`. `second` re-seals the node under the sealed runner-up
-  (`form_scene.swap_to_second`: form / variant / params / spans swap, the former pick becomes the
-  new second, the record is byte-identical; `update_spec(preserve_attestations=True)` — a
-  presentation swap changes no data shape, so the C1 contract stays; the rev bumps) BEFORE the
-  YES is stamped; then `record_validation(…, presentation_id)` seals `_c2_ok` and `_present_ok`
-  (closed: `pick` | `second`; stripped on export and refused / stripped in template packs like
-  `_c2_ok`; `update_spec` strips it, `apply_repair` preserves it) and the C3 kick proves the
-  design the user chose. 409 when the card is not commissioning, is not a form, or sealed no
-  second; 422 for any other id.
-- **Glyph policy.** `glyph_missing` is AMBER (the browser paints the CLIR; measurement falls
-  back to the font's `.notdef` advance). Red returns with a server-side raster painter.
-- **Engine adjustments for the flow's shapes.** One count-state rule at build and at bind
-  (`layout_span`): a record form holding at most the designed "few" rows (≤3 — naturally, after a
-  refresh shrank it, or under a count override) lays out as its designed empty / one / few state
-  with hollow space amber, exactly as enumerate's forced-state check accepted the span; a card
-  sealed over 8 rows that refreshes with 1 binds state `one`, red 0 (and a one-item list, the
-  common filtered case, has a span at all). The stat's label under the hero is left out when it
-  only repeats the card title (`title_echo`), and a lone hero under its title is the designed calm
-  card. On the mapping path a column constant across rows is dropped unless that would leave the
-  row with no word or number (two home games at one stadium keep the venue — a list of bare
-  timestamps has no form), and mapped column headers are humanised (`teamName` → "team name").
-- **Frame-aware design (fix round 1a-5, 2026-10-07 — after the first live read).** The
-  engine sees the ask's frame: `FormBuild.frame_kind` / `wants` → `form_scene(question_kind,
-  wants)` → `CardInput.question_kind` / `wants`. Rules, all code: (A) `enumerate.floor_rank`
-  applies the plan contract's B2 table (`KIND_FORMS`: forecast on a sub-daily axis →
-  `series_line` / `conditions` / `day_table` / `agenda`, on a day axis → `day_table`; schedule →
-  `agenda` / `day_table`; next_event → `next_event` (a rows record with no time axis is a
-  lookup: `table` / `ranked_list` / `kv_grid`); lookup / ranking / latest_items → `table` /
-  `ranked_list` / `kv_grid`; status / alerts → `entity_list` / `stat`; trend → `series_line` /
-  `stat`) as a prior above the signature table; `next_event` is offered only for a next_event /
-  schedule question or a `next` want; the fields the ask names (`ni_forms.asked`: a content word
-  of the ask or of the wants matching the field's label / name / path tail, directly or through
-  the `field_words` synonym groups of `assets/lexicon/wants.json`) are never in a plan's drop
-  list — the asked number leads a rows record (`record._apply_list_roles`), `pick_default` takes
-  the smallest span that keeps every asked field, a candidate whose default span drops one ranks
-  below one that keeps it, and PRESENT's L-ASK hard gate rejects such a pick; PRESENT's menu
-  shows the frame (`Frame: {kind, wants, asked_fields}`). (B) `series_line` needs ≥3 points; a
-  series that mostly lies ahead is a forecast: the hero is the reading of the period holding now,
-  no delta, the per-period list runs forward in time order; the Min / Max / Avg strip follows the
-  column's precision (`fmt.stat_decimals`: a derived statistic shows the column's decimals, at
-  most one more). (C) `title_echo` compares the title against labels / headers (`src` key /
-  lexicon) only, never a data cell; a record whose rows ALL fit a span with room left is that
-  span's designed few state (hollow amber, every span); when no candidate survives, `enumerate`
-  returns the universal fallback — `table` (records / events / series) or `kv_grid` (measure) at
-  its smallest lint-clean desktop span, else its smallest accepted span — so a record never leaves
-  the flow with "no candidate forms" (`design.fallback: true`, lint recorded at bind). (D)
-  `ni_flow._scope_rows_to_subject` (removed in Round 20, Q3b — the query layer's `where`, §36):
-  on a lookup / next_event ask over a list answer, the intent's
-  subject words select the text cell + value that names them (fewest extra words) as a sealed row
-  filter (`where eq`, like the place filter) — "when is Thanksgiving" shows Thanksgiving Day, "the
-  next new moon" the New Moon row; a subject named in several cells over different rows (a team in
-  the home and the away columns of a schedule) is a participant, not a row: the list stays whole; a
-  subject no row names that is not the list's own name ends honestly ("the list has no row for …",
-  the nothing path). (E) `map_lite` lists only rows with a
-  name or a value (one unnamed point takes the whole box; nothing is "+N more"; "1 place"). (F)
-  `stat`: a worded hero wraps to two lines before it is ever cut; the hero plan lists every
-  secondary fact that fits. `tools/ni-live-e2e.py` prints per live card `design: <form>
-  <spans> designer=<model|rules>/<pick> lint red N amber N [codes] frame=<kind> wants=[…]`.
-- **Second live read (fix round 1a-6, 2026-10-07).** (H) `record.from_answers`: a list /
-  columns answer whose rows (after the sealed filters, e.g. the subject row filter above)
-  number exactly one reads like a value answer's one row — kind `measure`, roles by
-  `_apply_value_roles` (the asked field, or the first displayable, leads; a long list cell
-  is row data, never a passage lead) — so "what time is sunrise tomorrow" leads with
-  sunrise, not the day column a table would have had to keep instead. The sealed node's
-  `record.rows` still names the pipeline output; `record.from_spec` reads row 0 of it on
-  every bind (never every row — a measure caps at one); a refresh whose list no longer
-  has exactly one row is the data drifting past the design — the rules floor seals with
-  `design_needs_attention: true`, the same flag an unmatched sealed candidate sets. (I)
-  `fmt.unit_rides_inline`: a unit over 6 characters, or carrying a space or `=`, never
-  joins a hero value inline; `stat` draws it as its own `sub`-role line instead
-  (`src: "lexicon"`, a `["unit", field]` provenance recipe) and the hero carries the
-  number alone — the summary (`Stat.summary`) still names the value with its unit, as
-  before. (J) `fmt.decimals`: a value with no declared `Field.precision` shows at most
-  the magnitude rule's decimals (≥ 1 → 2; < 1 → 3 or 4) — never the raw float's own
-  digits (`4,121.299805` → `4,121.30`); declared precision still wins. (L)
-  `form_scene.design` lays out the pick at BOTH its sealed spans before sealing it
-  (the former `_layout_once` smoke test discarded this result); a red span moves to the
-  next candidate in floor order, then the universal fallback at its smallest clean span
-  — a design seals only once both sealed spans are red-free. `design.gates` (optional,
-  ≤ 12 short strings, `_validate_form_design`) names what was skipped (`red:<cand>:<form>`
-  / `fallback:<cand>:<form>`); a non-empty `gates` also means `designer: "rules"` (a
-  model pick a lint gate overrode was never the model's design). (M) PRESENT
-  (`present.build_messages`) ends the user message with a literal JSON skeleton of the
-  required object, THIS menu's candidate ids filled in, and "Reply with ONLY that
-  JSON." (the intent stage's prompt validates on the local 9B this way; a schema
-  described only in words never did); `llm.chat_json`'s optional `skeleton` argument
-  repeats the same literal shape on the one retry instead of naming the schema error
-  alone.
-- **Third live read (fix round 1a-7, 2026-10-07 — SET C).** (D2) `ni_flow._scope_rows_to_subject`
-  (removed with `_empty_subject_filter` in Round 20, Q3b — §36) reaches alerts / latest_items /
-  status kinds too (not just lookup / next_event): the own-check
-  that recognizes "the subject is the list itself" now needs either an overlap with the list's
-  own label / name, or the WHOLE subject explained by its generic words — one shared word is
-  never enough ("red flag warnings" shares only the generic suffix "warning" with "Active
-  weather alerts"'s own words, so it still falls through to the row search); a row hit also
-  needs its value's extra words to not outnumber the subject's own (a common word like "post"
-  matching an unrelated news headline by coincidence is rejected). When nothing names the
-  subject AND it is not the list itself, `ni_flow._empty_subject_filter` seals a filter on the
-  first text cell anyway (the subject's words, title-cased, the way a hazard name is spelled) —
-  the card's `may_be_empty` design reads an honest "no red flag warnings right now" instead of
-  the whole list, and a later refresh that DOES report it lights up. (P1)
-  `record._apply_value_roles`'s passage rule (">36 chars is a passage lead") now fires only with
-  exactly one chosen value answer — a "next matchup" build's three answers (name / start /
-  venue) never lets "the identity text is long" demote it off the card; a plan's secondary-facts
-  loop then keeps identity ahead of venue / meta by field order. (P2) `day_table.plan_body`
-  walks from the first day its (possibly window-cut) rows actually hold, not always "today" — a
-  weekend-only build never synthesizes the empty weekday rows between today and the window.
-- **FitVerdict (Phase 3a, plan §B3 — advisory, build time only).** After `_verify_frame` accepts
-  a declared build, `ni_flow._fit_check` asks ONE closed local question: does the chosen data
-  answer the ask? `ni_forms.verdict.fit_verdict` builds a per-call menu (code-owned:
-  `_verify_frame`'s already-computed `unanswered` components plus the ask's own want words) and
-  a literal JSON skeleton (the class-M pattern), validates `{answers_ask: yes|partly|no,
-  missing: [ComponentId] ≤6, wrong: [AnswerName] ≤4, evidence: [{answer, value}] ≤4}`, and
-  strips any `evidence.value` that is not a verbatim substring of the fenced preview rows. The
-  verdict is LOGGED ONLY — `fit: yes|partly|no (model)` or `fit: rules` in the flow notes — and
-  sealed as the spec's optional `_fit` (stripped on export / template install like `_c2_ok`); it
-  never blocks the build, never changes the card. `call_model=None` (no
-  consent) or any model trouble returns `None`. Authority stays off (Phase 3b) until a labeled
-  set someone else writes shows precision("no") ≥0.90. The sealed verdict DOES reach the
-  screen now, as a closed advisory marker (operator ruling 2026-10-12, never a block):
-  `ni_forms.verdict.visible_fit(spec, latest)` reads `_fit` and the bound reading the card
-  shows and returns `{verdict: no|partly, missing: [label] ≤3}` or `None` — `no`/`partly`
-  only (`yes` or absent shows nothing), `missing` ids resolved through the label lexicon or
-  dropped (a plain lowercase word/phrase ≤24 chars shows as itself; anything else is
-  dropped), and suppressed when the reading is the card's designed empty state (0 rows on a
-  `may_be_empty` list or a count answer) or nothing is bound yet. `ni_routes._board_row` and
-  `ni_flow._finalize`'s C2 preview bind both call it, so the marker rides the board row
-  (spec-level — a refresh never changes it) and the C2 preview bind beside `alternatives`;
-  a rebuild reseals `_fit`, so the marker changes with it.
-- **`tall` display size (2026-10-07).** `display_size_for_span` maps a 1×2 desktop design (`d1x2`) to
-  `tall` (it read `large` before); `_DISPLAY_SIZES` accepts it. The board sizes a form card from the
-  painted CLIR's own span key (web `cardSpan`, app PR #495 — absent/unknown size reads as small), so
-  `display.size` only drives the card menu's Size entry and the version-skew fallback.
-- **Runner-up in the preview (ALT).** When a form node's sealed `design.second` survives
-  re-enumeration at bind time, `bind_scene(…, alternatives=True)` lays out its own two sealed
-  spans too and adds them as the bound node's `alternatives: [{id, form, clir: {desktop,
-  phone}, summary}]` (≤1 entry, optional). Only `ni_flow._finalize` (the preview bind the C2
-  VerifyPanel reads) passes `alternatives=True`; the engine's run (`run_item`) and every other
-  caller leave it False, so a run's `latest` never carries it. `ni._enforce_form_shape` checks
-  it the same way as `clir` / `design` when present.
-- **What the client paints.** The CLIR for its device (`clir.desktop` on the board,
-  `clir.phone` on a phone): v1 prims (`text`, `time`, `rect`, `line`, `tri`, `dot`, `path`,
-  `cells`, `icon`, …) in content-box px with `x` anchors, `reading_order`, `hitmap`, and the
-  `live` bindings (now marker, countdown, past-dim, age) it re-evaluates on its own clock. Every
-  `text` prim carries `src` ∈ `TEXT_SRC` (data / lexicon / ask / title / key / code — never a
-  model word); `time` prims carry the ISO instant + `fmt` + `zone`, formatted on the device.
-  `summary` is the accessible text; `lint.red == 0` on everything the server ships. The web
-  painter (`IrPaint.svelte`, Phase 1a-3) paints the CLIR as DOM text and inline SVG with the
-  same live bindings as `paint/live.py`; a client older than 1a-3 shows its unrenderable
-  placeholder for a `form` node (the version-skew rule).
-- **What left with the templates.** The `may_be_empty` "No <label> right now" text node is the
-  form's own designed empty state; the `next: true` scene flag ("no current prediction" on a
-  passed next-event time) has no form equivalent — the countdown / next-event forms read the
-  instant and the client's clock. `tools/ni-live-e2e.py` prints a form card as `<form>:
-  <summary>`; `tools/ni-flow-eval.py --recorded` / `--chaos` use the eval's own minimal scenes
-  and are unchanged.
-- **Data-layer round 2 (after the SET D read, 2026-10-08; `select_answers` and `_scope_rows_to_subject`
-  were removed in Round 20, Q3b — §36).** `select_answers`: among tied list / columns
-  answers the one whose own name or label says an ask word wins ("Snow forecast" over "Tonight, hour
-  by hour" on "snow"), else the declared order; a `trend` ask with a declared history list (an axis)
-  takes it over a tied latest value. `_scope_rows_to_subject` reaches `result` and `schedule` kinds (a
-  named team's row, or the honest nothing). A `count` ask always cuts its window and never demotes a
-  one-row list to a measure (zero rows is the honest "0"). The per-answer cell cap is 5 (the Library's
-  cap rose with it). Measured on all 86 recorded live cards: selection changes on the two snow asks
-  only. A title-fallback rule ("the card never claims a quantity it does not show") was built, measured
-  (it re-titled 27 right cards to generic labels) and NOT shipped.
-- **Clock pass (Phase 1b).** A sealed card can go wrong with the CLOCK alone, no fetch
-  involved: "Today" turning into "Yesterday" past card-tz midnight, a daylight-saving
-  change moving every card-zone hour, a `live` binding's edge, or the as-of age passing
-  the stale threshold (`as_of` / `fetched_at` + 2× cadence). `ni_forms.clock.next_boundary`
-  (record, the bind's own laid-out CLIRs, `now`, `card_tz`, `cadence_s`) finds the earliest
-  such instant, or `None`. `_bind_form` computes it at every bind (build-time preview,
-  a run, a clock pass alike) and seals it on the bound node as `clock: {"next": "<ISO-8601
-  Z>" | null}` (optional — absent on a pre-1b payload, version-skew rule; `_enforce_form_shape`
-  checks it the same way as `design`). Every successful `run_item` ALSO writes a new snapshot
-  slot, `outputs` — the exact outputs dict the bind consumed, through the same `json_instants`
-  treatment as `preview_data` so a later bind can still read every time/date cell after the
-  JSON round trip — and sets the item's plaintext `next_clock` column (migration 42) from the
-  bound node's `clock.next`. `NIStore.due_items()` admits an item via `next_clock <= now()` the
-  same way it does via `last_checked` / `interval_minutes` (one SQL pre-filter, no decrypt to
-  learn an idle item is due). `tick` tells the two due-reasons apart with `_is_due`: a due item
-  that is NOT fetch-due takes the clock pass instead of `run_item` — no fetch, no model
-  (`ni_forms.llm.no_model()`), reads the `outputs` snapshot (and `history`, as a run does),
-  re-binds at the layout clock's current instant with the ORIGINAL run's `fetched_at` held
-  fixed (`_form_bind_context(spec, fetched_at, now)` — `now` defaults to `fetched_at` for every
-  other caller), and writes `latest` + `last_good` with the fresh bound payload. It never
-  touches `last_checked` / `consecutive_failures` / `last_status`, never evaluates alerts, and
-  never writes `llm_state` (the monitor hash) — nothing here runs `run_pipeline`, so the change
-  signal that gates it cannot fire. A missing `outputs` snapshot (a card last run before this
-  change) or any other failure declines the pass (clears `next_clock`) instead of failing the
-  card. `_bind_form` has no lint-colour-driven "needs update" state, so a clock re-layout whose
-  only red lint is `L-HOLLOW` (a day table thinning toward its last day) simply keeps the
-  designed card, matching the prototype's rule by construction rather than by a ported check.
-- **G3 (2026-10-12/13, live refetch of set G).** Hero rule: a one-row `stat` / `conditions`
-  record never leads with a bare date/time cell when a real measure or text cell sits in the
-  same row (`record._apply_value_roles`: a date/datetime field is only ever the lead when
-  nothing else in the row is leadable) — the Library's day-axis / period-axis answers declare
-  their date column first, and a day cut to one row no longer lets it stand in for the asked
-  quantity; the cut day still shows as a `secondary` fact (`conditions`'s date/time cells are
-  no longer dropped from its KV facts). A moment with a clock face (sunset, not a bare calendar
-  date) leads `stat`'s countdown variant with the time itself (`"d","date"`, next_event's own
-  pattern) and the live countdown rides its own `sub` line underneath (`_countdown_bind`) —
-  never a duration alone with no time of day anywhere on the card. Asked-cell rule: a sky
-  condition word (fog, sunny, cloudy, overcast …) the ask names makes the row's own
-  `Conditions` cell the list's lead (`record._apply_list_roles`'s closed `_CONDITION_ASK_WORDS`
-  check), demoting a numeric column that would otherwise lead a `series_line` chart — a
-  category cell stays outside `asked.asked_fields`'s general rule (a closed vocabulary is never
-  the asked quantity) only for this one named class. Two bounds keep it honest: a quantity word
-  ("windy", "humid", "rainy", "snowy") is not a condition word (wind speed, humidity, rain chance
-  and snowfall are number cells), and when the ask names a number cell ("rain chance tomorrow
-  and will it be foggy") that number keeps the lead. Separately, an NWS forecast period carries
-  no name cell at all; its own name (`"Tuesday"`, `"Tuesday Night"`) is derived by code from its
-  `startTime` cell in the card zone (`fmt.period_name`) wherever a list shows it, never left as
-  a bare date. Text-product coverage: an ask whose every want is a written text product (the
-  forecast discussion — the closed `_TEXT_PRODUCT_WANTS`) is answered only by a genuine
-  `text`-typed cell; a one-row build with no such cell (a short category word like "Mostly
-  Clear" is a label, never a discussion) is an honest stop (`ni_flow._text_product_gap`, run
-  from `_verify_frame`) — links, never a numeric stat wearing the asked word. A summary /
-  outlook / brief is not such a product (the periods' short forecasts serve it: sets F #49 and
-  G #49, live and partial), nor is an advisory (an alert the alert lists serve; a one-row alert
-  list binds as a measure and must never be refused here).
-
-## 35. Browser components (Round 20, steps B1–B2 — the component core and the walls)
-
-A browser component is a standalone, replaceable, hash-pinned headless browser the app can
-load to read a page the way a browser does (scripts run, the DOM settles). It lives in
-`smartbrain_3000/browsers/`. The card flow and the tick call it since B3a (below); the web
-surfaces are B3b. The engine only ever runs inside an OS wall (B2: macOS Seatbelt, Linux namespaces, the Docker
-renderer sidecar); where no wall can be built the platform reports `unavailable` with a
-reason and the runner starts nothing (fail closed). The first engine is Obscura
-(h4ckf0r0day/obscura, Rust, Apache-2.0) v0.2.4, run as a one-shot `fetch` subprocess — never
-`serve`, `mcp` or `scrape`, no CDP port, no `--eval`.
-
-- **Manifest** (`browsers/engines/<name>.json`, package data, loaded and validated on every
-  use; `manifest.py`, the command-line builder in `cmdline.py`). Closed keys: `name, version, released, source_url_template,
-  platforms{darwin-arm64|linux-x86_64|linux-aarch64: {asset, sha256, size, members{<file>:
-  {sha256, size}}}}, files[{name, mode, install}], executable, capabilities, argv{fetch,
-  assets, honest}, forbidden_flags, limits{timeout_s, script_deadline_ms, heap_mb, rss_mb,
-  rlimit_data_mb, html_cap_bytes}, identity{mode, pool_size}, min_glibc`. An unknown key,
-  a placeholder outside `{url, run_dir, proxy_port, timeout_s, heap_mb, output_path,
-  user_agent}`, a flag outside the template allowlist (`--proxy --storage-dir --timeout
-  --dump --output --wait-until --v8-flags --user-agent --stealth`), a forbidden token, a
-  `--v8-flags` value other than `--max-old-space-size={heap_mb}` or placed after `fetch`
-  (it is global-only; without it the heap is unbounded — measured 3.85 GB in 1.5 s), or an
-  `html_cap_bytes` above `netguard._MAX_BYTES` is a `ValueError`. The source URL must be
-  `https://github.com/…`. `members` pins the sha256 of every file the installer writes, so a
-  launch re-hashes against the manifest, not against anything on disk. `obscura-worker` is
-  listed but `install: false` (it serves `scrape`, which is never run). `released` gives
-  `age_days`. `SELECTABLE = {obscura}`: the `obscura-stealth` manifest ships (installable,
-  hashed, shown) but is not selectable in this step.
-- **Forbidden, always** (golden-tested, union of the code floor and the manifest list):
-  `--allow-private-network`, `--host`, `--port`/`-p`, `--eval`/`-e`, `--file` (batch reads
-  a local file), `--screenshot`/`-s`, `--quiet`/`-q` (heap-limit and watchdog kills exit 0
-  and announce themselves only on stderr — measured), the subcommands `serve`/`mcp`/
-  `scrape`, `--stealth` unless the manifest declares the capability, and the env key
-  `OBSCURA_ALLOW_PRIVATE_NETWORK`. The builder validates every value first (an https URL
-  normalised to lowercase IDNA ASCII with no whitespace, control characters or userinfo and
-  never an IP literal — the engine reads local files when handed `file://`; a printable-ASCII
-  UA ≤ 200 chars not starting with `-`; absolute paths; bounded ints), inserts it verbatim
-  (single-pass placeholder fill, never re-scanned), then re-walks the rendered argv token by
-  token — a forbidden token anywhere, even as a value, is refused. The engine env is a closed
-  set: minimal PATH, `LANG`/`LC_ALL`, HOME/TMPDIR/XDG_* inside the run dir,
-  `OBSCURA_TIMEZONE` (validated with zoneinfo first — a bogus zone silently becomes GMT,
-  and the default is Europe/Berlin), `OBSCURA_SCRIPT_DEADLINE_MS`, `OBSCURA_PROFILE`; no
-  proxy variable is ever passed.
-- **Installer** (`install.py`, the download and unpack in `release.py`). Layout `<data>/browsers/<name>/<version>/` (outside
-  `models/`). The exact pinned URL is fetched through netguard's address validation + IP
-  pin, `follow_redirects=False`, with exactly ONE redirect allowed whose target is https on
-  `{github.com, objects.githubusercontent.com, release-assets.githubusercontent.com}`
-  (default port, no userinfo); the serving host is logged. The body streams to
-  `<version>.tar.gz.part`, hashed as it arrives; the download aborts as soon as more than the
-  pinned size has arrived and has a wall-clock deadline; the sha256 is checked BEFORE
-  unpacking. The untar is by hand: top-level regular files only, each named in `files`;
-  absolute paths, `..`, links (also for members never written), devices, FIFOs, directories,
-  duplicates and strangers are refused; member count and total size are capped; installed
-  members must match their pinned size and sha256 and get exactly the manifest's mode (exec
-  bit only on the executable), written O_EXCL|O_NOFOLLOW. Then `<version>.partial/` →
-  `INSTALLED.json {name, version, sha256, installed_at, platform}` → one atomic rename →
-  prune every other entry under `<name>/` → self-test. `verify_installed(name)` re-hashes
-  every member against the manifest, refuses extra files, links, group/other-writable files
-  or a missing exec bit — on EVERY launch, nothing cached. `ensure(name)` installs only when
-  that check fails, never on an unsupported platform or below `min_glibc`, single-flight per
-  engine; transient failures retry at most 3 times, a refusal never. Phases: `absent ·
-  downloading(pct) · verifying · unpacking · self-testing · ready · unavailable · error ·
-  stale · disabled`. `SMARTBRAIN_NO_BROWSER=1` = `disabled`, nothing downloads (the test
-  conftest sets it). Errors are fixed sentences that name github.com and never echo an
-  exception, a path or a URL. The self-test (injected; default: the wall's canary program
-  and the engine's `--version` under the wall, see Walls) runs after an install and once
-  per boot (`ensure` runs it when the engine is in place and none has passed in this
-  process); it records `ok`, `skipped(wall_unavailable)` or `failed:<row>`, and a pass
-  stamps `verified_at` with the wall kind it passed under. In Docker the app container
-  never downloads an engine (`walls.remote`): the sidecar image holds it, and the row is
-  `ready` when the sidecar's `READY.json` names this manifest's exact build (name, version,
-  platform asset sha256).
-- **Egress child** (`jail_egress.py` + `egress.py`; P3 design §2). The engine's only network
-  route. Spawned with `jailrun._jail_env()` (no `SMARTBRAIN_*`, no proxy variable), its own
-  session, RLIMIT_CPU + RLIMIT_CORE, stderr to devnull. Protocol: one closed-key config line
-  on stdin → `{"endpoint": {kind: tcp, port} | {kind: unix, path}}` on stdout → serve until
-  stdin EOF or `max_life_s` → `{"census": [...], "dropped": n}` → exit. Rules: CONNECT
-  only (a plain `GET http://…` is `method` — the engine sends exactly that for an http page
-  and then exits 0 with an empty document, so http is refused up front too); request head
-  ≤ 8 KB; hostnames only (IP literals and all-numeric/`0x` last labels are `ip_literal`);
-  port 443 or the render URL's explicit port for that exact host; site policy by registrable
-  domain (`pagegraph.registrable_domain`, the app's conservative suffix table — TODO: a full
-  public-suffix list) checked BEFORE any DNS (`own` = the URL's site, `sealed` = the listed
-  sites, `open` = any public site); one bounded resolution per host per run (3 s), refused if
-  ANY answer fails the unchanged `netguard._is_unsafe`; the dial goes to a validated address.
-  Caps per run: 24 concurrent tunnels, 150 tunnels, 24 sites, 16 MB down, 1 MB up, 15 s idle
-  (a config may only tighten them). Census rows `{site, tunnels, up, down, verdict}` (≤ 64;
-  verdicts `ok method bad_request bad_host ip_literal port offsite cap_tunnels
-  cap_concurrent cap_sites resolve resolve_timeout unsafe connect cap_up cap_down`) go to the
-  parent on exit and nowhere else — the child writes no log. Listening: 127.0.0.1 ephemeral
-  port where the wall consumes a port (macOS, the test wall), a 0600 Unix socket in the run
-  dir where the wall relays to one (Linux: the namespace init's relay; Docker: the sidecar
-  agent's relay, the socket opened to the shared group 0660). Measured: with
-  `--proxy` the engine forwards hostnames unresolved, and its own SSRF guard catches literal
-  private IPs and `localhost`/`*.localhost` but NOT aliases such as `ip6-localhost`,
-  `localhost.localdomain` or the container's hostname — the egress child stops those.
-- **Walls** (`walls/`; P3 design §2). `check(platform, engine_dir) -> Unavailable | None`
-  (the pre-check for the runner and the Status surface; the macOS/Linux probes spawn once
-  per process and are cached), `prepare(platform, run_dir, engine_dir, egress_endpoint) ->
-  Wall | Unavailable` after the egress child is up, `Wall.proxy_port(endpoint)` (the egress
-  port, or the wall's relay port for a Unix endpoint), `Wall.wrap(argv, env)`,
-  `Wall.verify(pids)` on every watchdog poll (one unconfined PID = `confinement/wall_verify`),
-  `Wall.run(...)` for a `remote` wall, `Wall.teardown()`, `helpers` (the wall's own
-  processes in the engine's group, not engine children), `expects_children = False`
-  everywhere, `self_test(platform, m, engine_dir, home)` = the wall's canary program.
-  Reasons (closed): `platform` (Windows, other), `sandbox` (the wall cannot be built or
-  verified here), `userns_blocked` (unshare refused: disabled by sysctl or filtered by
-  seccomp — Docker Desktop's default), `apparmor_userns` (Ubuntu's AppArmor restriction on
-  unprivileged user namespaces), `docker_no_sidecar`, `missing_libs`. The fake engine
-  fixture never runs under a local real wall; a real engine never runs under the NullWall.
-  - **macOS — Seatbelt** (`walls/darwin.py` + `walls/obscura.sb`). The B0 spike's five
-    measured rules, byte for byte (sha256 pinned in code; a changed file = `sandbox`): exec
-    of `ENGINE_DIR/obscura` only (no fork), `sysctl-read hw.pagesize_compat`,
-    `file-read-data` of the literal `/`, `file-read* file-write*` under `RUN_DIR`,
-    `network-outbound` TCP to `localhost:PROXY_PORT`. `wrap` prepends `sandbox-exec -f
-    <profile> -D ENGINE_DIR=… -D RUN_DIR=… -D PROXY_PORT=…` and execs the canonical engine
-    path; parameters are canonical paths from a closed character set (letters, digits,
-    `/._-+@~,` and space) and a live port (0 refused). Under deny-default even traversing
-    a symlink is denied (`/var` → `/private/var`, measured), so run dirs are created
-    canonical (`make_run_dir` returns the realpath). `verify` = `sandbox_check(pid, NULL,
-    SANDBOX_CHECK_NO_REPORT)` (ctypes, libsystem_sandbox): 1 for every PID, the
-    sandbox-exec wrapper before its exec tolerated. `check`: sandbox-exec present, the
-    profile hash, a dry run with real parameters (exec of `/usr/bin/true` must be refused,
-    exit 71) and a canary read (exact profile + one exec rule for `/bin/cat`: the run dir
-    is readable, a file beside it is not). Self-test rows (exact profile + one exec rule per
-    probe binary): `nc` to 127.0.0.1, ::1, the LAN address and 169.254.169.254 refused with
-    EPERM, UDP to a loopback listener delivers nothing, `localhost` does not resolve (no
-    resolver under the profile), a CONNECT to an IP literal through the proxy gets THIS
-    egress child's 403 (census `ip_literal`), a canary file in the data dir is unreadable,
-    the run dir is readable, `sandbox_check` = 1 for a live confined process and 0 for the
-    app, the engine's `--version` under the exact profile, 0 hits on the canary listeners.
-    RLIMITs stay in the spawn's pre-exec step (B1). macOS has no PDEATHSIG: after an app
-    crash a confined engine runs until its own script deadline (measured 15.1 s).
-  - **Linux — namespaces** (`walls/linux.py` + `walls/userns_boot.py`, run by path with
-    `python -I -S`, stdlib only, every import before the masks). The bootstrap unshares
-    USER|NS|NET|PID, maps only the app's uid/gid (setgroups denied; running as root =
-    `sandbox`), forks the namespace init (PID 1), which makes mounts private, masks `/home
-    /root /run /tmp /var/tmp /dev/shm /mnt /media` and the data dir with 64 MB tmpfs, binds
-    the engine dir back read-only (its remount repeats the source's locked atime/nosuid/
-    nodev/noexec flags — a differing remount is EPERM in a user namespace) and the run dir
-    read-write, mounts a fresh /proc, brings `lo` up, relays 127.0.0.1:3128 to the egress
-    socket, sets NO_NEW_PRIVS and runs the engine (a non-root uid in its namespace, so exec
-    leaves it no capability). The init reports the engine's exit to the bootstrap, which
-    mirrors it (a signal is re-raised); a setup failure exits 125 without exec'ing the
-    engine. `helpers = 2`. `verify`: every PID in a user AND network namespace other than
-    the app's, with a `Seccomp` field (the lone bootstrap before unshare tolerated).
-    `check` runs the bootstrap's probe mode; self-test = canary mode (capabilities dropped
-    with capset, then: loopback/LAN/metadata connects fail, UDP stays in the namespace,
-    DNS fails, the data-dir canary is invisible, the run dir is readable, the relay reaches
-    THIS egress child, different namespaces + fresh /proc) + a live `verify` + the engine's
-    `--version` inside + the census + 0 host-side hits. Not measurable on Docker Desktop
-    (seccomp blocks unshare: `userns_blocked`, measured); the CI legs are the proof.
-  - **Docker — the renderer sidecar** (`walls/docker.py` app side, `render_agent.py`
-    sidecar side, `compose/render/Dockerfile`, compose profile `render`). The app
-    container never runs an engine. The sidecar image (FROM the app's base image + the app
-    package) installs the pinned Linux engine at build time through the same installer and
-    fails the build unless it re-hashes clean; it runs as 65532 with the app's gid,
-    `network_mode: none`, read-only, `cap_drop: [ALL]`, no-new-privileges, init,
-    `pids_limit: 128`, `mem_limit: 1g`, tmpfs /tmp and NO app data volume. The only shared
-    thing is `smartbrain_render`: a local tmpfs volume (uid/gid 10001, mode 1770, 256 MB)
-    at `/render` in both containers. A render's run dir is created on it (so every path in
-    the argv means the same file on both sides) and opened to the group (1770, socket
-    0660); the app writes `job.json` (closed keys: v, kind, run_id, argv, env, out,
-    deadline_s, rss_mb, cpu_s, data_mb, relay_port — the argv/env rendered by the app's
-    own `cmdline`) and waits for `result.json` (closed keys: v, run_id, spawned, rc,
-    verdict, signals, refused, rows) with the render's deadline + 15 s pickup; results and
-    the output are read with `O_NOFOLLOW` at every path component (the sidecar is
-    untrusted). The agent (no listener; it polls the volume) re-walks the argv with the
-    manifest grammar and substitutes its own verified engine path, requires the relay as
-    the proxy and every path inside the run dir, re-hashes the engine per job, starts the
-    relay 127.0.0.1:3128 → the egress socket, runs the engine with the app's
-    `proc.spawn/watch/kill_tree` (`verify`: every PID shares the agent's canary-proven
-    network namespace), kills every other process in the container, removes the engine's
-    state (home/tmp/storage) and answers; a bad job is refused, never fatal. Once per boot
-    it writes `READY.json`: TCP to 1.1.1.1, the Docker gateways and 169.254.169.254, UDP to
-    a public resolver and a DNS lookup must all fail, only `lo` may be UP (a network-none
-    namespace still lists the kernel's down fallback tunnel devices — measured), the root
-    is read-only, the uid is not 0, the engine re-hashes clean; then a heartbeat every 2 s.
-    `check` = a valid `ok` READY and a heartbeat from the same boot within 10 s, else
-    `docker_no_sidecar`. Self-test = the READY facts + a `selftest` job (the relay reaches
-    THIS egress child, no app data in the sidecar, DNS fails, the engine starts) + the
-    census. The launcher starts the profile (B3): on its 30 s beat in Docker mode it reads
-    `/api/status/overview` with its local token; when `renderer.wanted` and `renderer.sidecar`
-    is `missing` or `stale` (an app before that field: a `browsers[]` row with reason
-    `docker_no_sidecar`; never while every row is `disabled`) it runs `docker compose -f <file>
-    --profile render up -d render`, whose `pull_policy: always` pulls the newer image and
-    recreates a stale sidecar (measured against a registry). At most one start per 10 minutes
-    (a sidecar still booting, a failed start, a stale one whose image is not out yet), re-armed
-    when the app stops answering; one log line per start; `--no-render` opts out. The service
-    is named: a bare `--profile render up -d` converges every service, and the app's
-    `pull_policy: always` then installs a staged update with no click (measured). Stop runs
-    `--profile render down` (a plain `down` leaves the sidecar running). The `release.yml` job
-    `render-image` publishes `ghcr.io/securecloudgroup/smartbrain_3000-render` with the app
-    image's tags, built with the same `SMARTBRAIN_VERSION` (the READY `build` the app compares),
-    and names its digest in the release notes.
-  - **NullWall** (`walls/null.py`): for the test suite only, built ONLY when
-    `SMARTBRAIN_BROWSER_TEST_NULLWALL=1` AND every executable in the engine dir is the fake
-    engine fixture (a `#!` script carrying `# smartbrain-test-fake-engine`) — both checked
-    and asserted; its self-test is the fake engine's `--version`.
-- **Runner** (`runner.py`, `proc.py`). `render(url, *, engine="obscura", site_policy,
-  identity, timezone, timeout_s=None, want_assets=False) -> RenderResult{ok, status, reason,
-  html, final_url, assets, engine, version, identity, timings{egress_ms, render_ms,
-  total_ms}, census}`. Flow: validate (refusals are results) → re-hash → wall pre-check (no
-  wall: `unavailable`, nothing spawned) → the single slot `_LIVE_RENDERS = Semaphore(1)`
-  (`busy`, never a failure) → fresh 0700 canonical run dir (HOME, TMPDIR, XDG, cwd,
-  `--storage-dir`, the output file; it holds the engine's cookie file and is removed on
-  every path; on the shared volume for the sidecar) → egress child → `walls.prepare` →
-  argv/env from the manifest (the proxy port from the wall) → a remote wall runs the job
-  (`Wall.run`, the same argv/env; the app-side re-hash is the sidecar's per job) or the
-  engine is spawned in its own session, stdin and
-  stdout to devnull, stderr drained by a capped tap; on POSIX RLIMIT_CPU, RLIMIT_CORE=0,
-  RLIMIT_NOFILE, RLIMIT_NPROC (headroom over the user's count) and RLIMIT_DATA only when
-  `limits.rlimit_data_mb` > 0 (V8 reserves ~450 GB of address space — off by default), plus
-  PR_SET_PDEATHSIG on Linux → watchdog every 250 ms: timeout_s + 5 s grace, tree RSS above
-  `limits.rss_mb`, a child process, `Wall.verify` → output read under `html_cap_bytes`
-  (O_NOFOLLOW) → kill the whole group and prove no live member is left → stop the egress
-  child (the census is complete only then). `want_assets` runs the engine a second time with
-  `--dump assets` and keeps https URLs only, deduped, ≤ 500. Identity: `mimic` (the manifest
-  default) pins one of the 8 built-in profiles (0–3 Windows Chrome 143–146, 4–7 Mac Chrome
-  143–146; an index outside 0–7 silently means 0, so both manifest and runner refuse it) —
-  given directly or as `card` → sha256(card id) mod 8; `rotate` draws one per run; `honest`
-  sends SmartBrain's UA via `--user-agent` while the engine's JS surface still claims Chrome,
-  so the result records `consistent: false`. Per-run randomised fields (hardwareConcurrency,
-  deviceMemory, screen) are the engine's; nothing here pins them.
-- **Statuses and tripwires** (in this order; stderr is classified with every URL removed,
-  never shown, never logged):
-
-  | status | reason | when |
-  |---|---|---|
-  | `refused` | `bad_url` `ip_literal` `bad_policy` `bad_identity` `identity_unavailable` `bad_timezone` `bad_timeout` `tier_disabled` | the request, before anything runs |
-  | `unavailable` | `disabled` `platform` `missing_libs` `absent` `stale` `extra_files` `modified` a wall reason `egress_spawn` `egress_start` | nothing spawned (or only the egress child) |
-  | `busy` | `render_busy` | the slot is taken |
-  | `confinement` | `child_spawned` `wall_verify` `no_main_connect` `egress_census` | a child process; an unconfined PID; no established tunnel to the main document's site in the census (the engine got the page some other way, or not at all); an unreadable census |
-  | `oversize` | `rss` `heap` `html_cap` | the RSS watchdog; `V8 heap limit reached` on stderr (exit 0); output over the cap |
-  | `timeout` | `deadline` `script_watchdog` | our watchdog or the engine's exit 124; `V8 watchdog fired` on stderr (exit 0) |
-  | `blocked` | `refused` | `Failed to navigate` naming 403/429/forbidden/a challenge |
-  | `offsite` | `redirect` `final_url` | a failed navigation after the main site was reached and an off-policy site refused; the `Page loaded: <url>` the engine announces is not https or not on the policy's own site |
-  | `engine_error` | `spawn` `crash` `navigate` `exit` `no_output` | everything else that is the engine's fault |
-  | `ok` | — | |
-
-- **Router** (`router.py`). `browse(url, *, need_signal_from_static=None,
-  allow_render=False, site_policy, identity, engine="obscura", timezone="UTC")`: tier 1 is
-  the existing page door (`pagegraph.fetch_page_graph` over `netguard.safe_fetch_page` + the
-  extractor jail); need signals by code — `js_shell` (extracted text < 400 chars and ≥ 3
-  `<script>` tags or a `<noscript>` enable-JavaScript notice), `blocked` (static 403/429 or a
-  challenge page), `want_miss` (the caller's; passing a signal skips tier 1). A render runs
-  only with `allow_render` AND an escalating signal; a refusal outranks every other signal
-  and only a plain 403 may render — a 429 or a challenge never does (R8: never retry a
-  refusal, never solve a challenge). The stealth tier answers `tier_disabled`. A per-engine
-  breaker opens after 3 consecutive `engine_error`/`timeout` for 10 minutes
-  (`engine_unhealthy`, then one half-open attempt); capacity and policy outcomes never trip
-  it. A failed render keeps the static result and records `escalation {tier, status,
-  reason}`. `browse_both` runs both tiers at once and returns both (no comparison yet). Every
-  result carries `engine, version, identity, timings, census`.
-- **Status, doctor, backups.** `/api/status/overview.browsers[]` = `{name, phase, pct,
-  version, age_days, eligible, reason, sandbox{kind, verified_at}, last_self_test, error,
-  health}` per shipped manifest, readable while locked, no hashing (the wall pre-check
-  probes at most once per process); `eligible` only when there is no reason, the phase is
-  `ready` and a self-test passed in this process under the wall kind in use
-  (`verified_at` is that pass); `storage.browser_bytes` sums
-  `<data>/browsers`. `installer/doctor.py` lists installed engines, offers to delete leftover
-  `.part`/`.partial` (nothing else), and reports engine processes found by their path (a
-  NOTE while the app runs, a WARN without it; never killed). An encrypted backup is the
-  database alone (`COPY FROM DATABASE`), so engines never ride along (tested).
-- **Tests** never touch the network or the real binary: a fake engine
-  (`tests/fixtures/browsers/fake_obscura.py`, the only executable fixture) is packed into a
-  real tarball, served by a local release server, installed by the real installer, and run
-  under the NullWall through the real egress server; the sidecar path runs the agent's own
-  `process()` in a thread over a temp volume. Pure parts of every wall are tested on any
-  host; the real Seatbelt rows skip off macOS, the real bootstrap is asserted to fail
-  closed where unshare is blocked. `SMARTBRAIN_BROWSER_REAL_ENGINE=<path>` enables the
-  real-binary rows (offline canaries: a loopback alias refused by the egress, private
-  literals refused before any CONNECT, `about:blank` makes no CONNECT, a plain http page
-  reaches the egress only as a refused GET); they fail if any row did not run.
-- **SG gate** (`tools/browsers-sg.py` + `tools/browsers_sg_lib.py`, CI
-  `.github/workflows/browsers-sg.yml`). The real pinned engine under the real wall, through
-  the app's own wall/process code; only the command line is test-only — the canary page is
-  a `file://` page in the run dir (the engine validates TLS, so a loopback https fixture
-  cannot serve it — measured) and one run omits `--proxy`. Rows: `probe`, `self_test`
-  (+ `ensure` → eligible), `broken_config` (a tampered profile / a failing bootstrap /
-  an empty or stale sidecar volume refuses to render; `verify` rejects an unconfined
-  process), `canary_proxy` and `canary_noproxy` (fetch/img/WebSocket/beacon at 127.0.0.1,
-  ::1, localhost, localhost.localdomain, the hostname, ::ffff:127.0.0.1, 2130706433,
-  0.0.0.0, the LAN address, 169.254.169.254, the app port, 38080, a model port and a
-  rebinding name through the egress resolver seam — 0 hits both ways; a DOM marker and an
-  https control CONNECT prove the attempts ran), `no_state`, `about_blank` (no CONNECT),
-  `no_listener`, `kill_child`, `kill_parent`, `caps_memory`, `caps_cpu`, `render_https`
-  (`--net`); the sidecar mode adds `round_trip`; `--expect <reason>` checks the reason, a
-  render refused without an egress child, and the status row. A run fails on any failed
-  row or when the executed set is not exactly the mode's (zero rows = failure). Legs:
-  macos-latest, ubuntu with user namespaces enabled by sysctl, ubuntu with the AppArmor
-  default (`apparmor_userns`), the Docker app container (`docker_no_sidecar`), the compose
-  `render` sidecar; `SG gate` aggregates them (a required check is a branch-protection
-  setting).
-- **Residual, by design for this step**: the hash check and the exec are not the same inode
-  (an attacker who can write the data dir between them already owns the account); WebSocket
-  and `navigator.sendBeacon` report success without sending anything (measured); http://
-  subresources of an https page reach the egress as plain GETs and are refused. The sidecar
-  is one trust zone (the agent and the engine share its uid): a compromised engine could
-  rewrite its own result or `READY.json`, but it cannot give the container a network, and
-  everything the app reads from the volume is closed-key, capped and `O_NOFOLLOW` (the page
-  is untrusted content for the extractor jail anyway; the census comes from the app's own
-  egress child). A Linux wall setup failure in the middle of a render reads as
-  `engine_error/exit` (exit 125, nothing ran); `check` probes the same setup once per process.
-- **B3 adds** the flow wiring (B3a, below: python) and the web and launcher pieces (B3b: the
-  draft Activate panel, the feed offer, the Status card, the launcher starting the `render`
-  profile when the app reports that a renderer is wanted).
-
-### B3a — the page browser in the card flow (Round 20, step B3a)
-
-- **Eligibility gate** (`browsers.available(engine="obscura") -> {eligible, engine, version,
-  reason}`): the ONE answer every caller consults before a render, from the Status row
-  (`eligible` only after a self-test passed in this process under the wall in use;
-  `SMARTBRAIN_NO_BROWSER=1` → `disabled`). Closed reasons: `disabled manifest platform
-  missing_libs sandbox userns_blocked apparmor_userns docker_no_sidecar tier_disabled absent stale
-  preparing error self_test`. `PREPARABLE = {absent, stale, self_test}`: `browsers.prepare()`
-  starts `install.ensure` on a daemon thread (single-flight) on FIRST NEED — a creation or Fix
-  that wants a render, or a due rendered card (after a restore, a removal) — never at boot;
-  `browsers.progress()` is the `{phase, pct}` a waiting flow shows.
-- **Static DATA layer first** (the extractor jail, P3 design §3/§5): plain `<script
-  type="application/json">` elements (Next.js `__NEXT_DATA__`, SvelteKit / Angular state, settings
-  blobs — parsed with `json.loads`, never evaluated; a `window.__INITIAL_STATE__ = …` inside a
-  script is code and is never read) become `data: [{id, leaves: [[path, scalar]]}]` — ≤ 8
-  documents of ≤ 1 MB, ≤ 200 leaves each and 600 in all, depth ≤ 16, the first 100 keys / 25
-  items of each object / array, iterative walk with a work budget; a document that won't parse or
-  nests past Python's limit loses only itself. Leaf paths are in the §4.1 grammar (plain keys,
-  `["quoted"]` keys, `[N]`, ≤ 200 chars, at most 8 subscripts in a row; `__proto__` /
-  `constructor` / `prototype`, quotes and control characters drop their subtree; a bare-list root
-  reads as `items`). The id is the element's `id` when it is `[A-Za-z0-9_.:-]{1,64}`, else
-  `json<N>`; a repeated id keeps the first. ARIA grids (`role=table|grid|treegrid` on a non-table
-  element, `row`, `cell|gridcell|rowheader`, `columnheader` rows as headers) join `tables` under
-  the same caps (a native `<table role=table>` is never counted twice). `signals: {script_count,
-  script_bytes, noscript_js}` is the script evidence. `jailrun` validates both layers down to every
-  sub-key (a smuggled key, a non-finite number or an over-long leaf fails the extraction).
-  PageGraph gains `data` and `signals`; a JSON document of ≥ 10 leaves counts as data-bearing
-  (`pagegraph.data_bearing`, readability's shell rule, `has_evidence`, the compiled grounding
-  text). A new selector `{kind: "data_leaf", doc, path}` reads one leaf (numbers and booleans as
-  JSON writes them); `enumerate_menu` offers want-matching leaves first, ≤ 20 per document and 30
-  in all; a gone leaf is `GraphDrift`. Measured on the 50 recorded pages
-  (`tests/fixtures/pages`): 5 documents on 4 pages, 32 leaves (one document of ≥ 10 leaves, a
-  site config), 0 ARIA grids; the jail's `signals` reproduce the router's raw-HTML need signal on
-  50/50 (`js_shell`: health.aws only).
-- **Need signals → the ladder** (creation and Fix are the only escalation points). The page
-  door's static read stays `ni._fetch_http_page`; `router.static_evidence(url, graph=…|failure=…)`
-  turns it into the tier-1 result and `router.browse(url, static=…, allow_render=True,
-  site_policy={mode: open}, identity={card: <item id>}, timezone=<user zone>, want_assets=<creation>)`
-  judges it — no second static fetch. `js_shell` = < 400 visible chars, no data-bearing layer, ≥ 3
-  scripts or a noscript enable-JavaScript notice. `blocked` = a plain 403 (the sampling door hands
-  it over for a pasted link or a page card's Fix when `FetchError.kind` is not `challenge` and its
-  `content_type` is not JSON). `want_miss` = the static compile found nothing, `graph_fitness` < 5
-  and ≥ 20 KB of script — adopted only when the rendered page compiles AND passes the page verify
-  gate. ONE visit per build (a failed shell render spends it). A 429 or a challenge never
-  escalates: netguard now names `FetchError(kind="challenge")` from a closed vendor header table
-  (`cf-mitigated`, `x-vercel-mitigated`, `x-amzn-waf-action` — on ANY status, so AWS WAF's 202
-  interstitial is refused, never read) and, on an HTML error response, a closed marker table in
-  the first 16 KB (challenge-platform, captcha-delivery, px-captcha, Incapsula, Kasada, AWS WAF,
-  SiteGround, Sucuri, "verify you are human", "just a moment"…); `FetchError.content_type` keeps
-  the refusing response's media type. The router reports a challenge as `blocked/challenge`. The
-  rendered HTML goes through the SAME extractor jail (`jailrun.run_extractor`, 8 MB) — nothing
-  else parses it — and `graph_from_extract(…, render_mode="rendered")`. Closed notes on the flow
-  record: `render_skipped:<available reason | router reason>`, `render_failed:<status |
-  extract_<jail reason> | too_many_sites | no_structure>`; without a render the static read
-  stands (links as today).
-- **Sealing.** Only `ni_flow._page_source` writes `source: {type: "http_page", url, render:
-  "browser", sites}` — `sites` = the census's registrable domains with ≥ 1 tunnel, the URL's own
-  site first, the rest sorted, ≤ 12 (more is an honest stop). `ni._validate_render_fields`: both
-  keys or neither; `render == "browser"`; a literal `https://` URL (no `{{param:`), a named site
-  (no IP literal), no headers; `sites` 1–12 unique lowercase registrable domains, `sites[0]` the
-  URL's own. A legacy `{type, url}` page spec is untouched. Spec keys `_render_ok` (true or
-  absent; only on a rendered source) and `_feed_candidates` (≤ 5 `{url, site}`, https, on the
-  sealed sites). Packs refuse all four (`source.render`/`source.sites` nested, beside the
-  top-level set), template install and export strip them, `tools` create/update refuse a source
-  carrying `render`/`sites` (`_refuse_render_seal`) and `_assemble_spec` never copies the
-  top-level keys — nothing a model wrote reaches them. Rendered cards have a 15-minute interval
-  floor (max with the LLM floor).
-- **Consent (R6/R7).** No render before the tap: S2 and the pick never render; the pick pause's
-  flow field carries `tap: {render_notice, site_cap: 12}` (`render_notice` true when a pasted page
-  MAY render here — eligible or preparable) and the paste's consent text says the one visit may
-  also load the sites the page depends on. After the build: every census site the page's own →
-  the card commissions under the tap (as every page card, then waits for its YES, §33); any other
-  site → state `draft`, flow `ready`, note "waiting for your OK to also load: …", board row
-  `draft: {reason: "render_sites", sites}`. `POST /api/ni/items/{id}/activate` (desktop-local,
-  audited `ni_activate_render`, journal `commissioned`) → `NIStore.record_render_consent`: seals
-  `_render_ok` without a rev bump and commissions (409 unless a draft waits for its sites);
-  `POST …/commission` refuses such a draft (409). `_render_ok` lasts only while the source (URL,
-  `render`, `sites`) is unchanged: `update_spec` (both paths), `apply_repair` and a Fix's
-  `_finalize` keep it then and drop it otherwise (a wider set asks again); no write can introduce
-  it. The tick never runs a draft (the due query excludes drafts), and the run allows only the
-  sealed sites (egress policy `sealed`).
-- **The render worker.** `tick` never renders (`_TICK_THREAD` marks the tick's thread; a render
-  there is refused as `render_busy`). Rendered items have their own due window
-  (`_MAX_RENDER_CANDIDATES = 3`, listed FIRST, not counted in `_MAX_DUE_CANDIDATES` — a render
-  backlog never starves other cards; the scan is still bounded by `_MAX_ITEMS`). Per pass at most
-  one handoff, no quota cost: not eligible → a preparable engine starts preparing and the card
-  stays due, else `mark_checked("render_unavailable")` (no streak); otherwise
-  `spawn_render_worker` (one thread at a time, `_RENDER_WORKER_LOCK`; the engine slot is
-  `runner._LIVE_RENDERS`). The worker re-checks the item (enabled, due, not draft / paused /
-  broken / held for its YES, consented; an interpreted card needs the breaker closed and the local
-  slot free) and calls `run_item`, whose `http_page` + `render` fetch is
-  `router.render_sealed(url, sites, identity={card: id}, timezone)` (no static read, no
-  escalation) then the extractor jail, then the tick's post-run duties (broken transition, L2
-  candidate, carrier notices). `CAPACITY_KINDS = {render_busy, render_unavailable}` are never
-  failures: `run_item` re-raises them before any bookkeeping (no run row, `latest`,
-  `last_failure`, streak, L1 hook or trial revert); busy writes nothing (the card stays due),
-  unavailable writes only `last_status = render_unavailable` (board `render.unavailable`). A
-  busy extractor slot after a render (`jail_busy`) is `render_busy` too. Every other outcome is a
-  host-free failure class: `render_refused render_timeout render_blocked render_offsite
-  render_confinement render_oversize render_engine`. Run notes (closed keys) go to the sealed
-  `render` slot: `{engine, version, identity{mode, profile, consistent}, status, total_ms, census[{site,
-  tunnels, verdict}]}` — never `ni_runs`, `last_status` or a log. A manual run waits for nothing:
-  an engine slot already taken is 409 `{"detail": "the local page browser is busy — try again in a
-  moment", "code": "render_busy"}` before anything is written (`runner.slot_busy()`; a render that
-  finds the slot taken mid-run is the same 409, after the run's usual `manual` mark); an unavailable
-  engine keeps the 200 `{status: "error", kind: "render_unavailable", duration_ms}` and adds
-  `code: "render_unavailable"`; the C2 YES (`/validate`) reply adds `code` beside `run: "busy"` /
-  `run: "error"` for the same two cases. The code sits at the top level of the body, the shape
-  auth.py uses for `no_session` (the client's `ApiError` reads it); `/commission` and `/activate`
-  never touch the engine.
-- **Feed candidates (R12, creation only).** The creation visit's second engine run (`--dump
-  assets`, https only, ≤ 500) is filtered to URLs on the sealed sites whose path or query says
-  `json`, whose host starts `api.` or whose path is `/api` or holds `/api/` (no userinfo, ≤ 2000
-  chars) → `_feed_candidates` ≤ 5, exact URLs, board row `preview: {feed_candidates: [{url,
-  site}]}`. Nothing is fetched until the user picks one: `POST /api/ni/items/{id}/switch-feed
-  {url}` (desktop-local, audited `ni_switch_feed`; 409 unless `url` is a sealed candidate or while
-  the card builds) → `ni_flow.begin_switch_feed` re-seeds the flow at the tap with that URL as a
-  pasted link (`_pasted`) — the existing door and consent; a JSON link builds through the mapping
-  path and waits for its YES.
-- **Board row and Status.** Rows of page-browser cards (only those) add `rendered: true`,
-  `render: {sites, unavailable}`, `draft` and `preview` (above); every other row is unchanged.
-  `/api/status/overview.browsers_flow` (unlocked): `{rendered_cards, drafts, worker:
-  idle|busy}` (busy while the worker thread runs or any render holds the engine slot). While a
-  creation / Fix waits for a first install (≤ 180 s, polled each second) the flow field carries
-  `browser: {phase, pct}` ("Preparing the page browser (43%)…").
-- **Renderer signal for the launcher.** `/api/status/overview.renderer` (readable while locked):
-  `{wanted, sidecar: missing|ready|stale|n/a}`. `wanted` (`browsers.note_wanted()`, sticky until the
-  process ends) turns true the first time since boot the ladder WOULD render — the router's own rule
-  (`router.would_render`: a JS shell, a plain 403, a `want_miss` at creation or Fix; never a 429 or
-  a challenge, which the flow notes as `render_skipped:<reason>` before any availability check) — or
-  a rendered card is due on the tick or runs, whether or not this machine can render (so a
-  `render_skipped:docker_no_sidecar` build sets it). `sidecar` = `walls.sidecar_state()`: `n/a`
-  outside Docker; in Docker from the READY facts on the shared volume — `missing` (no valid READY
-  with a fresh heartbeat answers), `ready` (READY's `build` names this app's `__version__`),
-  `stale` (another build, or a B2 READY without `build`). The agent now writes `build` (its image's
-  `SMARTBRAIN_VERSION`) in READY (`READY_KEYS`; `LEGACY_READY_KEYS` still reads, and eligibility is
-  unchanged by the field). The launcher starts the `render` profile when `wanted` and `missing`, and
-  rebuilds / pulls the matching image when `stale`.
-- **Startup sweep.** At app start (`main.py` lifespan), `browsers.proc.sweep_strays(<data>/browsers)`
-  SIGKILLs every process of this user whose EXECUTABLE (Linux `/proc/<pid>/exe`, else `ps -o
-  comm`) lies under the browsers dir — an engine an earlier run left behind (macOS has no
-  PDEATHSIG); never by command line; the log names only the count.
-
-### Client (B3b)
-
-The web surfaces read the B3a fields; every one is optional, and a board row, flow field or
-Status payload without them renders as before (version-skew rule). The pure helpers are
-`web/src/lib/ni/browser.ts` and `web/src/lib/browserStatus.ts`. Every sentence is code-authored;
-the only server strings shown are the sealed sites and feed addresses (plain text — never
-`{@html}`, never a link) and the server's closed refusal sentences.
-
-- **Consent clause (the pick pause).** `flow.tap.render_notice` → one muted line between the
-  paste field and *Use this URL*: "If the page needs SmartBrain's page browser, that one visit may
-  also load the sites it depends on (up to `site_cap`)." (`tapClause`).
-- **Waiting state.** `flow.browser.phase` ∈ `downloading verifying unpacking self-testing` → the
-  card's stage line reads "Preparing the page browser (NN%)…" (`flowStageLabel` through
-  `browserWaitLabel`; never over a terminal flow); nothing else changes.
-- **Draft Activate panel.** `draft.reason == "render_sites"` → `RenderSitesPanel` in place of the
-  plain Activate: "This page also loads N other sites:", the sites after the page's own
-  (`draft.sites[1:]`, unique, ≤ 12) one per line, the consent line, one *Activate* → `POST
-  /activate` (`api.niActivate`). 200 → a toast and a board reload (the card commissions and waits
-  for its YES); 409 / 403 → the server's sentence on the panel (`describeError` passes 4xx
-  through). The `/commission` control never shows for such a draft.
-- **Rendered cards.** `rendered: true` → CardShell's `rendered` prop: a muted `page browser` chip
-  after the page's chips. `render.unavailable` → CardShell's `notice` (`renderNotice`): a muted
-  state line in any state, in the failing reason line's place, never dimmed; it keeps the legacy
-  chrome (`formBoxChrome(state, hasForm, notice)`), and an empty card drops "Waiting for the first
-  run…". The page browser's capacity answers are toasts, never the page's error line:
-  `errorCapacity` (a refused request) and `replyCapacity` (a run's or a C2 verdict's reply) read
-  the server's `code` first — `render_busy` / `render_unavailable`, beside `detail` on a 409 or in
-  the reply; any other code is another refusal — and only from a server that sends no code fall
-  back to the busy 409's sentence, a C2 reply's `run: "busy"` and a run's `kind:
-  "render_unavailable"`. A C2 YES the page browser didn't take toasts when the card checks its data
-  (`confirmedNote`). `ni/errors.ts` gives the seven failure classes (`ni._RENDER_FAILURES`) their
-  plain words for the failing reason line, the first-run line and History; the two capacity kinds
-  have none (never failures).
-- **Feed switch (R12).** `preview.feed_candidates` (https only, unique, ≤ 5 — `feedCandidates`)
-  → `FeedOffer` inside the held C2 panel, under Yes / No: "This page gets its data from a feed",
-  each exact address on one line (an ellipsis, the whole address in `title`), one *Use this feed
-  instead* each → `POST /switch-feed {url}` (`api.niSwitchFeed`). Success → a toast and a board
-  reload (the build's progress takes the panel's place); a refusal → the server's sentence on the
-  panel. Activate and the switch are Desktop-only on the server; like every NI write control the
-  client shows them everywhere and paints a phone's 403 sentence.
-- **Status.** `PageBrowserStatus` after the Voice card when `browsers[]` is non-empty: per engine
-  its name, `v<version>, released N days ago`, ONE phase chip (an eligible engine reads `ready`;
-  `downloading NN%`, `verifying`, `unpacking`, `checking`, `not checked yet`, `not downloaded`,
-  `update waiting`, `unavailable`, `failed`, `off`) and, only while `health` is `unhealthy` (the
-  breaker is open), a second warn chip `paused after repeated failures`; a native `<progress>`
-  while it installs or checks itself, the sandbox line (seatbelt / userns / sidecar / null in
-  words, `verified_at` as a local date and time or "not checked since SmartBrain started"), and
-  one sentence from the closed
-  `REASON_SENTENCES` table — keyed by `reason` (the `browsers.REASONS` codes), else by phase
-  through `browsers.available`'s own mapping, a failed install showing the installer's fixed
-  sentence, anything else "Not available right now." Then `browsers_flow`: rendered cards, drafts,
-  and the worker (`reading a page` / `idle`). No controls: the server exposes no page-browser
-  Retry / Turn off / Turn on route.
-
-## 36. Query layer (Round 20 — `ni_query`: built and measured in Q3a, wired into the flow in Q3b)
-
-- **What it is.** An information ask becomes a closed **Query IR** over ONE declared Library
-  answer (§32): `{answer, params, select, where: [{col, op, value}], time: {from, to} | null,
-  order: [{col, dir}], limit, agg}` — ops `= != < <= > >= in contains names` (`names`: the row
-  names this entity, `col` "*" = any text cell); time tokens `now today tonight tomorrow yesterday
-  weekend this_week next_week this_month next_days:N past_days:N next_hours:N past_hours:N
-  dow:mon..sun date:YYYY-MM-DD month:YYYY-MM year:YYYY`; `agg` `none | count`. Entry points:
-  `plan_query(ask, *, kind, wants, source, answers, params, consumed, now, zone, call_model, pool, masked,
-  grounds)  -> QueryPlan{ir, model_ir, coverage, interpretation, notes, model_meta}`, `apply_query(ir,
-  payload, answer, *, now, zone, direction) -> {rows, indices, count}`, `recognize(ask, *, now,
-  zone, masked)`, `say(ir, answers)`. Package: `recognize.py`, `prompt.py`, `normalize.py`,
-  `clauses.py`, `ground.py` (Q3c: the evidence a filter value stands on, the carried entities),
-  `plan.py`, `apply.py`, `say.py`, `decl.py` (answers in the Library's `row` / `columns` shape or
-  `_clean_answer`'s `cells`).
-- **Ownership.** *Model* (one local call): `answer`, `time`, `where`, `order`. *Code*: `select`,
-  `limit`, `agg`; `params` stays `{}` (the address's parameters are the resolver's and, for
-  clock-filled dates, the time binding's — below). *Recognizers*: validators of the model's clauses,
-  never substitutes. The Q2 measurement showed the 9B over-generating exactly the code-owned
-  clauses (every cell selected, places put into params, the declared count picked over list +
-  count).
-- **The call.** Prompt design v2 of the Q2 measurement, verbatim (system: role, compact rules,
-  closed ops and tokens, the literal default object with THIS call's answer names and cell paths
-  by role; user: the reference instant with weekday and zone, k = 3 examples retrieved from the
-  pool by same kind then shared ask words, the ask, the answer menu with cells as
-  `path:type:label:unit[codes]`, the parameter menu). `llm.chat_json` (purpose `query`) validates
-  the reply against the IR schema in its subset (no answer / cell enums — the validator quotes
-  enums) and runs the structural check through its new `check` hook; ONE retry, on a schema or a
-  structural slip, whose message states the violated RULE and repeats a skeleton naming no
-  answer (`RETRY_SKELETON`). The Q2 retry listed the companion answers and the model took one —
-  7 right answers turned wrong. `call_model(messages) -> str` is `chat_json`'s transport; in the
-  flow it is the flow model's messages call (*Transport*, below).
-- **Normalizations (the v1 contract the lead re-scored the Q2 replies under).** An explicit time
-  phrase decides `time` (below); otherwise the model's token stands, and null ≡ `{now, now}` ≡
-  `{now, null}` when compared. `where`: never on the axis or a time / date cell; numeric ops only
-  on number cells with numbers; `contains` / `names` only on a text cell or "*", with a value whose
-  words are a run of WHOLE ask words (`said_whole`; the ask's last word may add a plural s / es —
-  "Tornado Watch" in "tornado watches"; Q3b fix round: "quakes" inside "earthquakes" and "OR" inside
-  "Oregon" never filter), not a parameter-consumed entity (`consumed`) and not a word of the
-  source's own name; `names` ≡ `contains` over "*" when compared. `order`: an order on the axis is
-  implicit (dropped); a non-axis order survives only for kind `ranking`. A declared count value ≡
-  its list + count when nothing narrows.
-- **Time ruling (Q3b, the lead).** The recognizers stay authoritative for explicit anchors
-  ("tomorrow", "Saturday", "Thanksgiving in 2027", any written year). A COUNTED range the model
-  read (`past_` / `next_` days / hours) stands against the recognizers' CALENDAR reading
-  (`this_week`, `next_week`, `this_month`, `month:`, `year:`) of a relative phrase with no written
-  4-digit year (`plan.model_range_stands`): note `time_range_kept`, coverage time `approximated`
-  ("over the last year" → `past_days:365`, not the calendar year). The eval's gold side
-  (`gold_final`) applies the same rule, so the replay scores below are unchanged; the final IR's
-  execution agreement rises to 49/59 few-shot and 58/80 zero-shot (B26, C27, E27).
-- **Recognizer validators.** `recognize` reads the ask with ms-recognizers-text-suite 1.0.1
-  (DateTime, Number, NumberWithUnit, Ordinal; en-us) and dates its holidays with holidays 0.106
-  (MIT; the US calendar) into one closed shape `{time, numbers, ordinals, comparators}`, under the
-  bake-off's rules: spans end on word boundaries (one that starts inside a word is cut at the next
-  word — "cent" in "recent" leaves nothing); masked ranges drop spans; a time span is ms's, and
-  one ms cannot resolve is dropped ("later today", seasons, "Corpus Christi"); an ms date span
-  that names a holiday of the built-in US table (or carries ms's floating-holiday timex,
-  `XXXX-11-WXX-4-4`) is dated in the asked year — its own year phrase, else the ask's first ms year
-  ("in 2027", which ms alone ignores), else its next occurrence — by the US calendar's day of that
-  name or a closed rule (Easter by dateutil, Halloween, Valentine's, St. Patrick's, Mother's /
-  Father's Day); a year phrase ms read into the span stays a span of its own (`year:2027`); a
-  holiday span the table does not name exactly ("Christmas Eve", "Labor Day weekend") keeps ms's
-  day. puckling 0.5.0 (the Duckling port the bake-off paired with ms: a time span needed both
-  libraries) left before landing — no release of it installs on Python 3.12, the launcher's
-  Python (CI's 3.12 smoke legs failed with ResolutionImpossible). With ms alone 58 of the
-  bake-off's 4,737 asks change their explicit time: "today" beside a zip is read (6), and phrases
-  agreement had dropped are read ("the day" in "word of the day", written years in "2020 toyota
-  camry" or "election day 2026", "year over year"); "at the moment", which ms leaves unresolved,
-  is read by the now-phrase table below; the replay scores are unchanged. ms's rolling range wins
-  ("past 12 months" → `past_days:365`, backward; a quarter of no year — "the first quarter" — is
-  no stretch); "4 in Alaska" keeps the 4 and drops the inch; comparators come from one adjacency
-  table (above / over / more than / greater than / stronger / bigger / larger / higher than → `>`,
-  at least → `>=`, below / under / less / fewer / smaller / lower / weaker than → `<`, at most and
-  within → `<=`; at most one word between the phrase and the number). `explicit_time` reads the
-  span's token by the question kind's direction ("this week": forecast → today..next_days:7,
-  schedule / next event → today..this_week, past events → past_days:7..today); a holiday beside
-  another phrase is the subject, not the stretch ("Thanksgiving in 2027" → year:2027).
-  `stated_numbers`: a numeric `where` survives only with a number the ask states (recognized or
-  literal) — "IncidentSize > 0", weather-code lists and "> 0" rain filters are dropped. Q3b fix
-  round: a closed now-phrase table (rule 10: currently, at present, as of now, at the moment, as we
-  speak, right this minute / second / moment / instant, this instant; "rn" / "atm" only as the
-  ask's last word) reads `now` with no library partner; `name_masks` masks the intent's proper names
-  (`plan_query(masked=…)`, the page path's `_ask_window(…, names)`) so "Saturday Night Live" or
-  "Black Friday" is no day — a name the holiday table names stays a date ("when is Thanksgiving").
-- **Code-owned clauses.** `select` = the quantity cells (numbers, or text a measured value answer
-  describes; never a time / date cell or the declared filter's cell) the ask's words name through
-  the Library's own lexicon — the cell's label and path words plus the label and words of the
-  source's measured value answers whose label holds the cell's label ("Conditions" ⊂ "Conditions
-  (next period)", whose words say snow, fog, thunderstorm); only when the answer carries ≥ 2
-  quantities; nothing for a ranking; on a value answer, the companion value answers named by words
-  the chosen one leaves unexplained. `limit` = a number right before or right after a word of the
-  closed ranking table (Q3c: top, biggest, largest, smallest, highest, lowest, most, least, best,
-  worst, first, last — "top 5", "ten biggest", "biggest ten"), else 1 with the axis order (next →
-  ascending from now, latest / last → descending) for next_event / result / schedule lists. `agg` = count iff the kind is `count`; a declared count
-  value under a narrowing filter or time is swapped for the list it counts. Explicit comparators
-  (Q3b, `clauses.bind_comparators`, on the list a count value counts): a comparator the recognizers
-  read is an anchor like an explicit time — its quantity word (between the phrase and the number,
-  "above magnitude 3", else before the phrase, "earthquakes above 4.0") names ONE number cell of the
-  answer by the cell's label or path tail, else by the answer's declared `words` when it has one
-  number cell; the IR then carries `{col, op, value}` from the recognizer: added when the model's
-  where has no comparator on that cell (`comparator_added`), replacing another number the model
-  wrote there (`comparator_corrected`; a number the ask never states is dropped first,
-  `numbers_unstated`). Coverage where `recognizer`. A word naming no number cell or several adds
-  nothing (where stays `unbound`); the unit never picks a cell ("magnitude 4 in Alaska" is no inch).
-- **The rules floor.** Model off, unavailable, or invalid after the retry → among the answers that
-  serve the question kind, the best of (Q3b fix round, `clauses.serves_time` + `floor_answer`): how
-  well its declared window or axis step serves the explicit stretch (2 exact / 1 approximate / 0 —
-  now → a value declared now / latest; today / tonight / tomorrow → a value declared for it or rows
-  on a time axis, day rows only approximately for tonight; next hours → hour / period rows; a
-  weekday, date, weekend or N days → day / period rows, hour rows approximately; a stretch behind us
-  prefers none), then ask words (time phrase, comparator, stop and consumed words out) and wants
-  that are whole words of the answer's own name or label, then its declared `words`, then the
-  primary, then the declared order; time = the explicit phrase or null; where = only the explicit
-  comparators code binds (above); notes `query_rules` + why. Floor alone on every clean gold row: 39 → 46 / 60 few-shot TEST, 52 → 60 / 82
-  (answers 59 / 60 and 78 / 82); its remaining misses are the kind filter's (forecast and lookup
-  kinds take rows only, so "chance of rain tomorrow" cannot take the declared rain_tomorrow value).
-- **Coverage and notes.** `coverage[clause]` ∈ `bound | unbound | approximated | rules | recognizer`
-  — `unbound` (a time phrase no token carries, a comparator the final where lacks) wins over `rules`;
-  `approximated` = a part of a day read as the day ("last night" → yesterday), or (Q3c) a filter
-  value no evidence grounds, dropped; `recognizer` = a comparator the recognizers read, or (Q3c) an
-  entity of the ask, carried by code; `rules` on `order` (Q3c) = a ranking ordered by code (order:
-  bound < recognizer < rules < approximated < unbound). Notes are closed codes: `query_rules
-  model_off model_unavailable schema_invalid time_explicit where_dropped numbers_unstated
-  order_dropped params_dropped count_list time_range_kept comparator_added comparator_corrected
-  order_default filter_grounded:codes` (Q3d: one closed code — a Library code table grounded a filter
-  value), and two that carry their value (Q3c; ≤60 printable characters after the colon):
-  `filter_ungrounded:<value>`, `entity_added:<phrase>`; the flow adds `quantity_unbound
-  names_unbound bound_pushed clock_bound refetched` (below).
-- **The interpretation line.** `say` renders the final IR by code: `<answer label>[ (<selected
-  labels>)] · <where> · <time> · <order / limit> · count`, cell labels never paths, tokens in plain
-  words — "Earthquakes · Magnitude > 2 · past 7 days · count", "Daily forecast (Rain chance) · next
-  7 days". When the model dropped the asked comparator the line omits it and coverage says
-  `unbound` — visible, never silent. Two weekdays read "Monday to Friday" (Q3b fix round; it read
-  "on Monday to on Friday"). Sealed as `spec.interpretation` (TEXT_SRC code); the board row carries it
-  for the C2 VerifyPanel and the form footer leads with it (below).
-- **Execution semantics.** `apply_query` is the Q2 harness's `apply_ir`, pure Python: the answer's
-  rows (list / zipped columns / one pseudo-row; a count value reads the rows it counts), the
-  declared filter (filled by the caller) and `newest_first`, the where ops, the time cut on the
-  axis (else the first time / date cell) with the caller's `direction` placing `dow:` and
-  `weekend` (forward = upcoming, backward = the latest past), order, limit, agg.
-- **Measured (2026-10-09, `tools/ni-query-eval.py`, fixtures `app/tests/fixtures/ni_query/`; the
-  few-shot pool ships in the package since Q3b, `smartbrain_3000/ni_query/pool.jsonl` — measured =
-  served).**
-  Replaying the recorded Q2 replies: v1 contract 50/60 few-shot TEST and 54/82 zero-shot ALL (the
-  lead's re-score, same misses); full contract (+ the number validator, the count swap) 51/60 and
-  58/82; with the floor for the never-valid replies 53/60 and 65/82. Since the Q3b fix round: full
-  52/60 (the few-shot E37 reply dropped "above magnitude 2"; code binds it back) and 58/82; with the
-  floor 55/60 (E13 through the window-aware floor, E37) and 66/82 (E37); v1 unchanged; the whole-word
-  rule changes one recorded reply, the noted C38. Our messages hash equal to
-  the Q2 prompts on 109/109 zero-shot and 79/79 few-shot rows. `apply_query` reproduces the
-  harness's gold rows on 107/107 samples; execution agreement of the final IR 46/59 few-shot
-  (raw replies 39/59). Code-owned clauses equal gold on select 103/109, limit 106/109 (the "when is
-  …" lookups A38 / E14 / E39 want 1), agg 108/109 (noted C38).
-  Recognizer: every explicit gold phrase yields the gold time except "over the last year" (B26,
-  E27) and "over the past month" (C27) — the recognizers read the calendar year / month where the
-  label is rolling — and three noted rows.
-  Live (`mlx/Qwen3.5-9B-MLX-4bit`, few-shot TEST, prompts byte-identical 79/79): v1 contract
-  51/60, full contract 52/60, 53/60 with the floor; valid on the first try 68/79, after the
-  rule-only retry 9, never 2; B5 and E13 (lost to the old retry) right. With identical prompts 22
-  of 79 replies differ from the recorded ones — serving-side variance (prefix-cache hits), not the
-  prompt.
-- **Wiring (Q3b, `ni_flow._try_answers_build`).** A declared build (a Library tap whose sealed
-  `_library_url` is the fetched URL, with declared answers) runs `_query_plan` after the sample
-  fetch: `plan_query` over the source's declared answers, with the Library record's source id /
-  name and `access.params` menu, the packaged few-shot pool, `consumed` = the runs of ask words
-  the address already took (`_consumed_spans` over the frame's place, the pick's reading
-  `_library_label` without its "(XX)" code and word-valued filled params; filler words never), and
-  `masked` = the intent's proper names (`recognize.name_masks`, recognizers only). A
-  planner fault falls to the rules floor; None only when both fail (the misfit note, the mapping
-  path). Then, in order: the unbound-quantity stop; the answers (`_chosen_answers`: `ir.answer`
-  plus value companions from `ir.select`, ≤4); the time binding; the row filters; the clock and
-  push-down rebind; place scoping, the next-event companion and the stale-event swap (kept);
-  `build_from_answers(…, span, where, agg, order, row_limit)`; the F3 sibling list only when the IR
-  has no row filter (an emptied filter is the answer, never another list); the not-reported
-  fallback only to values declared now / latest / undeclared and only when no particular stretch
-  was asked; and `_ir_as_built` (a sibling or fallback is code's choice: coverage answer `rules`).
-- **Time binding.** `_rows_direction`: a readable row time after now → forward; all at or before
-  now → backward; unread → the kind's direction. Lists (`_list_time_binding`): `{now, now}` → `now`
-  on an hour / period axis, `today` on a day axis, no cut on an instant list; `{now, null}` →
-  `upcoming` forward, no cut backward; today / tonight / tomorrow / weekend / a weekday /
-  today..next_days:N / now..next_hours:N → the legacy window on forward rows (N clamped to 16 / 168,
-  `approximated`); a stretch only ever ahead (tomorrow, next days / hours) over past rows is not cut
-  (`approximated`, the D5 latest-rows rule) unless the ask counts (W4); everything else → a SPAN op
-  (`back` on past rows). "this week" for a kind with no direction reads the next 7 days on forward
-  rows; over dated past rows the D5 rule holds (no cut, `approximated`, the line keeps "this week":
-  "consumer price index this week" on a monthly series shows the latest readings — Q3b fix round,
-  where the window-aware floor first took those day rows) unless the ask counts (the past 7 days).
-  A list with no time cell stands for now / today / tonight /
-  this week and a stretch behind us (`approximated`), never for a day ahead. Values
-  (`_value_time_binding`, they cannot be cut): `bound` when declared for the asked stretch (now /
-  today take the newest reading; tonight / tomorrow their own); a slow value (no `measure`) for
-  tonight or this week, or the newest reading for a stretch behind us, `approximated`. Unbound → the
-  source's honest nothing, "<provider> doesn't give <time words>" (`say.time_words`), next source.
-- **Clock parameters.** `_clock_rebind`: start / since / begin / date ← the stretch's first day,
-  end / until ← its last day, year ← an absolute year; relative stretches as day offsets (calendar
-  ones covering every weekday they can fall on); an absolute day / month / year is a FIXED value
-  sealed as a string spec param (`_clock_spec_params`); now and from-now stretches keep the
-  defaults. `_rebind_fetch` renders the sealed template at the build's `now`; a different address →
-  one refetch of the same consented source through the flow's own fetcher, and the record's
-  `_library_url`, `_library_clock_params`, `_library_params`, `_library_url_template` and
-  `_access.url` follow it (notes `clock_bound`, `refetched`). The C2 assert in `_handoff` (the
-  sealed spec reproduces the fetched URL) holds — "last night's result" asks since = until =
-  yesterday, "Thanksgiving in 2027" fetches the 2027 table.
-- **Row filters.** `_where_ops`: on a number cell a `number` op, then the comparator (`lt le gt ge
-  eq ne in`; `in` matched element-wise as `eq`); on a text cell `= != in` as written; `contains` /
-  `names` → `contains` (case-folded substring), `names` over "*" → `contains` with `or_keys` over
-  the answer's text cells (a team in the home OR the away column); columns answers map paths to
-  their row keys. Placed after the declared filter / `state_scope` / `reverse` (list) or the zip
-  (columns), before the window. A clause the answer cannot carry (a value answer, no such cell) is
-  dropped: coverage where `unbound`, note `where_dropped`; a name the intent says that neither the
-  address, the source's own name nor a filter value takes → coverage where `unbound`, note
-  `names_unbound`. Push-down (`_bound_overrides` over answers spec v1.4 `param_bounds`): `>` / `>=`
-  → the cell's `min` parameter, `<` / `<=` → `max`, `=` both; the address is re-templated by
-  position on the Library's `url_template` (`_templatize_url_by_position(overrides=…)`, quoted as
-  the Library fills it), refetched (note `bound_pushed`), and the row filter stays
-  (`minmagnitude=4` and `> 4`).
-- **Count, order and limit.** `agg: count` → the engine's count op (`rows_count`, as for
-  `may_be_empty` lists), and the window always cuts (W4, `_cuts(count=True)`). `order` / `limit`
-  (`_rank_ops`) → `sort_by` ops with `missing: "last"` (stable, the last key first, on the raw
-  cell before its display conversion) and a `top_n`, after the window and before a columns
-  answer's default cap — "the next one" keeps one row, "top 10 by market cap" the ten largest. A
-  limit above the engine's cap (50) is sealed at 50 with coverage limit `approximated`; a sibling
-  or fallback answer (code's choice) carries no order or limit.
-- **Honesty surface.** `_verify_frame` keeps its wants check. A primary asked quantity that is
-  unbound — every measure the ask names by its closed Library measure name (wind, humidity, water
-  temperature, …) reported by no declared answer (declared `measure`, the label cue
-  `_covers_measure`, or the measure's words in the answer's own lexicon; consumed words never name a
-  measure: "Wind River") — is the existing honest stop "doesn't report <measure>" (`_move_on`, the
-  next source), with note `quantity_unbound` and coverage select `unbound` in the returned query; a
-  secondary one builds the rest under the same coverage and note. Every unbound or approximated
-  clause is in `spec.query.coverage`.
-- **Sealed fields.** `_handoff` seals `spec.query = {ir, coverage, notes, model: {attempts,
-  used_fewshot}}` (the final IR the card executes; closed coverage keys and values; notes ⊆ the
-  ni_query NOTES ∪ the flow's codes) and `spec.interpretation = say(ir, answers)` (one line, ≤300
-  chars). `ni.validate_spec` validates both closed; they are stripped on export
-  (`ni_routes._EXPORT_STRIP_KEYS`) and template install (`ni_library._TEMPLATE_STRIP_KEYS`) and
-  refused in template packs, like `_fit`.
-- **Engine grammar (`ni.py`).** `where` ops gain `contains` (non-empty text ≤200) and `in` (1–12
-  scalars), and an optional `or_keys` (1–7 row keys, `contains` only: any cell matches). `window`
-  gains the SPAN form: a start token plus `to` (the end token) and `back` (a weekday or weekend
-  placed on the latest past one) — tokens `now today tonight tomorrow yesterday weekend this_week
-  next_week this_month open dow:<d> next_days:1..16 next_hours:1..168 past_days:1..999
-  past_hours:1..999 date: month: year:`; rows overlapping [start, end) on the source's wall clock
-  (day rows by date, timed rows as instants); a weekday / weekend span whose end falls before its
-  start reads to the next one ("Monday to Friday" on a Saturday); `floor` is refused on a span; the
-  legacy single forward tokens keep their exact semantics. `sort_by` gains `missing: "last"`
-  (required for a dotted key): numbers numerically, text case-folded, missing rows last, stable.
-- **Transport.** `run_flow`'s model is a `FlowModel(prompt, chat)`: the prompt stages (intent,
-  mapping, PRESENT, FIT) call it with a string; the query call goes through `chat` —
-  `gateway.chat(messages, model, timeout 300, temperature 0; None for claudecode)`, system + user
-  turns end to end. A caller's prompt-only seam (tests) is flattened as `ni_forms.verdict` does.
-  Measured live once (`mlx/Qwen3.5-9B-MLX-4bit`, few-shot TEST 79, one request at a time,
-  `ni-query-eval --gateway [--flat]`): flattened v1 48/60, full 49/60, with the floor 51/60 (valid
-  first try 64, after the retry 11, never 4; first call median 6.5 s); the messages form in the same
-  session v1 51/60, full 52/60, floor 53/60 (68 / 9 / 2; median 2.4 s), final IRs identical to
-  Q3a's live run on 79/79. The flattened prompt lost 3 rows (more than 2): messages end to end.
-- **Library key (answers spec v1.4).** Optional `param_bounds` on list / columns answers:
-  `{<cell path>: {min | max: <param>}}`, 1–4 cells, each a number cell of the answer; each side
-  names a parameter of the source (a numeric example); a parameter bounds one side only. Authored
-  for `usgs-quakes-state` and `usgs-quakes-near` (`properties.mag` min `min_mag`); the app's answers
-  reader keeps it closed (`_clean_param_bounds`). Q3b fix round: the two upcoming calendars whose clock
-  window ended today (`mlb-team-schedule`, whose `next_*` values read `dates[0]`, and
-  `finnhub-earnings-calendar`) ask from today to +30 days (`sourcetool/fills.py` provider rules, so a
-  `fills` run keeps it) — the −30..0 window put a game a month old under "next Braves game".
-- **Board row and footer.** `GET /api/ni/board` rows carry `interpretation` (only when the spec's
-  is a string) and `query: {coverage}` (only when the coverage is a dict — never the whole query),
-  omitted otherwise. Form cards: `ni_forms/shell.py` lays the line out as the first segment of the
-  left footer group on both faces, in the footer's muted style (`CardInput.interpretation` ←
-  `_form_bind_context`; recipe `["interpretation"]`, TEXT_SRC code), ellipsized by the engine's own
-  rule to the room the rest leaves; the rest follows as "· markers · host · cadence". When the whole
-  line does not fit beside the fullest rest, the rest drops the cadence, then the host (the
-  footer's own drop order), and the line never gets under 40 px. A card with no line lays out
-  byte-identically.
-- **Removed, one per measured delta.** Each step measured on the 86-card BUILD snapshot (the
-  recorded Q2 replies replayed through `_try_answers_build` at each sample's fetch instant, zone
-  America/New_York); `ni-query-eval --replies` stayed 50/60 + 54/82 after every step.
-  (a) `select_answers` with `_measures_named`, `_this_week`, `_serves_window`, `_window_fit`,
-  `_WINDOW_DIRECT`, `_names_a_param`, `_nothing_why` → `ir.answer`: 23 of 86 changed — right 8
-  (a01 / b01 / c01 temperature alone; b28 the year's history; c11 the NWS periods that say snow,
-  was "doesn't report snow"; c38 departure delay; d24 volume; a33 the quakes and a count), neutral
-  10, and 5 misses already in the recorded replies, now executed (a40 the ISS position → latitude
-  only, c09 swell → swell + water temperature, d03 UV at noon → now, d30 outage → incidents, a05
-  snow this weekend → a partial card). (b) `_window_from_text` with `_WINDOW_PATTERNS`,
-  `_NUM_WORDS`, `_COUNT`, `_PAST_RE`, `_count`, `_FORWARD_WINDOWS` (the intent carries no window)
-  → `ir.time`: 19 changed — right 12 (a17 / b18 / c18 last night's result asks exactly yesterday;
-  a24 / b28 this year → 2026; b26 / c27 the ruling's rolling ranges; b27 / d27 past 365 / 730
-  days; d37 "earthquakes in Japan this week" the past 7 days, was 0; a31 / d30 the always-empty
-  `now` cut gone), neutral 4, misses 3 (a06 surf → today, a25 mortgage history → past 30 days, b22
-  recent Alaska quakes → past 7 days and the address narrowed). The removed parse's own labeled
-  tables, read by its replacement (`_ask_window`): 162/198. (c) `_scope_rows_to_subject` with
-  `_subject_hits`, `_subject_tokens`, `_subject_phrase`, `_singular`, `_empty_subject_filter`,
-  `_SUBJECT_STOP`, `_MAX_SUBJECT_ROWS`, `_NAME_EXTRA_WORDS`, `_NAME_CELL_WORDS` and both call blocks
-  → `ir.where` as engine ops: 16 changed — right 7 (d18 the Sharks game, was the league
-  scoreboard; a33 / d22 magnitude > 4 / > 3, d22 pushed to `minmagnitude=3`; a30 flood warnings;
-  b32 / d33 winter storm warnings; d30 a nonsense filter gone), neutral 5, misses 4 (the recorded
-  replies' question-as-filter class: c11 / c10 / d21 emptied by `contains "Snow"` / `"Heat"` /
-  `"tech"`, a05 4 → 2 periods). (d) `_COUNT_ASK_RE`, `_EXISTS_ASK_RE`, `_ANSWER_MANY_RE` and the
-  count branch of `_cuts` → `ir.agg`: 0 changed. The order / limit wiring: 11 changed, all 11
-  cards whose line already said "the next one" / "the latest one" / "top 10" / "highest … first"
-  and showed every row (a08 / d14 the next launch 10 → 1, a22 / d24 top 10 of 20, b18 / c18 last
-  night's result 4 → 1, d13 the next game 2 → 1; a17 / d12 / d18 / d25 same rows, sealed sorted).
-  Base → final: 54 of 86 changed. Kept: `_answer_score`, `_covers_measure` / `_MEASURE_CUES`, `_v12`,
-  `_folded_words`, `_scope_rows_to_place`, `_scope_rows_to_state_bbox`, `_cadence_from_text`, the
-  A13 threshold alert author, `_run_intent`, `_verify_frame`.
-- **Fix round (after the Q3b review).** (1) The window-aware rules floor (above): the verify table
-  without a model is all green ("high in Denver on Saturday" takes the day rows); `--replies` floor
-  rows 53 → 54 / 60. (2) The whole-word where rule (above): live "how many active wildfires are
-  burning in Oregon" counts 25 again (was 1 under "mentions OR"); one recorded reply changes (C38).
-  (3) Name masks and the now-phrase table (above); the two subject-file window tests are restored as
-  tests of the new path. (4) The Library's upcoming calendars ask from today forward (above): live,
-  today..+30 puts the next game first (Dodgers 2026-10-11) or nothing in the off-season; the C8
-  Braves asks on the live model path, refused on the fixture's old-window sample, are accepted on the
-  same rows from the fetch day on. (5) "Monday to Friday". (6) Explicit comparators as anchors
-  (Code-owned clauses, above): the live "how many earthquakes above 4.0 today", whose reply dropped
-  the comparator, reads "Earthquakes · Magnitude > 4 · today · count" = 8 (coverage `recognizer`).
-  On the 86 cards the round changes C38 only (rows) and D07's line.
-- **Fix round Q3c (the set F read, 2026-10-12).** Set F (50 fresh asks, main 2e9f301f, pack = Library main + #12)
-  read by eye: live 31 · links 15 · awaiting a pick 2 · failed 2; right 17 · partial 9 · WRONG 5 — F19 (silent: the
-  league scoreboard for "the latest Canucks game"), F21 (presentation: stories named by objectID), F22 and F26
-  (flagged by the line: `contains "anywhere in the world"` / `contains "active"` emptied real rows), F24 (silent: 20
-  coins in market-cap order for "ten biggest by trading volume"). Four classes, each a rule (`ni_query/ground.py`,
-  `clauses.py`, `plan.py`, `ni_forms/record.py`):
-  (A) *Grounded filter values* (`ground.grounded_by`, run in `plan._code_clauses` on the model's where after the v1
-  rules): a `contains` / `names` value stands only on positive evidence — (1) a proper-noun phrase of the ask
-  (capitalized words never at a sentence start — the ask's first word or one after "?" / "!" — never "I", never a
-  word of the source's own name or a time / holiday word; a title-cased or all-caps ask has none; as evidence the
-  run keeps a word a parameter consumed — "Washington Metro" when the pick's label took "Washington" — since
-  `v1_where` already drops a value made only of consumed words), (2) a holiday span of the recognizers, (3) a cell label of the answer or a label of a code table it
-  declares, (4) a taxonomy keyword of the asked subcategories (plurals folded) — or a kind of a keyword of two words
-  or more: the value's words END with it ("Flash Flood Watch" ends with "flood watch"; a one-word keyword is a topic,
-  never a kind: "active wildfires" is no "wildfire") — (5) the sample's rows hold it as whole words in the text cells
-  the filter reads (its column, or every text cell for "*"). The answer's `words` lexicon is no evidence. Otherwise
-  the value is dropped (note `filter_ungrounded:<value>`, coverage where `approximated`) and the line no longer
-  claims it. The flow hands the evidence to `plan_query(grounds=ground.Grounds(keywords, sample))`: the taxonomy
-  keywords of `_frame_of`'s categories (`ni_flow._asked_keywords`) and the fetched sample. The kind clause of rule 4
-  is this round's one addition to the ruled list: without it the gold E33 value ("Flash Flood Watch"; the taxonomy
-  holds "flood watch" and "flash flood warning") is dropped whenever no such watch is active — set E's right honest
-  empty would turn into every Louisville alert, and the recorded few-shot E33 reply would turn wrong. Gold check
-  (every `contains` / `names` value of `gold.jsonl` + `gold_f.jsonl`, 19 rows, clean and noted): all grounded —
-  keyword A30 A31 A34 B32 C34 D33 E33 (kind) E34 E36 F33 F35 F37, holiday A38 E39, proper D18 E31 F19 F25, observed
-  E14 (the moon-phase rows; E14 had no sample until this round). (B) *Carried entities* (`ground.carry_entities`):
-  on a league-wide or network-wide list — an address that takes no parameter from a resolver (the Library
-  `fill.from: resolver`) — every proper-noun phrase of the ask (as in A.1, less the words a parameter consumed) that
-  no filter value holds is added as `{col: "*", op: "names", value: <phrase>}` (note `entity_added:<phrase>`,
-  coverage where `recognizer`) — on rows with a text cell only (a value answer or a date + number series names
-  nothing; the where stays ≤ 6), never for a phrase the chosen answer's own name or label holds ("AL East
-  standings" → "East"); an empty result is the build's honest empty ("Games · mentions Canucks · the latest one",
-  no row). On a resolver-filled address the ask's names are what the resolver read, in spellings the consumed
-  words do not show — probed: the verify table's intents carry "San Francisco" for "SF" and "Kansas City" for "KC",
-  the picks' labels are canonical, and a carried "SF" counted 0 quakes near San Francisco — so code adds nothing
-  there (the model's own filter still passes the A rules). Lowercase names stay the intent's `names_unbound` flag. (C) *Ranking defaults*: `limit` is the number right before or right after a word of the closed ranking
-  table ("ten biggest", "biggest ten", "top 5", "5 most recent"); kind `ranking` with no order from the model →
-  `clauses.rank_order`: the number cell the ask's quantity words name (the select lexicon: "by trading volume" →
-  `total_volume`), else the one the answer's own label names ("Top coins by market cap" → `market_cap`), else the
-  answer's first number cell — descending, ascending when the ask says smallest / lowest / least; note
-  `order_default`, coverage order `rules`; the line says it ("24h trading volume · today · top 10 by 24h volume").
-  (D) *The rows' name role*: `record._names_rows` — free text (field type `text`: more than 12 distinct values, or
-  all distinct and long) names its rows even when one value repeats; the F run's 20 Hacker News rows held one title
-  three times, so the all-distinct rule handed the name to the "Item id" column (the same rows give the same card on
-  the pre-Q3b tree: not a Q3b defect). A closed vocabulary that repeats still never names the rows.
-  Measured (`ni-query-eval`, fixtures + `gold_f.jsonl`, `library_f.json`, `samples_f/`, `runs_f.json`,
-  `asked_subcategories.json`): `--replies` v1 50/60 + 54/82 (unchanged), full 52 → 53 / 60 (D21: "tech" grounds
-  nothing) and 58 / 82, with the floor 55 → 56 / 60 and 66 / 82, parity 109/109 + 79/79; set F with the model off
-  (24 clean rows) 16 → 18 (F24, F26), per clause order 19 → 21, limit 23 → 24; `--exec` final IR 49 → 50 / 59
-  (D21), 59 / 81 (E14 executable in both), the five F samples' floor rows all agree with gold (F19, F24 differed).
-  Live, set F few-shot (`--gateway --gold-f --few`, one run): 20 / 24 clean rows; the same replies through the base
-  code 19 / 24 (F22's `names "world"` dropped; F24 limit 10). The five F cards through `_try_answers_build` on the
-  recorded samples with the live IRs: F19 0 rows under "Games · mentions Canucks · the latest one" (was the Panthers
-  game), F21 titles, F22 3 quakes (was 0), F24 the ten largest by volume (was 20 unsorted), F26 25 fires by size
-  (was 0). 86-card replay snapshot: 5 of 86 changed — right d21 (the "tech" filter had emptied the feed: 20
-  headlines), d45 (noted: people in space for "where is the ISS over the Pacific" → nothing → the next source),
-  neutral c10 (noted heat index: the "Heat" filter's accidental empty → the week's periods, `approximated`), a30
-  regression risk (the zero-shot reply's "flood" — gold "Flood Warning" — grounds nothing: the same 0 rows on the
-  sample, the line drops it, where `approximated`; on a day with other Houston alerts they would show), d25 a
-  snapshot artifact (its intent has no place; with the live intent's "Pacific division" the card is unchanged).
-- **Code-table grounding (Q3d, Library answers spec v1.5, §32).** Rule 3 gains its second half, `codes`
-  (`ground.RULES`: proper → holiday → declared → codes → keyword → observed): a `contains` / `names` value stands
-  when a Library code table of a text cell the filter reads (its own column, or every text cell for "*") holds it —
-  one of the table's values (case ignored), or a whole-word run of one (`said_whole`), the value's last word folded
-  to its singular (as said, `fold`, an `-es` off). `ground.py` does no I/O: `ni_flow._query_plan` hands in
-  `Grounds(keywords, sample, codes)`, `codes = _code_values(answers)` = `{table: LibraryIndex.code_values(table)}`
-  for every text value or cell of the source's answers that declares one (`{}` without a Library, on a pack older
-  than v1.5, or when the read fails). A value the table grounds is noted `filter_grounded:codes`; coverage is
-  unchanged. On the NWS event names (`nws_event`): "coastal flood advisory", "high wind warning", "small craft
-  advisory" are values; "flood" (15 names), "flood watches", "flash flood", "warning(s)" whole words of them;
-  "anywhere", "active" or "flo" none — nor "flood" on the area cell, which declares no table. `contains` is a
-  case-folded substring, so a kept value the table holds only in the singular carries the table's spelling ("flood
-  watches" → "flood watch", "coastal flood advisories" → "coastal flood advisory"); a value as said is never
-  rewritten. That also mends the plurals rule 4 grounded and kept ("tornado warnings", "heat advisories": they
-  matched no row). Through `_try_answers_build` on recorded responses (`tests/test_ni_query_codes.py`): A30's
-  zero-shot reply on the Houston sample — "Active weather alerts · Alert contains flood", the honest empty (Q3c
-  had dropped "flood" and stood for every Houston alert); F33 the 3 flood watches of the national response (the live
-  reply and the said plural); F35 Vermont's honest empty, and the said plural keeps the 3 winter weather advisories;
-  F37's "warnings" counts 12 of the 49 actual alerts; "coastal flood advisories in California" the 5 of 20. The
-  86-card replay with the Q3c pack: 0 changed, query records identical; with the v1.5 pack: 6 alert cards, rows
-  identical — a30's "flood" stands, a31 / b32 / c34 / d33 add the note, and all six read the pack's status filter.
-  The pre-Q3d reader on the v1.5 pack loses those six alert lists (a34: no answer at all) — the pack pin moves with
-  this reader.
-- **Open (measured, not fixed).** The floor's kind filter (forecast / lookup kinds take rows only;
-  text_brief values only) keeps B6, B40, C9 and C50 wrong with the model off. The client's coverage
-  words need one for `recognizer` (the board row sends the value as sealed). The now table leaves
-  out "current" (a describing word) and "this second". Mixed ranges
-  keep their words ("today to on Friday", "from on Monday"). `ni_query.apply` reads an inverted
-  weekday pair as empty where the engine reads to the next one. "this year" seals an absolute year
-  (no rolling token). A covering weekday binding cannot move a fixed-range API (tides `range=48h`).
-  `contains` also keeps near names ("Day after Thanksgiving"). A weekday that is today or tomorrow
-  does not bind a value declared `today` / `tomorrow` (an honest stop, never a wrong card). Refine and
-  Fix take the remap path, which never rebuilds from answers and refetches; no raw sample is sealed,
-  so a re-plan without a refetch has nothing to run on. Q3c: the Library's weather/alerts keywords lack
-  many NWS event names (a bare "flood", "coastal flood advisory", "rip current statement", "small craft
-  advisory") — such a filter stands only when the day's rows hold it, else the card shows every alert
-  under an `approximated` filter; a lowercase or sentence-initial team name ("canucks", "Canucks score
-  tonight") is carried by no rule (the intent's `names_unbound` flag only), nor is a second entity on a
-  resolver-filled address ("the Bruins' next game against the Canucks"); a list of ≤ 12 rows whose long
-  titles repeat is still typed `category`, so its id column would still name it; the F21 address took
-  "posts rust" as its topic (a fill, not the query layer). Q3d: a generic word that is a word of an NWS name
-  stands on the table too — "current" (Rip Current Statement), "local", "weather" (7 names), "high", "special",
-  "extreme" — so a model filter on one would narrow the alerts (none in the recorded replies; a whole-word run
-  anchored at a name's start or end would refuse "current" and "weather", and "thunderstorm" or "fog" alone with
-  them); "alert" already stood on the cell label "Alert". A said `-ies` plural is no `-y` word to the v1 rule
-  (F35: "Winter Weather Advisory" is not said in "winter weather advisories", so the model's name is dropped before
-  any grounding). The answer menu shows `[nws_event]` on the alerts' event cell (the prompt of the three NWS
-  sources changes when the pin moves). `alert_count`, a value, still counts test alerts.
-
-### Client
-
-Both web surfaces read the board row's optional `interpretation` and `query.coverage`
-(`NiBoardItem`; `ni_routes._board_row` carries them from the sealed `spec.interpretation` /
-`spec.query.coverage`). Absent, the card renders as before (version-skew rule); present, the
-line is always plain text, never `{@html}`. **VerifyPanel (C2):** directly above the Use this
-controls, one `.ni-note` line — "Reads as" and the whole line (it wraps, never cut) — then one
-muted chip per clause whose coverage is `approximated` or `unbound`, named through the closed
-table `CLAUSE_WORDS` in `$lib/ni/verify.ts` (answer, select → quantity, where → filter, time,
-order, limit, agg → count: "time approximated", "quantity not found"), in the line's order.
-**CardShell footer:** where CardShell paints the footer (a non-form card), the line is its
-first segment — one line with an ellipsis, the whole line in its `title` — before as-of · host
-· cadence, which wrap to their own line when both do not fit, at any width. A bound form
-card's footer is its CLIR's (`ni_forms/shell.py`, laid out per face) and CardShell adds no
-second one, so a live form card shows the line in its footer only once that shell lays it out.
-
-## 37. Brief cards (plan S8, decision D4 "Headlines + local")
+Signed over `b"sb-ni-pack-sig:v1\n" + canonical(payload)`. Verification order on every fetch: shape and bounds,
+`pack_id` matches the pin, signature against the pinned key over the served bytes, then `seq >` pinned is an
+update, `==` up to date, `<` a rollback refusal. A different key is KeyChanged: reported, never applied, the
+source blocked until the user re-trusts the exact offered key. Bounds: at most 200 templates, 2 MB, every
+`spec_template` passing the full §2 validator (empty param values allowed) and every `preview_payload` the §5
+bound-scene validator at install and at pack load. The publisher label is decoration; the fingerprint
+(`SB-XXXX-...`) is the identity. Packs refuse the system-written keys of §2.
+
+## 20. Library source, install and fleet healing
+
+- One Library source (the official), stored like a vault subscription: sealed record `{url, publisher_pubkey,
+  pack_id, seq, added_at, last_checked, blocked}`, TOFU-pinned on connect. Connect and disconnect are
+  desktop-local explicit acts. The official URL is prefilled, never trusted without the pin.
+- Install (a UI act): the sheet shows title, goal, every source host and path, and required params; the user
+  fills params (secrets through the credential path); the item is created in `draft` with sealed provenance
+  `_template = {pack_id, template_id, seq, spec_hash}`; the user's Activate is the consent. Installing never
+  runs anything. `repair_policy` is forced to `{l1: true, l2_frontier: false}`.
+- Fleet healing: when an update changes a template (`spec_hash` differs), every item carrying that `_template`
+  shows "Template update available". Applying is per item and user-driven: the diff is shown, acceptance
+  re-enters `draft` then `commissioning` (never silent, never inheriting consent). Param values and credentials
+  carry over; `_c2_ok`, contract and trial markers reset.
+- Update checks piggyback the tick (24 h default, 1 h floor; manual "Check now"). A validly signed older pack
+  is not unreachable: `last_checked` advances, the status reads "host is serving an older pack", and the
+  unreachable counter is untouched. The first transition to blocked or rollback posts one carrier notice.
+
+## 21. Export as template and submission
+
+`GET /api/ni/items/{id}/export-template` (desktop-local) returns the §19 template for the item. The sanitizer
+strips secret values (secret params reset to `ni:self:`), string and number param values (labels kept),
+`contract`, `_c2_ok`, `_l1_*`, `_l2_*`, `_research_*`, `repair_policy`, `_template`, `_built_from`, `recipe`,
+`brief`, and rewrites this item's `ni:<item_id>:<name>` refs to `ni:self:<name>`. It refuses `internal.schedule`
+and `internal.kb` sources, compare cards (§38), and any spec whose substituted URL (also percent-decoded) or
+any `llm` instruction contains an entered credential value (a belt-and-braces guard; the primary rule is
+`$secret` discipline). A card with the summary on first drops the summary. Items created before the
+`preview_data` slot existed refuse export with a message naming the cause. Submission is a GitHub PR to the
+registry repo; only the publisher-key holder signs and publishes.
+
+## 22. `mcp_tool` source
+
+SmartBrain's MCP is inbound by design; this is the one approved outbound path: servers the user explicitly
+configures, never ambient config, never discovery, never tool listings fed to models. Credentials stay in the
+user's own server process.
+
+Registry: a sealed store of `{id, label, transport: stdio|http, command?, args?, url?, enabled}`. CRUD is
+desktop-local UI only; no agent tool edits it. `stdio` launches the user's command per fetch with a stripped
+`SMARTBRAIN_*`/`ANTHROPIC_*` environment, a fresh process group and a watchdog. `http` connects to the typed
+URL and deliberately does not ride netguard (the point is the user's loopback or LAN server); the address was
+typed in a desktop-local act and is frozen, and redirects are refused by constructing our own
+`httpx.AsyncClient(follow_redirects=False)`.
+
+Source: `{"type": "mcp_tool", "server_id": "<id>", "tool": "query", "arguments": {...}}`. `tool` and
+`arguments` are frozen literal JSON; any change is a source change and re-consent, and the consent surface
+shows `MCP: <server label> -> <tool>` with the full arguments. One `tools/call` per run (20 s deadline). Text
+content items are joined (each truncated at 200 KB, the join stops at 200 KB); JSON-parsable text gives
+`{"data": ..., "text": ...}`, else `{"text": ...}`. Errors are host-free: `mcp_unavailable`, `mcp_tool_error`,
+`mcp_timeout`. Tool descriptions are never fetched into a prompt or spec.
+
+## 23. L2 frontier repair
+
+When L1 has exhausted its attempt in a streak and the item still fails, a frontier model may propose a fix
+under the strictest consent in the system.
+
+- Gates (all required): `repair_policy.l2_frontier` true (per-item opt-in, default false, set only by an approval
+  card or the desktop-local `POST /repair-policy`; packs cannot ship it); the Claude Code provider connected;
+  L1 exhausted this streak (`repair_policy.l1` false, or `_l1_last_attempt` predating `first_failure_at`);
+  one L2 attempt per streak (`_l2_last_attempt`).
+- Sent: the L1 envelope (goal, stages, failure class and detail, contract, at most 4 KB fenced raw excerpt) read
+  from the sealed `last_failure` slot. Never vault or KB content, secrets, or headers. Items whose source is
+  `internal.*` seal an empty excerpt.
+- Returned: the L1 closed schema, fully revalidated.
+- Park-only: a valid proposal is never applied by code. It is sealed as `_l2_proposal = {stages, created_at,
+  model}`, shown as "Fix proposed - review" with a stage diff and Apply or Dismiss, and posts a carrier
+  notice. Apply uses the L1 trial discipline (origin `repair_l2`) and refuses 409 when the item is `broken`.
+  Dismiss clears it. A user spec edit or a clean run voids a pending proposal.
+- The call takes minutes, so it never runs inside the tick: the tick marks eligibility and one bounded daemon
+  worker (one in flight process-wide) writes the proposal. Attempts are `ni_runs` rows (`repair_l2_proposed`,
+  `repair_l2_failed`); Apply and Dismiss are audited.
+
+### 23.1 Constraint drift and re-research
+
+A card with a sealed `recipe` (the researcher's, §29) adds two things.
+
+- `constraint_drift`: after a successful fetch and pipeline, `_finalize_run` re-runs on the fresh outputs the
+  verifier checks that passed at Keep (`ni_refresh.drift_reasons`: place, window, threshold, compare, empty).
+  A failing one fails the run with status `constraint_drift` (the normal streak, backoff and `last_good`;
+  no L1 and no stage-patch L2). A spec with no `recipe` skips the check.
+- Parked re-research: a failing card may ask for a new source when `ni_refresh` says so and the research plan
+  is `cloud`. The L2 worker runs `ni_research_flow.reresearch` (the researcher on `recipe.question`, Library
+  only, the current source withheld) and parks `_l2_proposal = {spec, origin: "research", reason:
+  constraint_drift|source_dead, created_at, model}`, a whole replacement card. Apply swaps the card through
+  `apply_repair(replace_spec=True)`; the old `contract` and `_c2_ok` are not carried; the L1 trial and
+  auto-revert apply.
+- Triggers (`ni_refresh.TRIGGER`, by `recipe.tier`): `curated` asks once the card is `failing`;
+  `verified_endpoint` and `page_reading` ask on the first `constraint_drift` and, for a dead source, once
+  `failing`.
+- Bounds: the sealed marker `_research_last_attempt = {at, streak, outcome: started|proposed|declined,
+  declines}`. No second attempt within 24 h of a start; none in a streak that already parked a proposal; after
+  each decline the wait is 1, 2, 4 days, capped at 7. Process-wide, `take_budget` spends one of
+  `SMARTBRAIN_NI_RERESEARCH_DAILY` / meta `ni_reresearch_daily` (default 10, 0 is off) per UTC day. Research
+  off, ask or local never sends anything.
+
+## 24. `http_image` source and the `image` node
+
+Cards can watch an image the user consented to. Pixels are fetched, sealed and re-served same-origin, the only
+CSP-legal path (`img-src 'self' data:`).
+
+`{"type": "http_image", "url": "...", "headers": {...}}`, with the `http_json` rules, netguard, image content
+types, a 4 MB cap and a wall-clock deadline. The body must sniff as PNG, JPEG, GIF or WebP by magic bytes (the
+served Content-Type is ignored; no SVG; no decoding or re-encoding); anything else is `image_type`. Bytes are
+sealed in the `image` slot; the pipeline sees metadata only: `{"image": {"bytes_len", "format"}}`.
+
+The bound `image` node is written by the server only: `{"type": "image", "src":
+"/api/ni/items/<id>/image?v=<created_at>", "alt"}`. The client refuses any other src. `GET
+/api/ni/items/{id}/image` serves the sealed bytes with the sniffed type and `Cache-Control: no-store`.
+
+## 25. `internal.ni` composite source
+
+`{"type": "internal.ni", "items": {"stock": "<item-id>", "spend": "<item-id>"}}`. At most 5 items; zero egress.
+Depth 1 by construction: a referenced item whose own source is `internal.ni` is refused at create, update and
+run (`composite_depth`). Per alias the payload is `{"title", "state", "payload_at", "history": {name: [{t,
+v}]}}`: history series plus health metadata, never another card's scene. A missing item yields empty history,
+never a failure. The consent surface lists every referenced item by title.
+
+## 26. Creation doors
+
+The flow (§29) is the only door for `http_json` cards. `create_ni_item` refuses `http_json` sources at
+prevalidate and remains the door only for the source types the flow does not build (`model`, `internal.*`,
+`mcp_tool`, `http_page`, `http_image`, `computed`). A refusal of a source carrying `render` or `sites`
+(`_refuse_render_seal`) keeps a model from writing the page-browser seal. Cards built from the Library or
+from research install through the flow's handoff: `ni:self:<name>` refs rewrite to `ni:<item_id>:<name>`, and
+anything code cannot derive stays empty on purpose, so the landing rule forces `draft` and the card asks the
+user (never a guessed value). A keyed card whose secret is absent may reuse another card's same-host,
+same-name credential through the desktop secrets provider, copy-based under the new item's own key and
+journaled; different hosts never reuse.
+
+## 27. Sample-grounded authoring
+
+When no Library source fits, drafting is grounded in a real sample: the internal tool `derive_ni_paths`
+(`{sample <= 32 KB, want?}`) walks the sample in code and returns candidate leaf paths with types and example
+values (the §4.1 grammar), with no model in the loop. A fix conversation reads `read_ni_item`, whose
+`last_failure` excerpt (http sources only, §23 rules) lets paths be corrected against the real payload.
+
+## 28. Item journal and session continuity
+
+Per-item memory for any later model: the sealed `journal` slot, an append-only list pruned to the newest 20 of
+deterministically composed entries `{ts, kind: created|updated|param_changed|commissioned|c2_wrong|repaired|
+reverted|source_changed|recipe, summary}`. Summaries are built from structured facts by code (plus the user's
+own C2 notes verbatim); models never write them. It cascades on delete and is excluded from export.
+`read_ni_item` returns the journal plus deterministic `state_explanation` and `user_next_action` strings per
+state and condition, so a model reports state truth ("waiting for the user to add the key on the card; do not
+describe this card as live").
+
+Cloud sessions (the Claude Code provider): a turn opens one session, later steps resume it with only the
+delta, and the turn's end or watchdog deletes the artifacts. Containment is unchanged (empty toolset,
+`--setting-sources ""`, strict MCP, stripped environment, private 0700 directory). Stateless per call is the
+fallback.
+
+## Status truth
+
+The card must never lie about its state.
+
+- Board rows carry `needs_credentials` (secret params with no stored key) and `needs_params` (`[{name, label}]`,
+  unfilled non-secret slots), and render `last_status` and `consecutive_failures` in words ("First run failed -
+  couldn't find the expected data, 4 attempts; last tried 2m ago"), not "Waiting for the first run...".
+- A `{{param:X}}` that resolves empty raises `param_empty` at substitution, so the engine never fetches
+  `?symbol=`. The landing rules force `draft` while any referenced non-secret param is empty; the commission
+  route 409s naming it; the card offers Fill (`PUT /param`, desktop-local, secrets refused). `param_empty` is
+  not L1-repairable.
+- Cards with `needs_credentials` offer Add key (the host-bound credential modal). Any item declaring a
+  secret-kind param lands in `draft`.
+- `create_ni_item` refuses a title that case-insensitively matches an existing item unless
+  `allow_duplicate: true`, and names the existing card.
+- The C2 verdict `ok=true` kicks the C3 proof run synchronously (the same body as `/run`, with its double-run
+  guard) and reports the post-run `state` and `run` outcome; a kick failure never masks the verdict. Board rows
+  carry `c2_ok`, so the card shows "Confirmed - verifying..." after the tap.
+- A flow shell (`spec._shell`) is a not-yet-finalized placeholder: commission refuses it and the board hides
+  Activate. Shell titles are bound to one readable line.
+
+## 29. The creation flow
+
+Code owns the sequence; models fill narrow, validated blanks. There is one flow. A card is made by
+`POST /api/ni/intake {request, source_url?}`: a shell card appears at once (before any model call) and a
+single-flight background worker walks the stages. The tick never runs flows. Every later step is a card
+affordance.
+
+### States
+
+A flow record rides the sealed `flow` slot. `FLOW_STATES`: `intent`, `source`, `awaiting_access`, `sampling`,
+`mapping`, `assembling`, `awaiting_credential`, `awaiting_params`, `ready`, and the terminal `unsupported`,
+`failed`, `declined` (`ni_master.TERMINAL_STATES`). `source` with the `awaiting_source_pick` marker is the pause
+that offers links and the paste-a-link field (§33); a bare `source` is the locating window, work in progress.
+A record left at the retired `confirm_source` state by an older build re-lands the `source` pause when the
+board reads it, or when the sweep runs. The board shows `progress {step, of, label, gate?, try?}` for a
+non-terminal flow: four steps (Understanding your ask, Finding a source, Reading a sample, Checking it answers
+your ask / Building the card), computed from the state alone, with `try {n, of, host}` while the auto-pick
+works through Library sources.
+
+`sweep_stranded_flows` (from the tick, budgeted) fails any non-terminal record older than one hour to
+`failed(stale)`, except user-gated pauses (`awaiting_access`, `awaiting_credential`, `awaiting_params`,
+`source` with the pick marker), and skips live in-flight workers. A cancelled flow is cooperative: the worker
+finishes its current fetch and seals nothing.
+
+### Stages
+
+1. **Intent** (one model call, closed schema, one retry): `{kind: external_data|computed_only, subject,
+   cadence_minutes (default 15), wants[], place, threshold|null, display_hint}`. The frame is code's parse:
+   `frame_kind` over `library_index.FRAME_KINDS` (`current_value | next_event | schedule | forecast |
+   result | trend | ranking | latest_items | alerts | status | count`), left null when the words state none;
+   the form engine's question kinds (`ni_forms.types.QUESTION_KINDS`) add `lookup`, `map`, `image`,
+   `text_brief` and `compare`. `computed_only` builds the countdown (§3) or asks "when is it?" (an answerable `unsupported`).
+2. **Source** (code). A user-named `known_url` (the composer's field, a pasted link, a Fix) is the consent and
+   is sampled directly. Otherwise the **auto-pick** runs (below). There is no pick pause for Library rows.
+3. **Sampling** (code): one consented fetch through `ni_fetch`; lists are deterministically downsampled to 2
+   exemplars (1 if still over 30 KB) before any model sees them.
+4. **Mapping** (one model call): only for a pasted JSON link, a Fix, or a remap. The menu is pre-filtered by
+   code to the field's expected type; the model selects paths only; code verifies membership and type, retries
+   once, else `failed(mapping)`. A tapped or auto-picked Library row is never model-mapped: it builds from its
+   declared answers (§32).
+5. **Assembly** (code): pipeline and a `form` scene (§34) from the answers, with typed verification against the
+   sample. An unsupported `display_hint` degrades honestly.
+6. **Verify** (code, `_verify_frame`, before every declared-answers handoff): the build is checked against the
+   ask's frame. It refuses a source whose categories share no top level with the ask, one about a different
+   named subject, one that cannot take the named place, answers that cannot be this kind of question (a next
+   event needs a time still to come; a result needs a score), a label for another day than asked, and wants
+   nothing chosen speaks to. A refusal drops that source ("<provider> doesn't answer this (<reason>)") and the
+   flow moves on. Computed notes name what the source does not report. A text-product want (the forecast
+   discussion) is answered only by a genuine text cell.
+7. **Fit verdict** (advisory, build time, one closed local call): `ni_forms.verdict.fit_verdict` asks whether
+   the data answers the ask; the verdict is sealed as `_fit` and only ever shown as a marker (`visible_fit`:
+   `no` or `partly` with at most 3 missing labels, never `yes`, suppressed on a designed empty state). It never
+   blocks or changes a card.
+8. **Handoff**: `_finalize` seals the spec: `_born`, `_built_from` (§33), the `recipe` for researched cards,
+   `query` and `interpretation` (§36), history tracking (§34). Landing rules: secret params make `draft` with
+   `awaiting_credential`; empty params make `draft` with `awaiting_params`; a held card (§33) lands
+   `commissioning`; otherwise `commissioning`.
+
+### The auto-pick
+
+`_auto_pick` runs for an ask with no named source. In order:
+
+1. An ask that compares two to four named things goes to `ni_compare_flow.try_compare` first (§38).
+2. A brief-shaped ask builds a headline card when the sample holds a list of titled, linked or dated items (§37).
+3. The Library is asked for up to 5 rows (`_library_candidates`, with the frame as a hint; a row whose lookup
+   leaves its host is dropped). Rows whose source declares its answers are buildable; others ride along as
+   link rows. Keyless rows come first, then rows that need the user's key or contact email.
+4. `_auto_continue` tries the buildable rows in order. Each try seals the pick, fetches the one address through
+   the same netguard path as a tap (audited as `ni_auto_pick`, with the host), and builds from the declared
+   answers; every post-fetch check is the gate, and a row that does not fit is dropped with its reason. A row
+   that needs a key or email pauses at `awaiting_access` and sends nothing until the user types it
+   (`POST /flow/access`).
+5. No buildable row, or every row failed: the researcher runs (below), else the declined card (§39).
+
+Consent posture: the only fetch before Keep is of an installed Library row that declares its answers. Nothing
+recurs until Keep: the card is held (§33).
+
+### Research
+
+`ni_research_flow.fallback` runs before the honest stop. The tier is chosen by `ni_research.policy`: the setting
+(`SMARTBRAIN_NI_RESEARCH` or meta `ni_research`, `auto | off | local | cloud`, default `auto`), the routes, and
+this card's consent.
+
+- `cloud`: an `anthropic/*` route and the card's `_model_consent` (and, for the open web, consent given under
+  the web wording). A bounded tool loop in which the model only chooses and code runs every tool
+  (`library_search`, `web_search`, `fetch_sample`, `try_recipe`, `propose_card`, `propose_compare`). The open web
+  (search and public pages) is on unless the kill switch (`SMARTBRAIN_NI_RESEARCH_WEB` or meta
+  `ni_research_web` set to `off`) limits it to the Library. Fetches carry no headers, no POST, no redirects,
+  and every address must have been handed over by a search or the Library, never composed.
+- `local`: the closed-world mode. Code ranks Library rows and the local model only picks one and fills the
+  recipe. Never the web.
+- `ask`: the card shows the consent question (`model_consent`, §29 Consent) and nothing is sent.
+- `off`: no researcher.
+
+A proposal is checked by code (`ni_research.tools._checks`: place, window, threshold, compare, empty,
+`subject` for page readings), may be refused twice, and lands as a held card with `_built_from.path:
+research` and a sealed `recipe = {question, sources, constraints, tier, verification?, provenance?, research?}`
+(`ni_recipe`). `tier` is `curated`, `verified_endpoint` or `page_reading`. Researcher drafts may carry no `llm`
+stage, `$secret`, model or MCP source, or model-chosen interval. The interval is stamped by code from
+`recipe.question.cadence`. A run that could not finish ends `fault` (a failed, retryable card), never a
+decline.
+
+### Consent
+
+- A card whose resolved model is not local and differs from the card's `_model_consent` stops before any model
+  call with an answerable `unsupported` whose question is `model_consent {model, local, prompt, web}`. The
+  wording names what leaves the device (the request and samples from the source), and with the open web on,
+  the search and page items. `POST /flow/answer {kind: model_consent, value: allow|local}` stamps the consent
+  (sealed into the spec so Fix does not re-ask) or builds with the local model. The engine's `llm` stage stays
+  local-only.
+- `run_flow` resolves its model live from the `ni` route with `chat` and `agent` fallbacks and prefers a local
+  one when the ni-resolved model is cloud and a local one exists (an explicit `ni` route wins).
+- A named `source_url` is shape-validated at intake and netguard-fetched at sampling.
+
+### Card actions
+
+The backend declares the buttons: board rows and flow fields carry `actions`, a list from `ni_master.ACTION_KINDS`
+(`keep, dismiss, cancel, retry, fix, refine, run, pause, resume, edit, delete, activate, activate_sites,
+give_access, answer_date, allow_model, use_local, fill_param, add_credential, review_fix`). `ni_master.actions_for`
+is the one table; the client renders the declared list and ignores unknown kinds.
+
+- **Retry** (`POST /flow/retry`) re-runs a terminal shell's sealed request with the same sealed answers
+  (`_declined`, `_model_consent`, `_use_local`); a fetch-class failure drops the failed URL. 409 while a
+  worker still runs, for a finished card, and for a non-terminal flow.
+- **Cancel** (`POST /flow/cancel`) stops a running flow; 409 when nothing is building.
+- **Fix** (`POST /flow/fix`, `begin_remap`) re-enters sampling on the item's own frozen source (http_json and
+  page cards; unfilled params refuse). **Refine** (`POST /refine`) routes a note by code: a cadence phrase sets
+  the interval; a source-change phrase re-enters the source pick; anything else re-samples the frozen source
+  with the note sealed on the record for the rebuild and the verify.
+- **Answer** (`POST /flow/answer`): `supply_date` (YYYY-MM-DD, sealed as `_supplied`, the user's date being the
+  truth) and `model_consent`.
+- **Pick source** (`POST /flow/pick-source {url, pasted}`): the paste-a-link field of the stop card. A link row
+  the card offered is refused (409) unless `pasted: true`; a pasted link builds through the mapping path and is
+  held for Keep.
+- Duplicate titles 409 naming the existing card.
+
+### The Master and the ledger
+
+`ni_master.py` is the execution-plane contract: the closed move set (`advance retry reroute ask_user research
+degrade finish park`), the append-only `_ledger` on every flow record (one `_transition` hook covers every stage
+entry and terminal), and the single-writer law: terminal card copy (a `reason` sentence, a closed-kind `question`
+from `QUESTION_KINDS`, `reopen` affordances from `REOPEN_KINDS`) is derived in one place,
+`terminal_surface`, and rendered verbatim. The law guarantees a non-empty reason and a question or a reopen on
+every terminal state; shells are exempt from terminal-slot hiding (a shell's only payload is its sample, so
+hiding the record would erase the truth), finalized cards keep it (a failed remap must not mask a working card;
+the board hides a terminal record only when the card renders a payload and holds no question).
+
+### Oversight
+
+`ni_watch.py` (W-CREATE) rides the NI tick. It sweeps stranded flows and audits **the cards the board actually
+serves**: each item is read the way `GET /api/ni/board` builds its row (`ni_routes._board_row`), never from the
+internal flow slot, and checked against the table `ROW_CHECKS` (a code, a severity, a host-free title and a
+predicate over a served row):
+
+- `dead_end` (high): a terminal flow served with no reason (`reason` or `decline.line`), or with no question,
+  reopen or way-on action; or a terminal record the board serves with no flow and nothing to render (a shell,
+  or a card with no payload).
+- `no_actions` (high): a served card whose `actions` is empty (`delete` is on every list).
+
+A new audit is a new row of the table. It also clusters the same failure class across cards (3 or more in 24 h
+is one warn finding; a decline is a verdict, not a class). Findings are code-authored host-free strings in
+`ni_findings`, edge-triggered by the open-finding dedupe; high findings ride the carrier row; the Status
+surface lists them with a Dismiss (`GET /api/ni/findings`, `POST .../resolve`).
+
+## 30. The Library and the user's key
+
+The SmartBrain Library is the flow's source step: a signed record collection with `answers` (§32), an index
+(`library_index`), a resolver that fills parameters from the user's words (`library_resolve`, including geo
+and named-place resolution with closed data) and a client (`library_client`). A tap or an auto-pick is recorded
+as a vote (`{source_id, "yes", app_version}`) queued in a sealed outbox (reserved row, slot `outbox`, at most
+200) and sent by the scheduler (at most 10 per tick, backoff 15 minutes doubling to 24 h, dropped on
+400/413/415/422 or after 8 tries; `SMARTBRAIN_LIBRARY_API=""` switches sending off). The add form's `suggest`
+queues a record with parameter values, headers, tier, origin and votes removed.
+
+## 31. The user's own key and contact email
+
+A Library source whose parameter fills `from: vault_key` yields its address without the key plus `needs_key
+{in: query|header, name, prefix, docs_url}` (a key in the path is refused); `contact_ua` sources carry
+`needs_contact`. Keyless rows are offered first. A row that needs access seals `_access` (bound to that exact
+URL) and the flow pauses at `awaiting_access` with the question `give_access`; nothing is fetched. `POST
+/flow/access {key?, email?}` (desktop-local, audited without values) stores the key as `ni:<id>:api_key` bound
+to the host (with the header prefix) and the email as SecretStore `contact:email`, then starts the worker. A
+same-host `api_key` another card holds is reused. Sampling and assembly attach the key only when the URL equals
+the sealed `_access.url`. The built spec carries refs and an `api_key` secret param, never a value.
+
+## 32. Cards built from a Library source's declared answers
+
+A curated Library record may carry `answers`. Each is closed and `_clean_answer` drops any that breaks the
+shape (the rest still serve).
+
+- `value`: one path, type `number | text | time | date | count`, `unit` or `unit_path`, `codes`, optional
+  `window` (`now | today | tonight | tomorrow | latest`) and `measure` (`temperature`, `feels_like`,
+  `precip_chance`, `precip_amount`, `conditions`, `thunderstorm`, `snow`, `wind`, `humidity`, `waves`, `swell`,
+  `wave_direction`, `water_temp`, `alerts`, `kp`, `uv`, `air_quality`, `tide`, `sunrise`, `sunset`), a `time`
+  may say `utc: true`, and `tbd_if {path, equals}`.
+- `list`: rows at `path`, 1..4 (up to 5) row cells relative to one item, `newest_first`, `may_be_empty`,
+  `filter {path, equals}` (a `"{param}"` or a short fixed value), an optional `axis {cell, step:
+  day|hour|period}` (the rows are indexed by time and can be cut).
+- `columns`: 2..4 parallel arrays with `limit` and an optional `axis`.
+- `codes`: `wmo_weather` on a number cell (the engine's `label` step), or on a text cell a Library code table
+  (`library_codes(name, value)`, a slug `[a-z][a-z0-9_]{0,39}`, for example `nws_event`). A table is kept on its
+  cell type only.
+- `param_bounds` on list and columns answers: `{number cell path: {min?/max?: parameter name}}`, so an asked
+  comparator ("above magnitude 4") is pushed into the address.
+- Paths may hold whole `{param}` segments, filled at build as quoted keys.
+
+**Seal.** A Library pick (`seal_library_pick`, the auto-pick and the live harness alike) seals `_library_source`,
+`_library_url`, `_library_params`, `_library_format`, `_library_provider`, `_library_scope`, `_library_lookup`,
+`_library_label` and `_library_readings`.
+
+**Sampling.** A sealed same-host lookup runs first (`library_resolve.resolve_lookup`); a step off the host, or a
+lookup that fails, moves on. A row that promised JSON and answers with a page moves on: it never becomes a page
+card.
+
+**Choice and build.** The query layer (§36) picks: the plan's `ir.answer` is the answer (value companions from
+`ir.select`, at most 4), and the build binds the IR's `time` to it. A measure no declared answer reports, or a
+stretch the chosen answer cannot show, is nothing: the next source, "<provider> doesn't give <the weekend>" or
+"doesn't report wind", never the headline answers instead. `_try_answers_build` builds before any derive or
+mapping call: `{param}` segments filled, then extract and the typed transforms (`number`, `time`, `date`,
+`count`, `label`, `zip` + `top_n` (7 daily, 12 hourly), `reverse`, `where`, `window`). A `unit_path` is read once
+and frozen as a literal. A list fits when every cell is present in some row; a row missing a cell shows a dash
+there; a cell missing from every row is drift (the run fails and repair fires). A `may_be_empty` list shows
+"No <label> right now" while empty. A list whose rows name a place (`port`, `station`, `city`, `state`,
+`county`, `country`, `location`, `site`, `place`, `venue`, `airport`, `region`) is scoped to the asked place
+by a sealed `where eq`; no row naming the place means the source has nothing for it.
+
+**Windows.** With a window and an `axis`, the `window` transform replaces `top_n` and runs before the cells'
+conversions, so "this weekend" stays Saturday and Sunday on every refresh. "Today" is the source's today (its
+named zone, else the offset of the row nearest now), except a UTC stamp with no zone named, whose day is the
+user's. On an hour-step axis `today` and `tonight` floor at the current hour for forecast-style series
+(columns); event, schedule and result lists keep the whole asked period; a next-event list floors. `tonight`
+before 06:00 is the current night. A next-event or schedule list with no asked window gets a forward cut every
+run (rows from now minus 15 minutes). The engine clock is the user's zone as the desktop reports it (`meta
+user:timezone`; a remote device may seed it when none is stored, and `user:timezone_by` records which authority
+wrote it).
+
+**Nothing here, or a misfit: the next source.** When the response holds none of the chosen answers or an asked
+value is missing, the flow moves to the next row ("<provider> has nothing for this right now"); with no other
+row an asked value that is missing may fall back to the source's other `primary` answers, named "not reported
+by this source right now"; otherwise the card ends honestly.
+
+**Verify replaces the judge.** The build is deterministic, so no judge runs; `_verify_frame` (§29) checks it and
+the note says "built from the Library's declared answers: <labels>" plus what the source does not report. A
+declared build never renders in the page browser: a row that answers with a page moves on.
+
+## 33. Open paths wait for the user's Keep
+
+Every confidently wrong card came from the two open paths: a model-mapped dataset and a page. A card built from
+a path other than a Library source's declared answers is held until the user keeps it.
+
+- **Seal.** `_finalize` seals `_built_from: {path, host, title}` (closed, `ni._validate_built_from`). `path` is
+  `declared` (a Library source's declared answers), `auto` (the same build picked by the auto-pick), `page`
+  (an `http_page` card), `mapping` (a pasted or harvested JSON link, a Fix, a remap) or `research` (a
+  researcher's recipe). `host` is the fetched host; `title` is the page's own title, else the picked row's.
+  Export strips it and packs refuse it.
+- **Held.** `ni.awaits_yes(item)`: state `commissioning`, `_built_from.path` in the open set (`page`, `mapping`,
+  `auto`, `research`) and no `_c2_ok`. A held card lands `commissioning` like any other and differs only in
+  that the due query skips it (no cadence fetch before Keep), and the board shows the reading the flow found
+  (`preview`, or a manual run's ok `latest`) with `awaiting_yes {from: library|page|dataset, host, title,
+  used_key?}`. Nothing sets `_c2_ok` except `POST /validate ok=true`; the scheduler, runs, repairs, export,
+  import, template install and template update never do, and `update_spec` strips it. A card already past
+  commissioning is never re-held by an edit; a Fix or a source-changing edit returns it to commissioning.
+- **Keep** is the C2 verdict (`ok=true`; the client labels it "Keep" for a Library-picked card and "Yes,
+  that's it" otherwise): `_c2_ok` sealed, the C3 kick runs, `last_checked` is cleared so the proof run follows,
+  then `live`. For a form card `presentation_id: pick|second` chooses the design before the verdict (§34).
+- **Try another source** is `ok=false` on a held card: a `c2_wrong` journal row, state `draft`, then
+  `ni_flow.decline_reading`. The declined address (and the row's own pre-lookup address) joins `_declined` (at
+  most 10, never offered again on this card) and the flow re-runs from the user's words, so the auto-pick tries
+  the Library's other sources, then research, then ends on the declined card. The response carries `repick:
+  "relocate"` (or `"none"` when the re-run could not start). Never a dead end.
+- **Library-only reads, links only for the rest.** A Library source without declared answers, and a web page a
+  search found, are never built from; they are offered as links (`kind: link`, `found: dataset|page`) on the
+  stop card, named honestly, with nothing read off them. A link the user pastes is theirs to build from
+  (`mark_pasted` seals `_pasted`) and waits for Keep. A web page's `<table>` grids are readable (§40), its
+  prose never.
+- **Card (/ni).** Health chip "Needs your OK", a dashed border, the reading rendered as the card's own scene,
+  "From the SmartBrain Library: <title> (<host>)" or "From the web page <host> - <title>" / "From the dataset
+  <host> - <title>", the one-read notice for a Library card ("SmartBrain read this source once to build this
+  preview. It won't read it again until you tap Keep."), and the footer "not updating yet".
+
+## 34. Form scenes
+
+Every card the flow builds (a Library source's declared answers, a pasted dataset, a page card, the countdown)
+seals one scene node of type `form`. The engine is `smartbrain_3000/ni_forms`; this section is the product
+contract around it.
+
+**Sealed node** (closed, `ni._validate_form`). A `form` node is a leaf (no children, no `when`):
+`{type: "form", form, variant, params, record: {kind, fields: [{name, label, path, type, role, unit?, currency?,
+scale?, precision?, wallclock?}], rows: str|null}, spans: {desktop, phone}, design: {designer: model|rules, pick,
+second: null | {id, form, variant, params, spans}, fallback?: true, gates?: [str]}, frame?: {kind, wants}}`.
+`form` is in `ni_forms.types.FORMS`; at most 8 fields; `rows` names the pipeline output holding the list rows,
+`null` for value answers; spans are `ni_forms.spans` keys (`d1x1`, `p2x1`...). `design.second` is the runner-up
+sealed whole, so it can be chosen without a refetch. `design.fallback` marks the universal fallback (no form
+survived: a plain `table` or `kv_grid` at its smallest lint-clean span). `design.gates` (at most 12 short
+strings) names what a lint gate skipped and implies `designer: rules`. `frame` is the ask's frame
+(`kind`, `wants` at most 8).
+
+**Build** (design time, once). `record.from_answers` turns the answers the pipeline was built from, plus the
+sample outputs, into a `DataRecord`: value gives `measure` (one row); a list gives `events` when a time cell
+sits on a declared axis, else `records`; columns give `series` on an axis, else `records`. Types follow the
+declaration (`number` with a unit gives `currency`, `percent` or `quantity`; `time` gives `datetime`; `codes`
+give text; text with at most 12 distinct values is `category`; a blank string is a missing cell). Roles follow
+the shape (the asked field or the first displayable leads as `measure`; a later time that is the reading's own
+stamp is `as_of`; a text over 36 characters is `text_body` only when exactly one value answer is chosen; rows
+take `name`, `status`, `kind`, `meta`, `time`, `date`, `value`, `secondary`, `lat`, `lon`). Labels are the pack's
+or the user's words (`label_src: lexicon`). Then `profile`, `enumerate`, `present`: PRESENT runs through the
+flow's own model call (the ni route, the consent gate) with a literal JSON skeleton; with one candidate, no
+model, an invalid reply or a transport error, the rules floor picks. Both sealed spans must lay out red-free:
+a red span moves to the next candidate in floor order, then the universal fallback. `display.size` is
+`display_size_for_span(spans.desktop)`.
+
+**Frame-aware design.** The ask's question kind is a prior over forms (`KIND_FORMS`: a forecast on a sub-daily
+axis gives `series_line`, `conditions`, `day_table`, `agenda`; on a day axis `day_table`; schedule gives
+`agenda` or `day_table`; next_event gives `next_event`; lookup, ranking and latest_items give `table`,
+`ranked_list`, `kv_grid`; status and alerts give `entity_list` or `stat`; trend gives `series_line` or `stat`).
+Fields the ask names (`ni_forms.asked`, including the `field_words` synonym groups) are never dropped by a plan,
+`pick_default` takes the smallest span that keeps every asked field, and PRESENT's hard gate rejects a pick that
+drops one. `series_line` needs at least 3 points; a series that mostly lies ahead is a forecast whose hero is the
+current period. A one-row list or columns result reads like a value answer.
+
+**Time.** The `time` and `date` transforms emit display text that keeps its instant; the record stores the
+instant (ISO 8601 Z) or the calendar day, and forms format it on the device. A zoneless string with no instant is
+never guessed. `Context.card_tz` is the source's IANA `zone` output when the pipeline extracted one, else the
+user's zone.
+
+**Bind** (every run, no model). `bind_scene(scene, outputs, history, image_ref, form_ctx)` with `form_ctx =
+{source_url, fetched_at, viewer_tz, title, ask, cadence_s}` from the sealed spec. `record.from_spec` re-reads
+the sealed field specs by `path` (types and roles are never re-derived); a sealed `rows` output that is not a
+list raises `bind_type`; a measure with an empty cell, or a sealed row field gone from every row, raises
+`extract_miss`. Under `ni_forms.llm.no_model()` the engine re-enumerates and takes the candidate matching the
+sealed `(form, variant, params)`; when the data drifted past it, the rules floor applies and the bound node
+carries `design_needs_attention: true`. The bound node is `{type: "form", form, clir: {desktop, phone}, summary,
+hash, lint: {red, amber, codes}, design: {designer, pick}, clock: {next}, design_needs_attention?,
+alternatives?}`; `ni._enforce_form_shape` runs `check_clir` on both CLIRs. `hash` is the desktop CLIR's
+canonical sha256; two binds of one run's outputs at one fetch instant hash the same. `alternatives` (at most
+one runner-up, with its own two CLIRs) appears only in the preview bind the C2 panel reads.
+
+**History.** The handoff seals `history: {track: {<name>_h: <output path>}, max_points: 200}` for every numeric
+`measure` field (at most 4); rows-shaped records track nothing.
+
+**C2 presentation.** `POST /validate {ok, note?, presentation_id?: pick|second}`: `second` re-seals the node
+under the runner-up (`swap_to_second`; the record is byte-identical, attestations preserved, the rev bumps)
+before the verdict is stamped; `_present_ok` records the choice. 409 when the card is not commissioning, not a
+form, or has no second; 422 for any other id.
+
+**Clock pass.** A sealed card can go wrong with the clock alone ("Today" becoming "Yesterday", a daylight
+change, a live binding's edge, the as-of age passing the stale threshold). `ni_forms.clock.next_boundary`
+finds the earliest such instant; `_bind_form` seals it as `clock.next` and the engine writes it to
+`next_clock`. A due item that is not fetch-due takes the clock pass: no fetch, no model, it re-binds from the
+`outputs` snapshot at the layout clock's instant with the original `fetched_at` held fixed, and writes `latest`
+and `last_good`. It never touches `last_checked`, the failure counters, alerts or `llm_state`; a failure
+declines the pass instead of failing the card.
+
+**Fit verdict.** See §29 stage 7: advisory, sealed as `_fit`, shown as a marker, never a block.
+
+**What the client paints.** The CLIR for its device (`clir.desktop` on the board, `clir.phone` on a phone):
+primitives (`text`, `time`, `rect`, `line`, `tri`, `dot`, `path`, `cells`, `icon`...) in content-box px with
+`reading_order`, `hitmap` and `live` bindings (now marker, countdown, past-dim, age) it re-evaluates on its own
+clock. Every `text` prim carries `src` in `TEXT_SRC` (data, lexicon, ask, title, key, code; never a model
+word); `time` prims carry the ISO instant, `fmt` and `zone`. `lint.red == 0` on everything the server ships;
+`glyph_missing` is amber. The web painter (`IrPaint.svelte`) paints DOM text and inline SVG; a client that
+predates it shows an unrenderable placeholder (the version-skew rule).
+
+## 35. Browser components
+
+A browser component is a standalone, replaceable, hash-pinned headless browser the app loads to read a page the
+way a browser does. It lives in `smartbrain_3000/browsers/`. The first engine is Obscura (v0.2.4), run as a
+one-shot `fetch` subprocess, never `serve`, `mcp` or `scrape`, with no CDP port and no `--eval`. The engine only
+runs inside an OS wall (macOS Seatbelt, Linux namespaces, the Docker renderer sidecar); where no wall can be built
+the platform reports `unavailable` with a reason and nothing starts (fail closed).
+
+**Manifest** (`browsers/engines/<name>.json`, validated on every use). Closed keys: `name, version, released,
+source_url_template, platforms{darwin-arm64|linux-x86_64|linux-aarch64: {asset, sha256, size, members{<file>:
+{sha256, size}}}}, files, executable, capabilities, argv{fetch, assets, honest}, forbidden_flags, limits{timeout_s,
+script_deadline_ms, heap_mb, rss_mb, rlimit_data_mb, html_cap_bytes}, identity{mode, pool_size}, min_glibc`. An
+unknown key, a placeholder outside `{url, run_dir, proxy_port, timeout_s, heap_mb, output_path, user_agent}`, a
+flag outside the allowlist (`--proxy --storage-dir --timeout --dump --output --wait-until --v8-flags
+--user-agent --stealth`), a forbidden token, a `--v8-flags` other than `--max-old-space-size={heap_mb}`, an
+`html_cap_bytes` above `netguard._MAX_BYTES` or a non-`https://github.com/` source is a `ValueError`. `members`
+pins every installed file's sha256. `SELECTABLE = {obscura}`.
+
+**Forbidden, always.** `--allow-private-network`, `--host`, `--port`/`-p`, `--eval`/`-e`, `--file`,
+`--screenshot`/`-s`, `--quiet`/`-q`, the subcommands `serve`/`mcp`/`scrape`, `--stealth` unless the manifest
+declares it, and the env key `OBSCURA_ALLOW_PRIVATE_NETWORK`. The builder validates every value (an https URL
+in lowercase IDNA ASCII with no userinfo and never an IP literal; a printable-ASCII UA; absolute paths; bounded
+ints), inserts it verbatim, and re-walks the rendered argv token by token. The engine environment is a closed
+set (minimal PATH, `LANG`, HOME/TMPDIR/XDG inside the run dir, a validated `OBSCURA_TIMEZONE`,
+`OBSCURA_SCRIPT_DEADLINE_MS`, `OBSCURA_PROFILE`); no proxy variable is ever passed.
+
+**Installer.** Layout `<data>/browsers/<name>/<version>/`. The pinned URL is fetched through netguard with exactly
+one redirect allowed, to https on `{github.com, objects.githubusercontent.com,
+release-assets.githubusercontent.com}`; the body streams to a `.part` file hashed as it arrives, aborting beyond
+the pinned size, and the sha256 is checked before unpacking. The untar is by hand (top-level regular files named
+in `files`; absolute paths, `..`, links, devices, directories, duplicates and strangers refused; written
+`O_EXCL|O_NOFOLLOW` with exactly the manifest's mode), then one atomic rename and a self-test. `verify_installed`
+re-hashes every member on every launch. `ensure(name)` installs only when that fails, never on an unsupported
+platform, single-flight, at most 3 retries for a transient failure. Phases: `absent`, `downloading(pct)`,
+`verifying`, `unpacking`, `self-testing`, `ready`, `unavailable`, `error`, `stale`, `disabled`.
+`SMARTBRAIN_NO_BROWSER=1` is `disabled`. In Docker the app container never downloads an engine; the sidecar image
+holds it.
+
+**Egress child** (`jail_egress.py`, `egress.py`). The engine's only network route, spawned with a stripped
+environment in its own session. CONNECT only; request head at most 8 KB; hostnames only (IP literals refused);
+port 443 or the render URL's explicit port; site policy by registrable domain checked before any DNS (`own`,
+`sealed`, `open`); one bounded resolution per host, refused if any answer fails `netguard._is_unsafe`. Caps per
+run: 24 concurrent tunnels, 150 tunnels, 24 sites, 16 MB down, 1 MB up, 15 s idle. It reports a census
+`{site, tunnels, up, down, verdict}` (at most 64 rows) to the parent on exit and writes no log.
+
+**Walls.** `check`, `prepare`, `wrap`, `verify` (every watchdog poll; one unconfined PID is `confinement/wall_verify`),
+`teardown`, `self_test`. Closed unavailable reasons: `platform`, `sandbox`, `userns_blocked`, `apparmor_userns`,
+`docker_no_sidecar`, `missing_libs`.
+
+- macOS: Seatbelt (`walls/obscura.sb`, hash pinned in code): exec of the engine only, no fork, read of the run dir
+  only, outbound TCP only to the egress port on localhost. `verify` is `sandbox_check`.
+- Linux: `walls/userns_boot.py` unshares USER|NS|NET|PID, maps only the app's uid, masks `/home /root /run /tmp
+  /var/tmp /dev/shm /mnt /media` and the data dir, binds the engine dir read-only and the run dir read-write,
+  mounts a fresh `/proc`, relays 127.0.0.1:3128 to the egress socket, sets NO_NEW_PRIVS and runs the engine.
+- Docker: the renderer sidecar (`render_agent.py`, compose profile `render`) runs `network_mode: none`, read-only,
+  `cap_drop: [ALL]`, no app data volume, sharing only a tmpfs volume with closed-key `job.json` and
+  `result.json` files read with `O_NOFOLLOW`. The agent re-hashes the engine per job and writes a `READY.json`
+  once per boot after proving it has no network. The launcher starts the `render` profile when the app reports
+  `renderer.wanted` and the sidecar is `missing` or `stale` (at most one start per 10 minutes).
+- NullWall: tests only, built only when `SMARTBRAIN_BROWSER_TEST_NULLWALL=1` and every executable in the engine
+  dir is the fake-engine fixture.
+
+**Runner** (`runner.py`, `proc.py`). `render(url, engine, site_policy, identity, timezone, timeout_s, want_assets)`
+returns a `RenderResult {ok, status, reason, html, final_url, assets, engine, version, identity, timings,
+census}`. Refusals are results. One render at a time (`_LIVE_RENDERS`, `busy` never a failure); a fresh 0700 run
+dir; the egress child; the wall; a watchdog (timeout plus a 5 s grace, tree RSS, any child process, `Wall.verify`);
+the whole process group killed and proven dead. Identity is `mimic` (one of 8 built-in profiles, pinned per card by
+sha256 of the card id), `rotate` or `honest`. Statuses and reasons: `refused`, `unavailable`, `busy`
+(`render_busy`), `confinement` (`child_spawned`, `wall_verify`, `no_main_connect`, `egress_census`), `oversize`
+(`rss`, `heap`, `html_cap`), `timeout`, `blocked`, `offsite`, `engine_error`, `ok`.
+
+**Router** (`router.py`). Tier 1 is the static page door (`pagegraph.fetch_page_graph`). A render runs only with
+`allow_render` and an escalating signal: `js_shell` (under 400 visible characters with no data-bearing layer and
+at least 3 scripts or a noscript notice), `blocked` (a plain 403) or `want_miss` (the static compile found
+nothing). A refusal outranks every other signal; a 429 or a challenge never renders (never retry a refusal, never
+solve a challenge). netguard names `FetchError(kind="challenge")` from a closed vendor header and marker table. A
+per-engine breaker opens after 3 consecutive `engine_error` or `timeout` for 10 minutes.
+
+**Eligibility.** `browsers.available(engine)` is the one answer every caller consults:
+`{eligible, engine, version, reason}`, eligible only after a self-test passed in this process under the wall in
+use. `browsers.prepare()` starts the install on first need, never at boot. `/api/status/overview.browsers[]`
+reports each engine; `.browsers_flow` reports `{rendered_cards, drafts, worker}`; `.renderer` reports `{wanted,
+sidecar}`.
+
+**The page browser in the card flow.**
+
+- **Static data layer first.** The extractor jail reads plain `<script type="application/json">` documents
+  (never evaluated) into `data` (at most 8 documents of 1 MB, 200 leaves each and 600 in all) and ARIA grids into
+  `tables`, with `signals {script_count, script_bytes, noscript_js}`. A `data_leaf` selector reads one leaf.
+- **One visit per build**, at creation or a Fix only. The rendered HTML goes through the same extractor jail.
+  Closed flow notes: `render_skipped:<reason>`, `render_failed:<reason>`.
+- **Sealing.** Only `ni_flow._page_source` writes `source: {type: "http_page", url, render: "browser", sites}`,
+  `sites` being the census's registrable domains with a tunnel, the URL's own first, at most 12
+  (`ni._validate_render_fields`). Spec keys `_render_ok` and `_feed_candidates` (at most 5 `{url, site}`). Packs
+  refuse them, export and install strip them, tools refuse them. Rendered cards have a 15-minute floor.
+- **Consent.** No render before the tap: the pick never renders, and the paste's consent text says the one visit
+  may also load the sites the page depends on. After the build: every site the page's own means the card
+  commissions under the tap (then waits for Keep); any other site means state `draft`, a note "waiting for your
+  OK to also load: ...", and a board `draft: {reason: "render_sites", sites}`. `POST /activate` (desktop-local,
+  audited) seals `_render_ok` and commissions (409 unless a draft waits for its sites); `/commission` refuses it.
+  `_render_ok` lasts only while the source is unchanged. The run allows only the sealed sites.
+- **The render worker.** The tick never renders. Rendered items have their own due window (`_MAX_RENDER_CANDIDATES
+  = 3`), at most one handoff per pass; one worker thread at a time calls `run_item`, whose fetch is
+  `router.render_sealed`. `CAPACITY_KINDS = {render_busy, render_unavailable}` are never failures. Other outcomes
+  are host-free classes: `render_refused`, `render_timeout`, `render_blocked`, `render_offsite`,
+  `render_confinement`, `render_oversize`, `render_engine`. A manual run on a busy engine is 409 `{code:
+  "render_busy"}`; an unavailable engine is a 200 `{status: "error", kind: "render_unavailable", code}`.
+- **Feed candidates** (creation only): the visit's `--dump assets` filtered to JSON-looking URLs on the sealed
+  sites, at most 5, shown on the held panel. `POST /switch-feed {url}` (desktop-local; 409 unless the url is a
+  sealed candidate) re-seeds the flow with that URL as a pasted link.
+- **Client.** Every field is optional (version-skew rule). The consent clause on the paste, the "Preparing the page
+  browser (NN%)..." stage line, the render-sites panel, the `page browser` chip, the feed offer, and the Status
+  card (`PageBrowserStatus`, from `browsers[]`) are all plain code-authored text; server strings shown are the
+  sealed sites and addresses, as text.
+- **Startup sweep.** At app start `browsers.proc.sweep_strays` SIGKILLs processes of this user whose executable
+  lies under the browsers dir.
+
+The SG gate (`tools/browsers-sg.py`, `.github/workflows/browsers-sg.yml`) runs the real engine under the real wall:
+probe, self-test, broken-config, canary rows (0 hits on every loopback, LAN and metadata target, with and without
+the proxy), no state, about:blank, kill rows, resource caps; the executed set must equal the mode's.
+
+## 36. Query layer
+
+An information ask becomes a closed Query IR over one declared Library answer (§32): `{answer, params, select,
+where: [{col, op, value}], time: {from, to} | null, order: [{col, dir}], limit, agg}`. Ops are `= != < <= > >= in
+contains names`. Time tokens: `now today tonight tomorrow yesterday weekend this_week next_week this_month
+next_days:N past_days:N next_hours:N past_hours:N dow:mon..sun date:YYYY-MM-DD month:YYYY-MM year:YYYY`. `agg` is
+`none | count`. Entry points: `plan_query(...) -> QueryPlan{ir, model_ir, coverage, interpretation, notes,
+model_meta}`, `apply_query(ir, payload, answer, now, zone, direction)`, `recognize`, `say`. The package is
+`ni_query/` (a package).
+
+- **Ownership.** The model (one local call) owns `answer`, `time`, `where`, `order`. Code owns `select`, `limit`,
+  `agg`; `params` stays `{}` (parameters belong to the resolver and the time binding). Recognizers validate the
+  model's clauses and are never substitutes.
+- **The call.** A system prompt with the closed grammar and a default object naming this call's answers; a user
+  message with the reference instant, examples retrieved from a pool, the ask, the answer menu and the parameter
+  menu. `llm.chat_json` validates against the IR schema and a structural check, with one retry whose message states
+  the violated rule and repeats a skeleton naming no answer.
+- **Recognizers.** `recognize` reads the ask with Microsoft Recognizers (DateTime, Number, NumberWithUnit,
+  Ordinal; en-us) and dates US holidays, into `{time, numbers, ordinals, comparators}`. An explicit time phrase
+  decides `time`; a counted range the model read stands against a calendar reading of a relative phrase. A
+  numeric `where` survives only with a number the ask states. A `where` value must be a run of whole ask words,
+  not a parameter-consumed entity and not a word of the source's own name. A non-axis `order` survives only for
+  kind `ranking`.
+- **Code-owned clauses.** `select` is the quantity cells (at most 4); `limit` and `agg` come from the ask's kind
+  and words (a count is the IR's `agg`, not a declared count answer).
+- **Rules floor.** With the model off, unavailable or invalid after the retry, the floor chooses among the
+  answers the ask's words and kind fit, window-aware, and the interpretation says so.
+- **Coverage and notes.** `coverage[clause]` is `bound | unbound | approximated | rules | recognizer`.
+  `say(ir, answers)` renders the interpretation line by code ("<answer label> [(<selected>)] ... "), sealed as
+  `spec.interpretation`; `spec.query = {ir, coverage, notes, model: {attempts, used_fewshot}}`.
+- **Execution.** `apply_query` is pure Python over the sample: filters, time cut by the answer's axis and the
+  direction (`_rows_direction`: a row time after now reads forward), order, limit, count. The engine grammar
+  gains the matching `where` ops (`contains`, `in`) and the clock rebinding of start, since, begin and date
+  parameters to the stretch's first day (`_clock_rebind`).
+- **Honesty surface.** `_verify_frame` keeps its wants check; a primary asked quantity that is unbound is
+  disclosed. The board row carries `interpretation` (only when the spec has one) and `query.coverage` (never the
+  whole query); the C2 panel shows "Reads as ..." and a muted chip per `approximated` or `unbound` clause (named
+  through `CLAUSE_WORDS`), and the card footer shows the line first.
+- **Transport.** `run_flow`'s model is a `FlowModel(prompt, chat)`: the prompt stages (intent, mapping) use
+  `prompt`; the message-shaped stages (query, form presentation) use `chat`. The consent gate applies to both.
+- **Code tables.** A `where` value on a text cell with a `codes` table is grounded in the table's values
+  (`LibraryIndex.code_values`, at most 1,000); a pack that predates tables reads as empty.
+
+## 37. Brief cards
 
 An ask for "the latest news on X" or "a brief on Y" (question kinds `latest_items`, `text_brief`) lands as a
-**brief card**: a list of the source's own headlines, written by code, never by a model. `ni_brief.py` owns it.
+brief card: a list of the source's own headlines, written by code, never a model. `ni_brief.py` owns it.
 
-**Headlines.** `ni_brief.layout_of(parsed)` looks (breadth first, three levels deep, at most 200 containers) for the
-list of objects that reads as headlines: a title key (`title`, `headline`, `name`, ...) plus a link key (https only)
-or a time key. The key tables are generic; no site, feed or ask is named. A bare list is wrapped as
-`{"items": list}`. `pipeline_for` seals the stages: `extract rows <path>[0:24]`, `where title ne ""`, `reverse`
-only for an oldest-first source, `top_n 8`, `time` (with `lenient: true`, so one junk date leaves that row without a
-time instead of failing the run) and `pick` of the title, link and time. `form_node` lays out a `ranked_list` form
-(numbered titles, a time and source host line from the link, the link in the hit map) through
-`ni_forms.form_scene.design_record(prefer_form=, prefer_spans=)`, which skips the presentation model. A source with
-no such list builds nothing and the caller builds what it would have. The same function serves three doors:
-the auto-pick / mapping flow (`ni_flow._try_brief_build`, sealed `_built_from.path` `auto` or `mapping`, held for Keep),
-and the researcher (`ni_research.tools.brief_spec` replaces the draft's pipeline, scene and display and keeps its
-source). A Library row that declares its answers keeps them, unless the sample is an RSS / Atom feed.
+**Headlines.** `layout_of(parsed)` looks (breadth first, three levels deep, at most 200 containers) for the list
+of objects with a title key (`title`, `headline`, `name`...) plus a link key (https only) or a time key. The key
+tables are generic; no site, feed or ask is named. `pipeline_for` seals `extract rows <path>[0:24]`, `where title
+ne ""`, `reverse` for an oldest-first source, `top_n 8`, a lenient `time` and `pick` of title, link and time.
+`form_node` lays out a `ranked_list` form through `design_record(prefer_form=, prefer_spans=)`, skipping the
+presentation model. A source with no such list builds nothing and the caller builds what it would have. The same
+function serves the auto-pick or mapping flow (`_try_brief_build`, held for Keep) and the researcher
+(`brief_spec`). A Library row that declares its answers keeps them unless the sample is an RSS or Atom feed.
 
-**The sealed `brief` key.** Closed shape `{summary: bool}`; absent on every other card. Off: no `llm` stage and
-`model` null. On: exactly one `llm` stage whose only output is the string `brief_summary`, `optional: true`,
-`max_chars <= 600`, and `spec.model` names a model. A researcher draft may carry neither an `llm` stage nor a brief
-with the summary on (`ni_recipe.check_researcher_draft`, `validate_spec(researcher=True)`). Export and template
-install strip `brief` (`ni_routes._EXPORT_STRIP_KEYS`, `ni_library`); an export of a card with the summary on first
-drops the summary (`ni_brief.without_summary`).
+**The sealed `brief` key.** Closed `{summary: bool}`; absent elsewhere. Off: no `llm` stage and `model` null. On:
+exactly one `llm` stage whose only output is the string `brief_summary`, `optional: true`, `max_chars <= 600`,
+and `spec.model` names a model. A researcher draft may carry neither an `llm` stage nor a summary. Export and
+template install strip `brief`.
 
-**Grammar additions.** `llm` stage: `optional` (only `true`; string outputs only; any soft failure of the stage,
-meaning no local model, a busy slot, an error or a bad reply, yields empty outputs and the run continues; an optional
-stage waits at most `_OPTIONAL_LLM_ACQUIRE_S` (1 s) for the local-model slot, `gateway.chat(acquire_timeout=)` raises
-`LocalBusy`, and `_make_llm_call` maps it to a soft `llm_error`, so the headlines never queue behind a chat) and
-`max_chars` (int 1..2000; the string outputs are clipped). `time` transform: `lenient` (bool, needs `key`, refused with `unless`).
-`run_item` tolerates the `llm_requires_local` / `llm_unrouted` refusal of `_make_llm_call` when every llm stage is
-optional, leaving the call unset, so a non-local model is never constructed or called (§13 is unchanged).
+**The opt-in.** `POST /api/ni/items/{id}/brief-summary {on}` (desktop-local): 404 missing; 409 not a brief; 409
+not kept (not live, degraded, failing or paused, or held for Keep); 409 with a plain reason when no local model
+exists. On seals `local/auto` in `spec.model` and adds the stage (a non-local model is never resolved); off
+removes both (`update_spec(origin="user")`, journaled, audited `ni_brief_summary_set`). The summary is written by
+the next refresh. Headlines refresh every time, with the summary on or off. A re-research proposal carries the
+summary only to another brief.
 
-**The opt-in.** `POST /api/ni/items/{id}/brief-summary {on}` (Desktop-local): 404 missing; 409 not a brief; 409 not
-kept (state not live / degraded / failing / paused, or held for Keep); 409 with a plain reason when no local model
-exists (`BRIEF_NO_LOCAL`); on requires a local model on the ni / chat / agent routes, seals the sentinel `local/auto` in `spec.model` and
-adds the stage (`_make_llm_call` resolves the first local model on those routes each time the card runs, so
-switching local servers keeps the summary working, and never resolves a non-local one), off removes both (`store.update_spec(origin="user")`, journal line, audit `ni_brief_summary_set`). The summary
-is written by the next refresh (the web triggers one run). The §13 monitor hash in `llm_state` records the `spec_rev`
-it was written at and the skip needs it to match, so turning the summary on, off and on again runs the model each
-time it is on even over unchanged bytes (an `llm_state` row without `spec_rev` runs once, then records it). Applying
-a re-research proposal to a card with the summary on carries the summary stage and `brief.summary` to the
-replacement only when the replacement is also a brief (`ni_brief.carry_summary`). Headlines refresh every time, with the summary on or off.
+**Board row.** `brief: {summary, local, state: off|pending|ready|unavailable, label, text}`; `label` is "Summary
+written by your local model", `text` at most 600 characters and read from stored outputs only when the summary is
+on. The text is drawn by the web component under the label, never inside the form scene.
 
-**Board row.** A brief card's row carries `brief: {summary, local, state, label, text}` (`state` is `off`, `pending`,
-`ready` or `unavailable`; `label` is "Summary written by your local model"; `text` is at most 600 characters and only
-read from the stored outputs when the summary is on). The text is drawn only by the web component, under the label;
-it is never part of the form scene, so a model's words never sit in the headline list.
+## 38. Compare cards
 
-**Client.** `BriefSummary.svelte` owns the toggle (its busy and refusal state are its own) and sits at the top of the
-card's `below` slot; CardShell takes a `roomy` prop so a brief keeps the bare-form chrome off. The painter is unchanged.
+An ask that compares two to four named things (question kind `compare`) lands on a card showing every one of them
+with its own number, or ends in "can't compare these yet" and why. Never a one-thing card. `ni_compare.py` owns
+the card and the check; `ni_compare_flow.py` is the flow glue.
 
-## 38. Compare cards (plan S7)
+**A fan-out source, reduced at fetch time.** One `http_json` source carries a sealed `compare = {entities: [{name,
+url, path}]}`. A run fetches every address through `ni_fetch.fetch_parsed` (politeness, port policy and robots
+apply to each request) and reduces each response to one row `{name, value}` with `ni_compare.number_at`. The
+unchanged pipeline and the `compare` form take it from there.
 
-An ask that compares two to four named things (question kind `compare`, `compare_count >= 2`; "compare Nvidia and
-AMD stock prices", "weather in Denver vs Salt Lake City") lands on a card that shows every one of them with its own
-number, or ends in "can't compare these yet" and why. Never a one-thing card. `ni_compare.py` owns the card and the
-check; `ni_compare_flow.py` is the v2 glue.
+**The sealed key.** Closed to `{entities}`: 2..4 items, each exactly `{name, url, path}`. Names are printable,
+1..80 characters and distinct. Addresses are literal, pass the `http_json` URL shape check and share one scheme,
+host and port. Things are told apart by their `(address, path)` pair; two things with the same pair are refused.
+`source.url` equals the first address; no headers, `secret_query` or `contact_ua`. Paths pass `ni.parse_path`.
+Export and install refuse a compare card.
 
-**Design: a fan-out source, reduced at fetch time.** Not card chaining (one card per thing, joined later: the joined
-card would depend on cards the user can delete or pause) and not a new pipeline op. One `http_json` source carries a
-sealed `compare` block, `{entities: [{name, url, path}]}`. A run fetches every address through `ni_fetch.fetch_parsed`
-(so `ni_polite`'s per-host budget, the port policy and, for a source found outside the Library, robots.txt apply to
-each request) and reduces each response to one row, `{name, value}`, with `ni_compare.number_at(response, path)`. The
-unchanged pipeline grammar and the existing `compare` form (§34) take the rows from there: `extract rows`, then
-`number` on `value`. The painter is unchanged.
+**Labels come from the question.** `ni_compare.asked(request)` takes the things from the ask in the user's casing
+(a temporal pair is not a compare). Row names, the title and the form labels are those words; a model only says
+which asked thing an address is for. The value label is the Library answer's declared label, or the closed
+measure the ask names, or "Value".
 
-**The sealed `compare` key.** Closed to `{entities}`: 2..4 items, each exactly `{name, url, path}`. Names are printable,
-1..80 characters and distinct; addresses are literal (no `{{...}}`), pass the `http_json` URL shape check and share one
-scheme, host and port; things are told apart by their `(address, path)` pair, so one address may serve several things at
-different paths (a response holding every rate: `rates.EUR`, `rates.GBP`) and a run fetches each distinct address once,
-while two things with the same address AND path are refused; `source.url` equals the first address; no headers, `secret_query` or `contact_ua`
-(a compare reads keyless addresses). Paths pass `ni.parse_path`. Export and template install refuse a compare card
-(`ni_routes._sanitize_spec_for_export`, `ni_library._TEMPLATE_STRIP_SOURCE_KEYS`): its addresses name the user's
-choices of things.
+**The check.** `ni_compare.shown / reasons / refusal`: an asked thing counts as shown when a row names it in a
+text cell and has a number of its own, or when one row names every asked thing and has a number. A title naming a
+thing does not count. `refusal(spec, outputs)` returns "can't compare these yet: it shows N of M compared (X
+missing)" or the more-than-four reason. It runs on every build path (`ni_flow._finalize` and
+`ni_research_flow._can_land`), and `ni_compare.drift` re-runs it on every refresh for a card whose source is a
+compare (`constraint_drift`, §23.1).
 
-**Labels come from the question.** `ni_compare.asked(request)` takes the things from the ask
-(`ni_verify.constraints.parse_entities`, in the user's casing); a temporal pair ("now versus a year ago") is not a
-compare. The row names, the title and the form's labels are those words. A model only says which asked thing an
-address is for (`propose_compare`); nothing a source or a model returns becomes a label. The value label is the
-Library answer's own declared label on the Library path; on the researcher's path it is the closed measure the ask
-names ("humidity", "wind"; `ni_compare.measure_label`) or "Value". The `metric` the model passes to `propose_compare`
-is not used for any label.
+**Statuses.** `compare_partial` (an `NIError` kind): an address failed or had no number; the run fails naming the
+things and `last_good` keeps showing. It maps to `source_dead` in `ni_refresh` and is not L2-eligible. A busy
+host defers the whole run.
 
-**The check.** `ni_compare.shown / reasons / refusal` (the `compare` verification class, run by
-`ni_research.tools._checks`): an asked thing counts as shown when a row names it in a text cell and has a number of its
-own, or when one row names every asked thing and has a number (a head-to-head). A title naming a thing does not count.
-`refusal(spec, outputs)` parses the things from `spec["goal"]` and returns "can't compare these yet: it shows N of M
-compared (X missing)", or the more-than-four reason. It runs on every build path: `ni_flow._finalize` (the single
-choke point for auto-pick and mapping) and `ni_research_flow._can_land` (the researcher's accept callback). The S9
-refresh re-check (`ni._constraint_drift`, which `ni_refresh` shares) runs `ni_compare.drift` only when the card's source is a compare (`is_compare`); a legacy one-thing card whose goal
-compares is not re-checked): the fresh outputs must still show every sealed name and every thing the goal names; a miss
-is `constraint_drift` with a `compare: ...` line.
+**The auto-pick.** `try_compare` runs first. For each thing it asks the Library about that thing alone, keeps rows
+that need no key, email, lookup or clock parameter, and looks for one source with one row per thing and a declared
+plain number answer for the asked metric; it fetches each address through the flow's fetcher, needs one unit
+across the things, and seals with `_finalize` (held for Keep, `_built_from.path` `auto`). Each source's whole
+attempt is one error boundary. No source builds it: the researcher gets the ask; else the declined card.
 
-**Statuses.** `compare_partial` (an `NIError` kind): one or more addresses failed or had no number. The run fails
-loudly, naming the things; `last_good` keeps showing; copy "one of the compared things couldn't be read; the last good
-comparison is still shown". `ni_refresh.reason_of` maps it to `source_dead`; `_l2_eligible` excludes it. A busy host
-(a capacity kind) still defers the whole run, never a partial.
+**Researcher.** The terminal tool `propose_compare({metric, unit, things: [{name, url, path}]})`: every asked thing
+exactly once, every address a handed-over address with a fetched sample found by a search whose query named that
+thing and no other asked thing, numbers read by code from the stored samples. `propose_card` for a compare ask is
+refused. The closed-world local tier declines a question with two or more entities. A compare reads the current
+value only.
 
-**v2 auto-pick.** `ni_flow._auto_pick` calls `ni_compare_flow.try_compare` first. For each thing it asks the Library
-about that thing alone (`ni_compare.entity_ask` rewrites the ask), keeps rows that need no key, contact email, helper
-lookup or clock parameter, and looks for a source with exactly one row per thing and a declared plain number answer
-for the asked metric (`metric_for`: a measure the source does not report skips it; a non-current window declines). It
-fetches each row's address through the flow's fetcher, reads the answer's path filled with that row's parameters,
-needs one unit across the things (a source serving every thing from one address is fetched once and read at each
-thing's path), and seals with `ni_flow._finalize` (held for Keep, `_built_from.path` `auto`). No
-source builds it (each source's whole attempt, seal included, is one error boundary: any refusal ends that source as a
-reason and the next runs; never a `failed` item): the researcher gets the ask (`ni_research_flow.fallback`); else `decline` ends the item as
-`unsupported` with the reasons. The mapping re-run (`_run_remap`) is refused for a compare card.
+## 39. The declined card
 
-**Researcher.** New terminal tool `propose_compare({metric, unit, things: [{name, url, path}]})` (the grammar's `Tool`
-enum gains `propose_compare`). Every asked thing is proposed exactly once; every address passes the same provenance
-rule as `fetch_sample` (exact handed-over addresses, never composed), has a fetched sample, and was found by a search
-whose query named that thing and no other asked thing (`ResearchCtx.urls[...]["queries"]`, at most four per address);
-numbers are read by code from the stored samples; the card is sealed by the same `ni_compare.build` and checks as the
-other paths. `propose_card` for a compare ask is refused by the gate above. The closed-world local tier declines a
-question with two or more entities. The prompt gains rule 9.
+A decline is an ask the system cannot answer reliably. It ends as one terminal flow state, `declined`, carrying a
+closed `reason`, one plain line and up to three links, sealed as `_decline_card {reason, line, links}` and repeated
+on the flow field as `decline {reason, headline, line, links}`.
 
-**Known limits.** A compare reads the current value only. Four web-found things can exceed the three-search budget. The
-auto-pick skips Library rows that need a key, a lookup or a clock parameter.
+**One table.** `ni_master.ENDINGS` maps every ending that is not a card to `(flow state, decline code | None)`;
+`ni_flow._end(store, item_id, ending, reason, links=None)` is the only writer of a decline. An ending declines
+when nothing the user can do on this card would change the answer; it keeps its own state when the user can still
+act.
 
-## 39. The declined card (plan G6, P6, 6.1, 6.2)
-
-"A decline is acceptable, a wrong card is the failure." An ask the system cannot answer reliably ends in ONE
-terminal flow state, `declined` (v2 only; `ni_flow` v1 keeps `unsupported`). The record carries the verdict in a
-sealed `_decline_card`, `{reason, line, links}`; the card renders it, and the flow field repeats it as `decline`.
-
-**The rule is one table.** `ni_master.ENDINGS` maps every v2 ending that is not a card to `(flow state, decline
-code or None)`; `ni_flow._end(store, item_id, ending, reason, links=None)` is the only writer of a decline. A
-caller names the ending and never picks the state or the code: `_end` reads both from the table, and it asserts the
-named row declines. The five rows that stay (`pick_has_untried_row`, `needs_key_or_email`, `model_consent_question`,
-`date_question`, `fault`) are named by the table but not enforced by `_end`: the drivers in
-`tests/test_ni_declined.py` hold them (one per row, each checked to land in the state the table names). An ending
-declines when nothing the user can do on this card would change the answer; it keeps its own state when the user
-can still act.
-
-| ending (`ENDINGS` key) | lands in | code |
+| ending | lands in | code |
 |---|---|---|
-| `research_declined_checks` (the verifier refused the card twice, or the local model could not pass the checks) | `declined` | `verify_refused` |
-| `research_declined_budget` (budget or steps spent, or the model stopped without proposing a card) | `declined` | `research_gave_up` |
+| `research_declined_checks` (the verifier refused the card twice) | `declined` | `verify_refused` |
+| `research_declined_budget` (budget or steps spent, or the model stopped without a card) | `declined` | `research_gave_up` |
 | `research_declined_no_source` (the closed-world tier found no Library source) | `declined` | `no_answering_source` |
-| `no_source_research_off` (no Library source declares an answer; research off, unconsented or with no model route) | `declined` | `no_answering_source` |
-| `no_source_rows_exhausted` (every row the auto-pick tried failed or did not fit, research gave nothing) | `declined` | `no_answering_source` |
-| `compare_unbuildable` (no source reads the things side by side, more than four, or research declined a compare) | `declined` | `compare_unbuildable` |
-| `compare_refused_at_build` (a card that shows fewer things than were asked, on any build path) | `declined` | `compare_unbuildable` |
-| `source_cant_answer` (the one source the user pasted, tapped or Fix re-reads does not answer this ask) | `declined` | `source_cant_answer` |
-| `ask_unsupported` (the kind of ask is not built, e.g. the computed source is off) | `declined` | `ask_unsupported` |
-| `pick_has_untried_row` (the pick still offers a Library source that declares its answers) | `source` + pick marker | none |
-| `needs_key_or_email` (the picked source's key or contact email) | `awaiting_access` | none |
-| `model_consent_question` (build with a model outside this computer?) | `unsupported` + question | none |
-| `date_question` ("when is it?") | `unsupported` + question | none |
-| `fault` (fetch, mapping, assembly, or the researcher failing to run: a retry runs it again) | `failed` | none |
+| `no_source_research_off` (no Library source declares an answer; research off, unconsented or no route) | `declined` | `no_answering_source` |
+| `no_source_rows_exhausted` (every row tried failed or did not fit; research gave nothing) | `declined` | `no_answering_source` |
+| `compare_unbuildable` (no source reads the things side by side, or more than four) | `declined` | `compare_unbuildable` |
+| `compare_refused_at_build` (a card showing fewer things than were asked) | `declined` | `compare_unbuildable` |
+| `source_cant_answer` (the one source the user pasted or Fix re-reads does not answer) | `declined` | `source_cant_answer` |
+| `ask_unsupported` (this kind of ask is not built) | `declined` | `ask_unsupported` |
+| `pick_has_untried_row` (the pick still offers a buildable row) | `source` + pick marker | none |
+| `needs_key_or_email` | `awaiting_access` | none |
+| `model_consent_question` | `unsupported` + question | none |
+| `date_question` | `unsupported` + question | none |
+| `fault` (fetch, mapping, assembly, or the researcher failing to run) | `failed` | none |
 
-**A research fault is not a verdict.** `loop.Outcome.status` is `proposed`, `declined` (a verdict: budget spent, the
-model stopped without proposing, the checks failed twice, no source) or `fault`. A run that could not finish (the
-model route raised, a reply or a tool raised inside `_bounded`, on the cloud and the local tier alike) ends `fault`
-through `loop._fault`, never `_decline`. `ni_research_flow.fallback` maps a fault to `ni_flow._fail(..., "research",
-...)` (state `failed`, Retry), so every caller (the v2 auto-pick, `_auto_continue`, the compare flow) gets the failed
-card and none a declined one. Re-research (`reresearch`) records a fault as `repair_research_fault`: not a decline,
-so no back-off streak; the attempt marker still holds the day's wait. The eval reads the failed state as `error`,
-so an outage cannot earn the decline credit.
+**A research fault is not a verdict.** `loop.Outcome.status` is `proposed`, `declined` or `fault`. A run that could
+not finish (the model route raised, a reply or tool raised) ends `fault` and becomes the failed card with Retry,
+never a decline; the eval reads it as `error`, so an outage cannot earn the decline credit. Re-research records a
+fault as `repair_research_fault` (no back-off streak).
 
-A built card that waits for a key or a value (`awaiting_credential`, `awaiting_params`) is a draft with its own
-gate, not an ending. `tests/test_ni_declined.py` drives every row through the real flow.
+**Codes.** `ni_master.DECLINE_REASONS`: `no_answering_source`, `research_gave_up`, `verify_refused`,
+`compare_unbuildable`, `source_cant_answer`, `ask_unsupported`. `DECLINE_LINES` holds a default line per code (a
+caller may pass a more specific one, cut to 200 characters); `DECLINE_HEADLINE` is "I couldn't build a reliable
+card for this". The record's `error` is `"<code>: <line>"`. The line is built only from code copy, the intent's
+`place` and `wants`, and Library-declared labels; a link title is the only fetched string, shown as text in a link
+list.
 
-**Codes.** `ni_master.DECLINE_REASONS` (closed): `no_answering_source`, `research_gave_up`, `verify_refused`,
-`compare_unbuildable`, `source_cant_answer`, `ask_unsupported`. `DECLINE_LINES` holds one default plain line per
-code; a caller may pass a more specific one (a compare names the thing it could not read), cut to 200 characters.
-`DECLINE_HEADLINE` is "I couldn't build a reliable card for this". The record's `error` is `"<code>: <line>"`, so
-`ni_master.error_class_of` reads the code.
-
-**Links.** At most `DECLINE_LINKS` (3), `{title, url, host}`, https only, one per address (`ni_master.clean_links`
-is the only filter; anything else is dropped, never shown). They come from what the run saw: the researcher's
-Library and search results (`Outcome.links`; a Library row's page when it has one), or the pick's link rows (a
-Library source without declared answers: its page; the web pages a search found). The card lists them read-only;
-none builds a card.
-
-**What the line can carry.** The decline line is built only from code copy, the intent's `place` and `wants` as the
-intent model read the ask, and Library-declared labels. It carries no fetched text: the researcher passes no line
-(the default only), and a link title is the only fetched string, shown as text in a link list, never in the line.
-
-**Wire shape.** The flow field of a declined card is `{state: "declined", error, reason (= the line), decline:
-{reason, headline, line, links}, reopen: ["retry", "pick_source"], actions}`. `FlowDecline`, `DeclineLink` and
-`DeclineReason` are in the generated schema (the code list is `ni_master.DECLINE_REASONS`, read by
-`tools/gen-ni-schema.py`; an inline literal is refused). `ni_master.TERMINAL_STATES` is `failed`, `unsupported`,
-`declined`; the no-dead-end law (§ G1) covers all three: `terminal_surface` always returns a non-empty `reason` and a
-question or a reopen, and `ni_watch` audits declined records like the others (a decline is a verdict, so it is not
-clustered as a failure class).
+**Links.** At most 3 `{title, url, host}`, https only, one per address (`ni_master.clean_links` is the only
+filter). They come from what the run saw (the researcher's Library and search results; the pick's link rows). The
+card lists them read-only; none builds a card.
 
 **Never refreshes, never fetches.** A declined card is a shell (draft, not enabled): `due_items` does not list it,
-the tick reads nothing for it, `/run` and `/commission` refuse it (409), and the stranded-flow sweep skips a
-terminal record. A finished card whose Fix ended declined keeps rendering its working payload (the terminal record is
-hidden, as for `failed`).
+`/run` and `/commission` refuse it, and the sweep skips a terminal record. A finished card whose Fix ended
+declined keeps rendering its working payload (the terminal record is hidden).
 
-**Reopen.** A shell: `POST /flow/retry` re-runs the sealed request; `POST /flow/reopen` re-enters the source pick
-(the card then lists the Library's pages and the paste-a-link field). Both drop the seal (`_transition` clears
-`_decline_card` on any other state). A finished card: Fix or Refine, as for any card. Actions on the flow field:
-a shell `["retry", "delete"]`, a finished card `["retry", "fix", "refine", "delete"]`.
+**Wire shape.** `{state: "declined", error, reason (= the line), decline, reopen, actions}`. `FlowDecline`,
+`DeclineLink` and `DeclineReason` are in the generated schema (`app/smartbrain_3000/ni_schema.json`, produced by
+`tools/gen-ni-schema.py`; `--check` fails when it is stale). Actions: a shell `["retry", "delete"]`, a finished
+card `["retry", "fix", "refine", "delete"]`. The client (`DeclinedCard.svelte`) shows the headline, the line, the
+https links (at most three) and the buttons the page declares; the page owns the requests.
 
-**Client.** `DeclinedCard.svelte` shows the headline, the line, the https links (client guard: `declinedLinks`, at
-most three) and the reopen buttons the page declares; the page owns the requests. Terminal states are
-`TERMINAL_FLOW_STATES` in `lib/ni/flow.ts`.
+## 40. Page tables
 
-## 40. Page tables (the `table` source format)
+Research may read data from an ordinary web page's `<table>` grids, never from its prose. The mechanism is
+general; nothing in it names a site or an ask. Every build runs the verifier checks, a web card is always held for
+Keep, and it carries the quality tier `page_reading`.
 
-Decision (T, 2026-10-22): research may read data from an ordinary web page's **`<table>` grids**, never from its
-prose. It reverses the 2026-10-05 "pages are links only" ruling, which followed 9 wrong page readings in 15. The
-safeguards: every build runs the verifier checks, a web card is always held for the user's Keep, and the card is
-labelled quality tier `page_reading`. The mechanism is general (any page with a data table); nothing in it names a
-site or an ask.
-
-**Source.** `{"type": "http_json", "url": "https://...", "format": "table", "table": {"headers": [...], "context": "..."}}`
-(`ni._validate_table_source`). `format: "table"` is an `http_json` format beside csv/feed/xml/text but is not in
-`_HTTP_JSON_FORMATS` (no Library row or flow pick carries it). The URL is https; the source has no headers, key,
-contact email or compare. `table` is the **locator** (`ni_table.validate_locator`): the table's normalised header
-names (2..12, lower-cased, whitespace collapsed, at most 60 characters each; an unnamed column is left out) and,
-when the table has one, the caption or the heading it sits under (`context`, at most 80). `ni._validate_table_owner`:
-only a spec whose `recipe.tier` is `page_reading` carries it (a researcher draft has no recipe yet), so a template,
-an import or a hand-written spec cannot.
+**Source.** `{"type": "http_json", "url": "https://...", "format": "table", "table": {"headers": [...],
+"context": "..."}}` (`ni._validate_table_source`). The URL is https; no headers, key, email or compare. `table` is
+the locator (`ni_table.validate_locator`): the table's normalised header names (2..12, lower-cased, whitespace
+collapsed, at most 60 characters each) and, when it has one, the caption or heading it sits under (`context`, at
+most 80). Only a spec whose `recipe.tier` is `page_reading` carries it (`ni._validate_table_owner`).
 
 **One decode rule.** A page is decoded once, by the jail, from its raw bytes (BOM, then `<meta charset>`, then the
-HTTP header charset, `netguard.declared_charset`). Research (the sniff path: `netguard.safe_fetch_text` returns `content`
-beside `text`, `ni_fetch.HtmlPage` carries the bytes and the content type, `tools._fetch_and_digest` hands them to
-`page_tables`) and refresh (`fetch_page_tables`) therefore read the same text, so a sealed locator matches on refresh. The
-decoded `text` of the sniff is for sniffing only. An eval cassette records text without bytes; its replay reads the text
-as UTF-8.
+HTTP header charset), so research and refresh read the same text.
 
-**Reading a page.** `ni_fetch.fetch_page_tables` fetches the page once (`netguard.safe_fetch_page`, the one polite
-path: per-host budget, robots.txt, port policy, no redirect) and reads it in the jail (`jail_extract`; HTML never parses
-in-process). The jail's `tables` layer now also carries each table's `<caption>` text and the `heading` (latest h1-h3)
-it sits under; a cell inside a hidden element is not a cell value, and a row opened while hidden adds no row. `ni_table.read` turns a jail table into a data table
-(at least two named columns and one data row; a grid with no `<th>` row promotes its first row to the header when every
-cell of it is a distinct label and two rows of data follow; rows padded or cut to the header width), `ni_table.payload`
-into rows shaped like a CSV: `{"columns": [...keys], "rows": [{key: cell}]}` in the page's order (no re-sorting), keys
-slugged from the header by the CSV rule, a collision suffixed in column order. Cells are strings; the pipeline's `number`
-transform coerces them.
+**Reading a page.** `ni_fetch.fetch_page_tables` fetches once through `netguard.safe_fetch_page` (per-host
+budget, robots.txt, port policy, no redirect) and reads it in the jail: at most 8 tables x 500 rows x 12 columns x
+120 characters, each with its caption and the latest h1-h3 heading, hidden cells excluded. `ni_table.read` turns a
+grid into a data table (at least two named columns and one data row; a grid with no `<th>` row promotes its first
+row only when every cell is a distinct label and two data rows follow), and `ni_table.payload` into CSV-shaped
+`{"columns", "rows"}` in page order.
 
-**Finding the table again.** `ni_table.locate(tables, locator)`: exact header match first, else a table that still holds
-every sealed header in order (a column added later is fine; reorder-safe because keys are names). With several
-candidates the sealed `context` must single one out. None, or several it cannot tell apart, is `TableGone`
-(`table_gone` / `table_ambiguous`); position alone is never a name. `ni._fetch_http_table` maps it to
-`NIError("fetch_failed", "table_gone" | "table_ambiguous")`: the card keeps its last good value, the failure streak runs,
-and `ni_refresh` treats it as `source_dead` (the `page_reading` tier asks for a re-research once the card is failing; a
-re-research reads the Library only). A robots refusal is `fetch_failed: robots_disallowed`; a redirect is refused.
+**Finding the table again.** `ni_table.locate(tables, locator)`: an exact header match first, else a table that
+still holds every sealed header in order. Several candidates must be told apart by the sealed `context`. None, or
+several it cannot tell apart, is `TableGone` (`table_gone`, `table_ambiguous`): position alone is never a name, and
+a different table is never picked. `ni._fetch_http_table` maps it to `fetch_failed`: the card keeps its last good
+value, the streak runs, and `ni_refresh` treats it as `source_dead`. A robots refusal is `fetch_failed:
+robots_disallowed`.
 
-**Researcher.** `fetch_sample` on an HTML body (a search result sniffed as a page, or a Library row whose format is
-`html`) returns a fenced digest (`ni_research.digest.table_digest`): at most four tables (the largest, in page order) with
-`table` (index), `about` (caption or heading), `columns` (the pipeline keys), `rows` and three sample rows of at most 40
-characters a cell, plus feed links and JSON-LD types the page announces (named, not fetchable: only a search result or a
-Library row is a legal address). The whole digest is under 3,200 characters (`MAX_TABLE_DIGEST_CHARS`; about 800
-tokens at worst). A page without a data table is `not_data`; page text is never echoed, with one exception: the one
-non-table string a page reading uses is the table's caption or, with none, the nearest heading above it (at most 80
-characters, cleaned and fenced). It is sealed as the locator's `context` and shown as `about`, as a name for the table
-and a tie-break between twins, never as a value. A heading is page text outside the table; that is the whole of it. Every string passes
-`clean_text`; the fence cannot be forged. The sample is `{format: "table", parsed: {tables}, graph}`; the graph (the page
-as `pagegraph` reads it) is kept in memory for the verifier alone. A draft names the table `source.table = {"index": N}`;
-`tools._seal_table` replaces it with the locator and `tools.spec_input` finds the table with `ni_table.locate`, exactly as a
-refresh will, so a table the page cannot single out fails at research time too. `_checks` gains one check, `subject`, from
-`page_verify.verify_page_reading` (compiled tier: every value must be on the page; right-now asks need a freshness signal,
-`ResearchCtx.window`); a checker error is a failed check. This page gate runs at Keep (build time) only: `subject` is not
-in `ni_refresh.RECHECKED` and refresh has no page graph, so a refresh re-runs the constraint checks but not the
-freshness signal. "Checked against the page" means as it was at Keep. `propose_card` stamps `tier: page_reading` and the source kind
-`page`; `propose_compare` refuses a page table. The prompt prefix and the `fetch_sample` description changed (rule 3, rule
-4, the source grammar), so `PINNED_PREFIX_SHA256` and `PINNED_SCHEMA_SHA256` were re-pinned.
+**Researcher.** `fetch_sample` on an HTML body returns a fenced digest (`ni_research.digest.table_digest`): at most
+four tables with `table` (index), `about`, `columns`, `rows` and three sample rows of at most 40 characters a cell,
+plus feed links and JSON-LD types the page announces. The whole digest is under 3,200 characters. A page without a
+data table is `not_data`. The one non-table page string used is the table's caption or nearest heading (at most 80
+characters, cleaned and fenced), sealed as `context` as a name and a tie-break, never as a value. A draft names
+`source.table = {"index": N}`; `tools._seal_table` replaces it with the locator. `_checks` gains `subject` from
+`page_verify.verify_page_reading` (every value must be on the page; right-now asks need a freshness signal); this
+gate runs at Keep only, and a refresh re-runs the constraint checks but not the freshness signal. `propose_card`
+stamps `tier: page_reading`; `propose_compare` refuses a page table.
 
-**Held for Keep.** The landed card's `_built_from.path` is `research`, an open path: `awaits_yes` holds it in
-`commissioning`, `due_items` does not list it and nothing recurs before Keep. The awaiting block's `from` is `page` for a
-`page_reading` card (`ni_routes._awaiting_yes_of`).
+**Held for Keep.** The landed card's `_built_from.path` is `research`; `awaits_yes` holds it, `due_items` does not
+list it, and the awaiting block's `from` is `page`.
 
-**Bounds.** Everything over fetched bytes is capped before it is scanned: the jail keeps 8 tables x 500 rows x 12 columns
-x 120 characters; `ni_table` cuts every cell at 200 and every header at 60 before splitting, uses no regex, and
-`tests/test_ni_regex_budget.py` sweeps `ni_table`, `page_verify` and the table digest on hostile shapes.
-
-**Eval.** CI10 (`tests/ni_eval/cassettes/ci/CI10.json`, hand-built, tuning set) is a page-table ask: library_search,
-web_search, fetch_sample (the page arrives through the recorded text fetch), try_recipe, propose_card; it lands
-`page_reading`, held for Keep, `from.kind` `page`.
+**Bounds.** Everything over fetched bytes is capped before it is scanned: `ni_table` cuts every cell at 200 and every
+header at 60, uses no regex, and `tests/test_ni_regex_budget.py` sweeps `ni_table`, `page_verify` and the digest on
+hostile shapes.

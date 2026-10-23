@@ -2,7 +2,7 @@
   // DeclinedCard — the honest end of an ask the system cannot answer reliably (plan G6: "a decline is
   // acceptable, a wrong card is the failure"). It says so plainly, gives the backend's one-line reason and up to
   // three links (read-only, opened in a new tab; nothing here builds or fetches), and offers the way back: run it
-  // again, pick a source (paste a link), or on a finished card Fix / Refine. The page owns the requests; this
+  // again, or on a finished card Fix / Refine. The page owns the requests; this
   // component owns what it shows and nothing else needs to be kept for it.
   import Icon from "$lib/components/Icon.svelte";
   import type { FlowDecline } from "$lib/ni/types.gen";
@@ -15,11 +15,9 @@
     canFix = false,
     canRefine = false,
     canRetry = false,
-    canPick = false,
     onFix,
     onRefine,
     onRetry,
-    onPick,
   }: {
     decline: FlowDecline;
     busy?: boolean;
@@ -28,11 +26,9 @@
     canFix?: boolean;
     canRefine?: boolean;
     canRetry?: boolean;
-    canPick?: boolean;
     onFix: () => void;
     onRefine: () => void;
     onRetry: () => void;
-    onPick: () => void;
   } = $props();
 
   const links = $derived(declinedLinks(decline));
@@ -54,7 +50,7 @@
       {/each}
     </ul>
   {/if}
-  {#if canFix || canRefine || canRetry || canPick}
+  {#if canFix || canRefine || canRetry}
     <div class="dc-actions">
       {#if canFix}
         <button class="secondary" disabled={busy} onclick={onFix}>Fix</button>
@@ -64,9 +60,6 @@
       {/if}
       {#if canRetry}
         <button class="secondary" disabled={busy} onclick={onRetry}>{busy ? "Retrying…" : "Try again"}</button>
-      {/if}
-      {#if canPick}
-        <button class="ghost" disabled={busy} onclick={onPick}>Paste a link</button>
       {/if}
     </div>
   {/if}

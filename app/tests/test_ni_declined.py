@@ -286,16 +286,6 @@ def test_a_compare_the_researcher_could_not_build_says_so(lib, monkeypatch) -> N
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "compare_unbuildable"
 
 
-def test_v1_keeps_its_unsupported_endings(lib, monkeypatch) -> None:  # noqa: F811
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")
-    store = _store()
-    item_id = _picked(store, lib, monkeypatch, source="no-answers")
-    out = ni_flow._sample_and_map(store, item_id, "NYC weather", {"kind": "external_data", "wants": ["temp"]},
-                                  WEATHER_URL, _model, lambda _u: {"current": {"temperature_2m": 70}})
-    assert out["state"] == "unsupported" and "doesn't declare its answers" in out["error"]
-    assert "_decline_card" not in out
-
-
 # ---- the card the board shows ----------------------------------------------------------------------------
 
 def test_the_board_field_carries_the_reason_the_line_the_links_and_the_way_back(lib, monkeypatch) -> None:  # noqa: F811
@@ -357,7 +347,8 @@ def test_the_watcher_files_nothing_for_declines_and_flags_a_declined_record_with
                         lambda state, record, *, shell: {"reason": "x", "decline": {}})
     item_id = ni_flow.create_shell_item(store, "an ask with no way out")
     ni_flow._flow_write(store, item_id, ni_flow._make_record("an ask with no way out", "declined"))
-    assert ni_watch._is_dead_end(store, item_id, True) is True
+    item = store.get_item(item_id)
+    assert "dead_end" in [c for c, _s, _t in ni_watch.audit_row(store, item, ni_flow._flow_read(store, item_id))]
 
 
 # ---- never refreshes, never fetches ----------------------------------------------------------------------
@@ -412,22 +403,10 @@ def test_retry_reopens_a_declined_shell_and_drops_its_seal(client, lib, monkeypa
     assert record["state"] == "intent" and "_decline_card" not in record
 
 
-def test_reopen_returns_a_declined_shell_to_the_source_pick_with_paste_a_link(client, lib, monkeypatch) -> None:  # noqa: F811
-    item_id = _declined_shell(client, lib, monkeypatch)
-    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: lib)
-    r = client.post(f"/api/ni/items/{item_id}/flow/reopen")
-    assert r.status_code == 200 and r.json()["state"] == "source"
-    record = ni_flow._flow_read(client.app.state.ni, item_id)
-    assert record["state"] == "source" and record["error"] == ni_flow.AWAITING_SOURCE_PICK
-    assert "_decline_card" not in record, "the seal never outlives the declined state"
-    assert "decline" not in ni_flow.board_flow_field(client.app.state.ni, item_id)
-
-
-def test_retry_and_reopen_refuse_a_flow_that_is_not_over(client, lib, monkeypatch) -> None:  # noqa: F811
+def test_retry_refuses_a_flow_that_is_not_over(client, lib, monkeypatch) -> None:  # noqa: F811
     store = client.app.state.ni
     item_id = ni_flow.create_shell_item(store, _REQUEST)  # a running shell
     assert client.post(f"/api/ni/items/{item_id}/flow/retry").status_code == 409
-    assert client.post(f"/api/ni/items/{item_id}/flow/reopen").status_code == 409
 
 
 def test_a_finished_card_hides_a_declined_remap_and_keeps_its_working_payload(lib, monkeypatch) -> None:  # noqa: F811

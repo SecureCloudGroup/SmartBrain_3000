@@ -625,7 +625,7 @@ def test_when_no_chosen_answer_is_in_the_response_it_ends_honestly_never_mapping
     prompts: list[str] = []
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", {**_INTENT, "wants": ["temperature"]},
                                   WEATHER_URL, _mapping_model(prompts), lambda _u: sample)
-    assert out["state"] == "unsupported" and "has nothing for this right now" in out["error"]
+    assert out["state"] == "declined", out
     assert not any("Choose the best candidate path" in p for p in prompts)
 
 

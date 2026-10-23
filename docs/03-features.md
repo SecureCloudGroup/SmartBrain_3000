@@ -392,37 +392,34 @@ created and changed on the Neural page — chat has no card-writing tools.)
 
 How a card comes to life:
 
-1. **You pick the source.** The card first looks in the **SmartBrain
+1. **SmartBrain finds the source.** The card looks in the **SmartBrain
    Library** — about 8,600 US public data sources, each with its provider and
-   how official it is — and offers up to three whose address it could fill
-   from your own words (*"Tide predictions — NOAA · Official — Melbourne
-   Causeway, FL"*). When your words fit more than one thing (two stations, two
-   cities), each choice is named so the tap answers it. Sources that work
-   without a key come first; one that needs a free key from its provider (or,
-   for the SEC and BLS, your contact email) says so, and the card asks for it
-   before the first fetch. Only a Library source that describes its answers
-   (which of its values answer which questions) builds a card; your tap is the
-   consent. When no Library source answers your ask yet, the card says so —
-   *"No SmartBrain Library source answers this yet"* — and lists **pages that
-   may help**: up to three web pages found by **searching your own words**, and
-   any dataset the Library knows about but hasn't described, each named with
-   its site. They are plain links that open in a new tab; SmartBrain can't keep
-   a live card from them yet, and it shows nothing it read off them. Pasting
-   your own link always works. Whatever you pick is frozen: nothing can
-   quietly change it later without asking you again. Browse the Library, or
-   add your own sources, from the **Library** link on the Neural page.
-2. **Built from real data.** The engine samples the approved source and builds
-   the pipeline and layout against what actually came back — the preview you
-   see is real data from your source, not an invention. If something looks
-   off, say so on the card (**Refine…** or *"Something's wrong"*): your note
-   re-enters the build against the same frozen source, and a note that needs a
-   *different* source goes back to the source pick.
-3. **Commissioning.** The system then proves the card: a clean real run, your
-   one-tap confirmation that it's the *right* data, and one more clean run at
-   cadence to prove it's stable. Only then is the card live. A card built from
-   a link you pasted yourself shows the reading it found and where it came
-   from, and doesn't update at all until you tap **Yes, that's it**; **No, try
-   another source** goes back to the source pick without that link.
+   how official it is — for sources whose address it can fill from your own
+   words (*"Tide predictions — NOAA · Official — Melbourne Causeway, FL"*), and
+   tries the best one itself, moving on to the next when a source can't answer.
+   While it works the card shows its progress, with a **Cancel** button. Sources
+   that work without a key come first; one that needs a free key from its
+   provider (or, for the SEC and BLS, your contact email) is tried last and the
+   card asks you for it before anything is fetched. Only a Library source that
+   describes its answers (which of its values answer which questions) builds a
+   card. When no Library source answers, a cloud model you allow can research
+   one (see the privacy page for what that sends); if nothing answers, the card
+   says so — *"I couldn't build a reliable card for this"* — with one plain
+   line on why and up to three links to pages that may help. Those links open in
+   a new tab; SmartBrain shows nothing it read off them. Pasting your own link
+   always works. Whatever is built is frozen: nothing can quietly change it
+   later without asking you again. Browse the Library, or add your own sources,
+   from the **Library** link on the Neural page.
+2. **Built from real data.** The engine samples the source and builds the
+   pipeline and layout against what actually came back — the preview you see is
+   real data, not an invention. If something looks off, say so on the card
+   (**Refine…**): your note re-enters the build against the same frozen source,
+   and a note that needs a *different* source starts the search again.
+3. **Keep it.** A new card is a **preview**: SmartBrain read the source once to
+   build it and doesn't read it again, or refresh it, until you tap **Keep**.
+   **Try another source** moves on to the next one. After Keep the system proves
+   the card: a clean real run, then one more clean run at cadence to prove it's
+   stable. Only then is the card live.
 4. **It keeps itself honest.** Every refresh is checked against the shape of the
    data you validated. If the source changes or breaks, the card shows the last
    good result (dimmed, with a health chip) rather than something wrong — and a

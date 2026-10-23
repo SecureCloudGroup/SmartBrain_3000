@@ -47,7 +47,7 @@
   } from "$lib/ni/browser";
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { fitText } from "$lib/ni/fit";
-  import { AWAITING_SOURCE_PICK, TERMINAL_FLOW_STATES, allows, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, rowActions, isFlowActive, linkWhat, pickRows } from "$lib/ni/flow";
+  import { AWAITING_SOURCE_PICK, TERMINAL_FLOW_STATES, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, isFlowActive } from "$lib/ni/flow";
   import {
     filterTemplates,
     formatFingerprint,
@@ -157,7 +157,6 @@
   let credentialError = $state("");
 
   // P3: source-pick + edit-modal state.
-  let pickUrlText = $state<CardText>({});
   let accessKeyText = $state<CardText>({});
   let accessEmailText = $state<CardText>({});
   let editFor = $state<NiBoardItem | null>(null);
@@ -202,20 +201,16 @@
   let flowActionError = $state<Record<string, string>>({});
   let answerDateText = $state<CardText>({});
 
-  // Returns true when the server took the source. `pasted` marks the user's own link (default:
-  // the paste form, i.e. no urlOverride); the v2 stop card passes its pasted text with true.
-  async function pickSource(item: NiBoardItem, urlOverride?: string, pasted = urlOverride === undefined): Promise<boolean> {
+  // Returns true when the server took the source. The stop card passes the user's own pasted link
+  // (it builds even when the card offered the same page as a link; that card then waits for their YES).
+  async function pickSource(item: NiBoardItem, urlText: string, pasted = true): Promise<boolean> {
     console.assert(item.flow?.state === "source", "pickSource: pause required");
-    // A Library-row tap submits the sealed URL verbatim — the tap IS the consent.
-    // No urlOverride = the paste form: the user's own link (it builds even when the
-    // card offered the same page as a link; that card then waits for their YES).
-    const url = (urlOverride ?? cardText(pickUrlText, item.id)).trim();
+    const url = urlText.trim();
     if (url.length < 8) return false;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
       const out = await api.niFlowPickSource(item.id, url, pasted);
-      pickUrlText = withoutCardText(pickUrlText, item.id);
       toast(out.needs && out.needs.length > 0
         ? "This source needs one more thing — see the card."
         : out.started === false
@@ -284,21 +279,6 @@
       await load();
     } catch (err) {
       flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t go through — try again." };
-    } finally {
-      busyId = null;
-    }
-  }
-
-  async function reopenPick(item: NiBoardItem): Promise<void> {
-    console.assert(typeof item.id === "string", "reopenPick: id required");
-    busyId = item.id;
-    flowActionError = { ...flowActionError, [item.id]: "" };
-    try {
-      await api.niFlowReopen(item.id);
-      toast("Okay — pick a source below.");
-      await load();
-    } catch (err) {
-      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "Couldn’t reopen the pick." };
     } finally {
       busyId = null;
     }
@@ -1363,14 +1343,12 @@
                   decline={item.flow.decline}
                   busy={busyId === item.id}
                   error={flowActionError[item.id] ?? ""}
-                  canFix={allows(item, "fix", !item.shell)}
-                  canRefine={allows(item, "refine", !item.shell)}
-                  canRetry={allows(item, "retry", item.shell === true && !!item.flow.reopen?.includes("retry"))}
-                  canPick={rowActions(item) === null && item.shell === true && !!item.flow.reopen?.includes("pick_source")}
+                  canFix={hasAction(item, "fix")}
+                  canRefine={hasAction(item, "refine")}
+                  canRetry={hasAction(item, "retry")}
                   onFix={() => fixItem(item)}
                   onRefine={() => openRefine(item)}
                   onRetry={() => retryFlow(item)}
-                  onPick={() => reopenPick(item)}
                 />
               {:else if item.flow.state === "failed" || item.flow.state === "unsupported"}
                 <!-- G1 single-writer law: the card renders the MASTER's reason
@@ -1394,14 +1372,14 @@
                     <p class="muted ni-note-sp">{consent.prompt}</p>
                   {/if}
                   <div class="ni-actions ni-actions-sp">
-                    {#if allows(item, "allow_model", true)}
+                    {#if hasAction(item, "allow_model")}
                       <button
                         class="secondary"
                         disabled={busyId === item.id}
                         onclick={() => answerConsent(item, "allow")}
                       >Build with {consent.model}</button>
                     {/if}
-                    {#if consent.local && allows(item, "use_local", true)}
+                    {#if consent.local && hasAction(item, "use_local")}
                       <button
                         class="ghost"
                         disabled={busyId === item.id}
@@ -1410,7 +1388,7 @@
                     {/if}
                   </div>
                 {/if}
-                {#if item.flow.question?.kind === "supply_date" && allows(item, "answer_date", true)}
+                {#if item.flow.question?.kind === "supply_date" && hasAction(item, "answer_date")}
                   {#if item.flow.question.prompt}
                     <p class="muted ni-note-sp">{item.flow.question.prompt}</p>
                   {/if}
@@ -1431,41 +1409,34 @@
                 {/if}
                 {#if !consent}
                 <div class="ni-actions ni-actions-sp">
-                  {#if allows(item, "fix", !item.shell)}
+                  {#if hasAction(item, "fix")}
                     <button
                       class="secondary"
                       disabled={busyId === item.id}
                       onclick={() => fixItem(item)}
                     >Fix</button>
                   {/if}
-                  {#if allows(item, "refine", !item.shell)}
+                  {#if hasAction(item, "refine")}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
                       onclick={() => openRefine(item)}
                     >Refine…</button>
                   {/if}
-                  {#if allows(item, "retry", item.shell === true && !!item.flow.reopen?.includes("retry"))}
+                  {#if hasAction(item, "retry")}
                     <button
                       class="secondary"
                       disabled={busyId === item.id}
                       onclick={() => retryFlow(item)}
                     >{busyId === item.id ? "Retrying…" : "Retry"}</button>
                   {/if}
-                  {#if rowActions(item) === null && item.shell && item.flow.reopen?.includes("pick_source")}
-                    <button
-                      class="ghost"
-                      disabled={busyId === item.id}
-                      onclick={() => reopenPick(item)}
-                    >Pick a source</button>
-                  {/if}
                 </div>
                 {/if}
                 {#if flowActionError[item.id]}
                   <p class="error ni-note-sp">{flowActionError[item.id]}</p>
                 {/if}
-              {:else if item.flow.state === "source" && rowActions(item) !== null}
-                <!-- v2: no source-pick UI. While the engine looks (or tries rows) the progress line
+              {:else if item.flow.state === "source"}
+                <!-- No source-pick UI. While the engine looks (or tries rows) the progress line
                      above says so; when it stops for lack of a Library source the card lists the
                      links read-only and keeps paste-a-link. -->
                 {#if item.flow.error === AWAITING_SOURCE_PICK}
@@ -1477,94 +1448,7 @@
                     onPaste={(url) => pickSource(item, url, true)}
                   />
                 {/if}
-              {:else if item.flow.state === "source" && item.flow.suggestions === undefined}
-                <p class="muted ni-note">
-                  Finding a source for this…
-                </p>
-              {:else if item.flow.state === "source"}
-                {@const pick = pickRows(item.flow.suggestions)}
-                {@const clause = tapClause(item.flow)}
-                <!-- The source-pick pause renders its OWN affordances — SmartBrain
-                     Library sources that declare their answers (a tap builds the card),
-                     pages that may help as plain links (ruling 2026-10-05: "Library
-                     cards; web as links" — they never build), and a paste-a-URL field.
-                     The tap or paste is the consent; netguard guards the fetch. -->
-                <div class="ni-commission">
-                  <p class="ni-note-gap">{pick.heading}</p>
-                  {#if pick.sources.length > 0}
-                    <div class="ni-suggestions">
-                      <!-- Rows key on url; a tap submits the sealed URL through the
-                           normal pick consent. -->
-                      {#each pick.sources as sug (sug.url)}
-                        <!-- Library candidate (R8): a real Library source with its address already
-                             filled from your words; the line under it names the provider and, when
-                             your words fit several (two stations, two cities), which one this is.
-                             The tap is your Yes (R6) and the consent for this exact address. -->
-                        <div class="ni-web-sug">
-                          <button
-                            class="secondary"
-                            disabled={busyId === item.id}
-                            title={sug.url}
-                            onclick={() => pickSource(item, sug.url)}
-                          >{sug.title}</button>
-                          {#if sug.evidence && sug.evidence.length > 0}
-                            <p class="muted ni-note-tight">
-                              {sug.evidence.join(" — ")}
-                            </p>
-                          {/if}
-                          {#if sug.needs?.includes("key")}
-                            <p class="ni-sug-needs">Needs your own free key — you'll paste it next</p>
-                          {/if}
-                          {#if sug.needs?.includes("contact")}
-                            <p class="ni-sug-needs">Asks for your contact email once</p>
-                          {/if}
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                  {#if pick.links.length > 0}
-                    <!-- Links, not sources: a Library dataset without declared answers (its page)
-                         or a web page the search found. Named for what they are, nothing read off
-                         them; they open in a new tab and never build a card. -->
-                    <p class="muted ni-links-note">Pages that may help — SmartBrain can't keep a live card from these yet:</p>
-                    <ul class="ni-links">
-                      {#each pick.links as link (link.url)}
-                        <li>
-                          <a href={link.url} target="_blank" rel="noopener noreferrer"
-                          ><Icon name="link" size={14} /> {link.title || link.host}</a>
-                          <span class="muted ni-link-what">{linkWhat(link)}</span>
-                        </li>
-                      {/each}
-                    </ul>
-                  {/if}
-                  <form
-                    class="ni-pick-url"
-                    onsubmit={(e) => { e.preventDefault(); void pickSource(item); }}
-                  >
-                    <input
-                      type="url"
-                      bind:value={pickUrlText[item.id]}
-                      placeholder={pick.links.length > 0
-                        ? "Found the data? Paste its link (https://…)"
-                        : "Or paste any web page or API URL (https://…)"}
-                      maxlength="2000"
-                      disabled={busyId === item.id}
-                      aria-label="Paste a source URL"
-                    />
-                    {#if clause}
-                      <!-- Round 20 (B3a, R6): what the paste's consent covers when the page
-                           needs the page browser. -->
-                      <p class="muted ni-note">{clause}</p>
-                    {/if}
-                    <button type="submit" class="secondary"
-                      disabled={busyId === item.id || cardText(pickUrlText, item.id).trim().length < 8}
-                    >Use this URL</button>
-                  </form>
-                  {#if flowActionError[item.id]}
-                    <p class="error ni-note-sp">{flowActionError[item.id]}</p>
-                  {/if}
-                </div>
-              {:else if item.flow.state === "awaiting_access" && item.flow.access && allows(item, "give_access", true)}
+              {:else if item.flow.state === "awaiting_access" && item.flow.access && hasAction(item, "give_access")}
                 {@const access = item.flow.access}
                 <!-- The picked source needs the user's own free key and/or a contact email
                      (SEC, BLS). Nothing is fetched until this is sent; each value goes only to
@@ -1653,7 +1537,7 @@
             <!-- S8: a headline brief's opt-in summary by the owner's LOCAL model; its form state stays in the component. -->
             <BriefSummary {item} onchanged={load} />
           {/if}
-          {#if !item.flow && allows(item, "fix", !item.shell && (item.state === "failing" || item.state === "broken" || item.state === "degraded" || (item.state === "commissioning" && item.consecutive_failures > 0)))}
+          {#if !item.flow && hasAction(item, "fix")}
             <!-- P3: the card's Fix — re-derives against the card's OWN frozen
                  source (never a new host). Generic across every http card.
                  2026-09-23: also on a COMMISSIONING card whose run failed — a
@@ -1715,7 +1599,7 @@
             <p class="muted ni-note">
               Creation didn’t finish. Delete this card, or start again above.
             </p>
-          {:else if preview && !item.shell && !item.flow && draftSites && (allows(item, "activate_sites", true) || hasAction(item, "activate"))}
+          {:else if preview && !item.shell && !item.flow && draftSites && (hasAction(item, "activate_sites") || hasAction(item, "activate"))}
             <!-- Round 20 (B3a, R6): this page also loads other sites — the panel lists them and
                  its Activate (POST /activate) is the consent; /commission refuses such a draft. -->
             <RenderSitesPanel
@@ -1724,7 +1608,7 @@
               error={flowActionError[item.id] ?? ""}
               onActivate={() => activateSites(item)}
             />
-          {:else if preview && !item.shell && !item.flow && allows(item, "activate", true)}
+          {:else if preview && !item.shell && !item.flow && hasAction(item, "activate")}
             <div class="ni-actions">
               <button
                 disabled={busyId === item.id}
@@ -1748,14 +1632,14 @@
                 <p class="muted ni-yes-from">{awaitingYesNotice(item.awaiting_yes)}</p>
               {/if}
               <div class="ni-actions">
-                {#if allows(item, "keep", true)}
+                {#if hasAction(item, "keep")}
                   <button
                     class="secondary"
                     disabled={busyId === item.id}
                     onclick={() => validateLooksRight(item)}
                   >{busyId === item.id ? yesWords.yesBusy : yesWords.yes}</button>
                 {/if}
-                {#if allows(item, "dismiss", true)}
+                {#if hasAction(item, "dismiss")}
                   <button
                     class="ghost"
                     disabled={busyId === item.id}
@@ -1822,7 +1706,7 @@
                   onclick={() => openHistory(item)}
                   title="Show recent runs"
                 >History</button>
-                {#if allows(item, "run", true)}
+                {#if hasAction(item, "run")}
                   <button
                     class="ghost"
                     disabled={busyId === item.id}
@@ -1843,7 +1727,7 @@
                       disabled={busyId === item.id || historyFor !== null}
                       onclick={() => openHistory(item)}
                     >History</button>
-                    {#if allows(item, "run", true)}
+                    {#if hasAction(item, "run")}
                       <button
                         class="ghost"
                         disabled={busyId === item.id}
@@ -1858,14 +1742,14 @@
                       onclick={() => togglePause(item)}
                     >{pauseKind(item) === "pause" ? "Pause" : "Resume"}</button>
                   {/if}
-                  {#if allows(item, "edit", true)}
+                  {#if hasAction(item, "edit")}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
                       onclick={() => openEdit(item)}
                     >Edit…</button>
                   {/if}
-                  {#if allows(item, "refine", !item.shell)}
+                  {#if hasAction(item, "refine")}
                     <button
                       class="ghost"
                       disabled={busyId === item.id}
@@ -1877,7 +1761,7 @@
                     disabled={busyId === item.id}
                     onclick={() => openRepair(item)}
                   >Repair settings</button>
-                  {#if allows(item, "delete", true)}
+                  {#if hasAction(item, "delete")}
                     <button
                       class="ghost ni-danger"
                       disabled={busyId === item.id}
@@ -2507,51 +2391,6 @@
     margin: 2px 0 var(--s-2);
     font-size: var(--f-label);
     overflow-wrap: anywhere; /* a long host or page title wraps inside the card */
-  }
-  .ni-suggestions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s-2);
-    margin-bottom: var(--s-2);
-  }
-  .ni-web-sug {
-    /* S2 web candidate: button + its on-page evidence line stack as one
-       unit and take the full row (evidence must sit under ITS button). */
-    flex-basis: 100%;
-    min-width: 0;
-  }
-  .ni-web-sug button {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .ni-links-note {
-    margin: 0 0 var(--s-1);
-    font-size: var(--f-label);
-  }
-  .ni-links {
-    /* Pages that may help (ruling 2026-10-05): plain links, one per row; a long
-       title or host wraps inside the card, never past it. */
-    list-style: none;
-    margin: 0 0 var(--s-2);
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-2);
-  }
-  .ni-links li {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-  .ni-link-what {
-    display: block;
-    font-size: var(--f-label);
-  }
-  .ni-sug-needs {
-    margin: 2px 0 0;
-    font-size: var(--f-label);
-    color: var(--warn);
   }
   .ni-pick-url {
     /* G1 field fix: a row layout collapsed the input to ~1ch inside card

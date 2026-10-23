@@ -204,7 +204,7 @@ def test_a_tapped_library_row_without_declared_answers_never_reaches_the_mapping
     item_id = _picked(store, lib, monkeypatch, source="no-answers")  # sealed as a legacy tap would be
     out = ni_flow._sample_and_map(store, item_id, "NYC weather", {"kind": "external_data", "wants": ["temp"]},
                                   WEATHER_URL, _never, lambda _u: {"current": {"temperature_2m": 70}})
-    assert out["state"] == "unsupported" and "doesn't declare its answers" in out["error"]
+    assert out["state"] == "declined", out
 
 
 def test_declared_answers_that_dont_fit_move_on_never_mapping(lib, monkeypatch) -> None:  # noqa: F811

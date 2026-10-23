@@ -252,7 +252,7 @@ export interface Flow {
   decline?: FlowDecline;
 }
 
-/** One row of GET /api/ni/board. `actions` is present only under the v2 flow; `payload` is the bound scene. */
+/** One row of GET /api/ni/board. `actions` lists what the card offers; `payload` is the bound scene. */
 export interface BoardRow {
   id: string;
   title: string;
@@ -282,7 +282,7 @@ export interface BoardRow {
   interpretation?: string;
   query?: RowQuery;
   fit?: Fit;
-  actions?: ActionKind[];
+  actions: ActionKind[];
   rendered?: boolean;
   render?: RowRender | null;
   draft?: RowDraft | null;
@@ -290,7 +290,7 @@ export interface BoardRow {
   brief?: BriefState;
 }
 
-/** GET /api/ni/items/{id}/flow (v2): one item's flow fields. */
+/** GET /api/ni/items/{id}/flow: one item's flow fields. */
 export interface FlowPoll {
   id: string;
   state: ItemState;

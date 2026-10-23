@@ -15,7 +15,7 @@ are never recorded and secret-looking query parameters are redacted from the cas
 Classes per ask: right / partial / wrong / links / declined / waiting / error (see ``score_ask``). A declined card
 (the v2 honest "I couldn't build a reliable card for this") is its own class: "right" when the gold expects a decline
 (``expected_outcome: decline``), else "declined", which is neither right nor wrong.
-``--flow v1|v2`` on record and replay sets the ``ni_flow`` flag (env ``SMARTBRAIN_NI_FLOW``) for the run.
+There is one flow; ``--flow`` is gone and is an error (it used to pick v1 or v2).
 ``--research cloud|local|off`` (S4c, v2 only) sets the researcher tier for the run (env ``SMARTBRAIN_NI_RESEARCH``)
 and routes its model turns through the cassette like every other model reply: ``cloud`` uses ``--research-model``
 (default anthropic/claude-sonnet-5-5) with the eval operator's consent, ``local`` the closed-world mode on
@@ -607,9 +607,8 @@ def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) 
                  "links": [], "notes": [], "scene_text": []}
     ni_flow.set_library_provider(lambda: StaticLibrary(rows))
     try:
-        with _env({"SMARTBRAIN_NI_FLOW": "v2"}):
-            item_id = ni_flow.create_shell_item(store, ask)
-            rec = ni_flow.run_flow(store, item_id, gateway_call=call, ni_route_model=LOCAL_STAND_IN)
+        item_id = ni_flow.create_shell_item(store, ask)
+        rec = ni_flow.run_flow(store, item_id, gateway_call=call, ni_route_model=LOCAL_STAND_IN)
         state = str(rec.get("state") or "")
         out["notes"] = [str(n) for n in rec.get("notes") or []]
         out["detail"] = str(rec.get("error") or "")[:160]
@@ -840,11 +839,10 @@ def _select(gold: list[dict], args: argparse.Namespace) -> list[dict]:
 
 
 def _set_flow(args: argparse.Namespace) -> None:
-    """``--flow v1|v2``: set the ni_flow flag for this run through its env var (no-op when absent)."""
+    """``--flow`` was removed with the v1 flow: any value is an error that says so."""
     flow = getattr(args, "flow", None)
-    assert flow in (None, "v1", "v2"), "flow is v1 or v2"
-    if flow:
-        os.environ["SMARTBRAIN_NI_FLOW"] = flow
+    if flow is not None:
+        raise SystemExit(f"--flow {flow} is no longer supported: there is one flow (the former v2); drop the flag")
 
 
 def bifrost_chat(bifrost: str, timeout: float = 300.0) -> Callable[[str, list, list | None], dict]:
@@ -973,7 +971,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--pack-dir", type=pathlib.Path)
             p.add_argument("--set", default="", help="comma list of set letters, e.g. A,B")
             p.add_argument("--only", default="")
-            p.add_argument("--flow", choices=("v1", "v2"), help="set the ni_flow flag for this run")
+            p.add_argument("--flow", default=None, help=argparse.SUPPRESS)  # removed: any value is an error
             p.add_argument("--research", choices=RESEARCH_MODES,
                            help="v2 researcher tier: cloud (consented), local (closed-world) or off")
             p.add_argument("--research-model", default=None, help=f"cloud route (default {DEFAULT_CLOUD_MODEL})")

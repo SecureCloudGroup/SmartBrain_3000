@@ -220,7 +220,7 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
     assert store is not None and item_id, "args required"
     record = ni_flow._flow_read(store, item_id) or {}
     lib = ni_flow._resolve_library()
-    if not ni_flow._is_v2(store) or record.get("_cancel") or lib is None:
+    if record.get("_cancel") or lib is None:
         return None
     plan = plan_for(store, item_id, record)
     if plan.mode == "off":
@@ -263,7 +263,7 @@ def research_plan(store: ni.NIStore, item: dict) -> policy.Plan | None:
     and the card simply stays failing with its own status."""
     assert store is not None and isinstance(item, dict), "store + item required"
     assert item.get("id"), "an item id"
-    if not ni_flow._is_v2(store) or ni_flow._resolve_library() is None:
+    if ni_flow._resolve_library() is None:
         return None
     plan = plan_for(store, item["id"], {}, web=False)  # re-research reads the Library only: any consent covers it
     return plan if plan.mode == "cloud" else None

@@ -38,10 +38,10 @@ from zoneinfo import ZoneInfo
 
 from . import browsers as _browsers_mod
 from . import claudecli as _claudecli_mod
-from . import db, ni, ni_brief, ni_compare, ni_master, ni_query, page_verify, pagegraph
 from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
+from . import ni, ni_brief, ni_compare, ni_master, ni_query, page_verify, pagegraph
 from . import ni_fetch as _ni_fetch
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
@@ -263,7 +263,7 @@ def _flow_write(store: ni.NIStore, item_id: str, record: dict, *, revive: bool =
 
     v2 Cancel: under the flow lock, a stored record that carries ``_cancel`` is never overwritten by one
     that lacks it (a stage that read before the Cancel and writes after it). Only a true re-seed passes
-    ``revive=True``. Nothing sets ``_cancel`` under v1, so v1 writes are unchanged.
+    ``revive=True``. Writes that never set ``_cancel`` are unchanged.
     """
     assert store is not None and item_id, "store + id required"
     assert isinstance(record, dict) and "state" in record, "record must carry a state"
@@ -3691,7 +3691,7 @@ def run_flow(store: ni.NIStore, item_id: str, *,
         if record.get("_use_local") and local:
             resolved_model = local
         elif _model_consent_of(store, item_id, record) != resolved_model:
-            return _ask_model_consent(store, item_id, resolved_model, local, research=_is_v2(store))
+            return _ask_model_consent(store, item_id, resolved_model, local, research=True)
 
     def call_prompt(prompt: str) -> str:
         assert isinstance(prompt, str), "prompt required"
@@ -3817,26 +3817,13 @@ def _ask_model_consent(store: ni.NIStore, item_id: str, model: str,
         question={"kind": "model_consent", "model": model, "local": local or "", "prompt": prompt, "web": web})
 
 
-FLOW_MODES = ("v1", "v2")
-
-
-def flow_mode(conn) -> str:
-    """The ``ni_flow`` flag, the single reader: env ``SMARTBRAIN_NI_FLOW`` wins, then the
-    ``ni_flow`` meta key (same store as the gateway routes), default ``v1``. Closed set:
-    anything else reads as ``v1``."""
-    assert conn is not None, "conn required"
-    raw = os.environ.get("SMARTBRAIN_NI_FLOW")
-    if raw is None or not raw.strip():
-        raw = db.meta_get(conn, "ni_flow")
-    mode = str(raw or "").strip().lower()
-    assert isinstance(mode, str), "mode is text"
-    return mode if mode in FLOW_MODES else "v1"
-
-
-def _is_v2(store: ni.NIStore) -> bool:
-    """True when the store's flow runs the v2 (auto-pick) posture."""
-    assert store is not None, "store required"
-    return flow_mode(store.conn) == "v2"
+def warn_retired_flow_flag() -> None:
+    """The ``ni_flow`` flag is gone: there is one flow. A leftover ``SMARTBRAIN_NI_FLOW=v1`` is logged once per
+    call and ignored (never a crash); the app calls this at start-up."""
+    raw = str(os.environ.get("SMARTBRAIN_NI_FLOW") or "").strip().lower()
+    if raw and raw != "v2":
+        log.warning("SMARTBRAIN_NI_FLOW=%s is ignored: the v1 build flow was removed and every card builds with "
+                    "the auto-pick flow. Unset it.", raw[:20])
 
 
 def _resolve_flow_model(store: ni.NIStore) -> str | None:
@@ -3981,17 +3968,14 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
     tap or paste is the consent for the first fetch.
     """
     assert isinstance(intent, dict), "intent required"
-    v2 = _is_v2(store)
     if known_url:
         out = _sample_and_map(store, item_id, request, intent, known_url,
                               call_model, do_fetch)
-        if v2 and out.get("_auto_picked") and out.get("state") == "source" \
+        if out.get("_auto_picked") and out.get("state") == "source" \
                 and out.get("error") == AWAITING_SOURCE_PICK and _buildable(out.get("_ranked_library")):
             return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
         return out
-    if v2:
-        return _auto_pick(store, item_id, request, intent, call_model, do_fetch)
-    return _pause_source_pick(store, item_id, request, intent, call_model)
+    return _auto_pick(store, item_id, request, intent, call_model, do_fetch)
 
 
 _AUTO_ROWS = 5  # v2: how deep locate looks, so fall-through has rows to fall to
@@ -5189,7 +5173,7 @@ def _pause_source_pick(store: ni.NIStore, item_id: str, request: str,
     corpus, and ≤3 web pages seal — as links, next to the Library's. Nothing
     found, providers unwired, or total failure → the plain pause (paste a URL),
     never a failed flow. ``web=False`` (v2 auto-pick): the user's consent was for a Library source, so no
-    search runs and no result page is read (v1 and a reopened pick only: the v2 auto-pick ends on the declined card).
+    search runs and no result page is read (a reopened pick only: the auto-pick ends on the declined card).
     """
     library = _without_declined(store, item_id,
                                 _library_candidates(request, intent) if rows is None else rows)
@@ -5792,7 +5776,7 @@ def _try_brief_build(store: ni.NIStore, item_id: str, request: str, intent: dict
     RSS / Atom feed. The card is held for the user's Keep like every card the program picked itself."""
     assert store is not None and item_id, "args required"
     kind = intent.get("frame_kind")
-    if not ni_brief.is_brief_question(kind) or not _is_v2(store):
+    if not ni_brief.is_brief_question(kind):
         return None
     if picked and _library_answers(str(live.get("_library_source") or "")) and not _is_parsed_feed(sample):
         return None
@@ -6759,12 +6743,10 @@ def _pick_links(record: dict) -> list[dict]:
 def _end(store: ni.NIStore, item_id: str, ending: str, reason: str, *, links: list | None = None) -> dict:
     """The one writer of a non-card ending that can decline. ``ending`` is a row of ``ni_master.ENDINGS``: when its
     state is ``declined`` the v2 flow seals the honest declined card (a closed code, ``reason`` as the one line,
-    up to three links); v1 keeps its ``unsupported(reason)`` unchanged. The table decides, not the caller."""
+    up to three links). The table decides, not the caller."""
     assert store is not None and item_id and isinstance(reason, str), "args required"
     state, code = ni_master.ENDINGS[ending]
     assert state == "declined" and code in ni_master.DECLINE_REASONS, "an ending that declines"
-    if not _is_v2(store):
-        return _terminate_unsupported(store, item_id, reason)
     record = _flow_read(store, item_id) or {}
     seal = ni_master.seal_decline(ending, reason, _pick_links(record) if links is None else links)
     # the rows a stopped pick held went into the seal; the card never lists them again, and nothing can tap one
@@ -6997,12 +6979,11 @@ def board_flow_field(store: ni.NIStore, item_id: str, *, read_only: bool = False
                          "provider": str(access.get("provider") or ""),
                          "key": {"docs_url": str(key.get("docs_url") or "")} if key else None,
                          "contact": bool(access.get("contact"))}
-    if _is_v2(store):  # v1 output stays byte-identical
-        out["actions"] = ni_master.actions_for(
-            state, record, shell=shell, awaiting_yes=False, item_state="", has_payload=False)
-        progress = build_progress(record)
-        if progress is not None:
-            out["progress"] = progress
+    out["actions"] = ni_master.actions_for(
+        state, record, shell=shell, awaiting_yes=False, item_state="", has_payload=False)
+    progress = build_progress(record)
+    if progress is not None:
+        out["progress"] = progress
     return out
 
 
@@ -7284,7 +7265,7 @@ def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, request: str, 
     moved = _repick_without(store, item_id, url, why=why, host_wide=host_wide)
     if moved is None or not research or _buildable(moved.get("_ranked_library")) or moved.get("_ranked_search"):
         return moved
-    if moved.get("_auto_picked") and _is_v2(store):
+    if moved.get("_auto_picked"):
         return moved  # v2 auto-pick exhausted the Library: stop on its links; no search, no page read before Keep
     web = _pause_with_web(store, item_id, request, intent, call_model, drop_why=why,
                           links=moved.get("_ranked_library"))
@@ -7294,9 +7275,6 @@ def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, request: str, 
 # ---- NO to a reading (ruling 2026-10-04: "hold open paths for a YES") ------------------------
 
 _MAX_DECLINED = 10
-# the per-pick seal a declined source leaves on the record; a later pick seals its own
-_PICK_SEAL_KEYS = ("_library_source", "_library_url", "_library_params", "_library_url_template",
-                   "_library_clock_params", "_access", "_format")
 
 
 def _without_declined(store: ni.NIStore, item_id: str, rows: list | None) -> list:
@@ -7306,31 +7284,23 @@ def _without_declined(store: ni.NIStore, item_id: str, rows: list | None) -> lis
 
 
 def decline_reading(store: ni.NIStore, item_id: str) -> dict:
-    """The user said NO to an open-path card's reading: back to the source pick without that source.
+    """The user said NO to an open-path card's reading: the flow re-runs from their words without that source.
 
-    The declined address is remembered on the flow record (``_declined``) so no later pick on this
-    card offers it again. Other offered rows left → the pick re-lands at once (``repick``, the same
-    ``_repick_without`` a refusing source takes). None left, or a pasted link → the flow re-runs from
-    the user's words with the declined address excluded: the Library's other sources, then the web,
-    then paste-a-link (``relocate``). Never a dead end."""
+    The declined address (and the row's own pre-lookup address) is remembered on the flow record
+    (``_declined``) so no later pick on this card offers it again; the auto-pick then tries the Library's
+    other sources (``relocate``). Never a dead end."""
     assert store is not None and item_id, "args required"
     item = store.get_item(item_id)
     if item is None:
         raise ValueError("item not found")
     url = str((item["spec"].get("source") or {}).get("url") or "")
     record = _flow_read(store, item_id) or {}
-    v2 = _is_v2(store)
-    # v2: the filled address the row carries, and the row's own pre-lookup address (what the pick compares)
-    named = [url, str(record.get("_library_url") or ""), str(record.get("_pick_url") or "")] if v2 else [url]
+    # the filled address the row carries, and the row's own pre-lookup address (what the pick compares)
+    named = [url, str(record.get("_library_url") or ""), str(record.get("_pick_url") or "")]
     declined = [u for u in record.get("_declined") or [] if isinstance(u, str) and u not in named]
     declined = (declined + [u for u in named if u])[-_MAX_DECLINED:]
     _flow_write(store, item_id, {**record, "_declined": declined})
-    # v2: "No" never parks on a pick; it re-runs from the user's words and auto-picks the next source
-    moved = _repick_without(store, item_id, url, why="isn't what you wanted (you said no)") if url and not v2 else None
-    if moved is not None and (moved.get("_ranked_library") or moved.get("_ranked_search")):
-        _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
-                    **{key: None for key in _PICK_SEAL_KEYS})
-        return {"kind": "repick"}
+    # "No" never parks on a pick; it re-runs from the user's words and auto-picks the next source
     request = str(record.get("request") or item["spec"].get("goal") or "")
     fresh = _make_record(request, "intent", notes=["you said no to that reading — finding another source"])
     for key in ("_declined", "_model_consent", "_model_consent_web", "_use_local"):  # the card's own answers ride along

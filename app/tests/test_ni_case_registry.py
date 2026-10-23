@@ -86,7 +86,7 @@ def _testable(case: dict) -> bool:
     if case["klass"] == "image":
         return False
     expected_state = str((case["expected"] or {}).get("engine_state") or "")
-    if expected_state in ("failed", "source"):
+    if expected_state in ("failed", "source", "declined"):
         return True
     if case.get("fixture") is not None:
         return True
@@ -130,7 +130,7 @@ def _lan_or_dead_fetcher(kind: str) -> Callable[[str], object]:
     the flow's ``failed(fetch)`` class the same way (a bare exception raised
     from the fetcher). Verifying the exact netguard branch is a separate
     suite's job — here we assert the flow degrades honestly on ANY fetch
-    exception, which is the safety-edge contract in ni-cases.md §B.
+    exception, which is the safety-edge contract of the case registry.
     """
     assert kind in ("lan", "dead"), "unknown kind"
 
@@ -244,8 +244,8 @@ def _drive_flow_inner(case: dict) -> dict:
         _nimod._fetch_http_page = _no_page
         fetcher = _xml_fetcher(case)
         gateway = _scripted_gateway([intent_reply])
-    elif expected_state == "source":
-        # No fetch happens (pause at AWAITING_SOURCE_PICK). One reply is enough.
+    elif expected_state in ("source", "declined"):
+        # No fetch happens (no source answers: the flow ends on the declined card). One reply is enough.
         fetcher = lambda url: {}  # unused
         gateway = _scripted_gateway([intent_reply])
     elif case["klass"] == "refuse":

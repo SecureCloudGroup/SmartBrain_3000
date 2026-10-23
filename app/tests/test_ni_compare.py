@@ -434,7 +434,6 @@ def _run_flow(library, monkeypatch, request, bodies):
 def _v2(monkeypatch):
     from smartbrain_3000 import gateway as _gateway
     monkeypatch.setattr(_gateway, "DEFAULT_ROUTES", {"chat": "mlx/test-local"})
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v2")
 
 
 @pytest.mark.parametrize("codes", [["EUR", "GBP"], ["EUR", "GBP", "JPY"], ["EUR", "GBP", "JPY", "CAD"]],

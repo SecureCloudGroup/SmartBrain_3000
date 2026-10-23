@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AWAITING_SOURCE_PICK,
-  allows,
   pauseKind,
   awaitingYesButtons,
   awaitingYesNotice,
@@ -157,7 +156,7 @@ describe("pickRows (ruling 2026-10-05: Library cards; web as links)", () => {
 });
 
 describe("rowActions / hasAction", () => {
-  it("is null for a v1 row (no actions key) and hasAction is false", () => {
+  it("is null for a row without an actions key and hasAction is false", () => {
     expect(rowActions({})).toBeNull();
     expect(rowActions(null)).toBeNull();
     expect(hasAction({ flow: { state: "failed" } as never }, "retry")).toBe(false);
@@ -177,7 +176,7 @@ describe("rowActions / hasAction", () => {
     expect(hasAction(row, "run")).toBe(false);
   });
 
-  it("an empty list is a v2 row with no buttons, not a v1 row", () => {
+  it("an empty list is a row with no buttons, not a row without actions", () => {
     expect(rowActions({ actions: [] })).toEqual([]);
     expect(hasAction({ actions: [] }, "keep")).toBe(false);
   });
@@ -191,7 +190,7 @@ describe("flowStageLabel with progress", () => {
       .toBe("Reading a sample");
   });
 
-  it("keeps the v1 labels without progress and never labels a terminal flow", () => {
+  it("keeps the stage labels without progress and never labels a terminal flow", () => {
     expect(flowStageLabel({ state: "source" })).toBe("Finding the source…");
     expect(flowStageLabel({ state: "failed", progress: { step: 1, of: 4, label: "x" } })).toBe("");
   });
@@ -219,11 +218,11 @@ describe("awaiting-yes wording for from: library", () => {
   });
 });
 
-describe("allows / pauseKind: rows to button sets", () => {
+describe("hasAction / pauseKind: rows to button sets", () => {
   const BUTTONS = ["keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "edit", "delete", "activate"];
-  const shown = (row: Parameters<typeof allows>[0]) => BUTTONS.filter((k) => allows(row, k, false));
+  const shown = (row: Parameters<typeof hasAction>[0]) => BUTTONS.filter((k) => hasAction(row, k));
 
-  it("v2 rows show exactly the declared buttons, unknown kinds ignored", () => {
+  it("rows show exactly the declared buttons, unknown kinds ignored", () => {
     expect(shown({ actions: ["keep", "dismiss"] })).toEqual(["keep", "dismiss"]);
     expect(shown({ flow: { actions: ["cancel"] }, actions: ["cancel"] })).toEqual(["cancel"]);
     expect(shown({ actions: ["retry", "delete", "teleport"] })).toEqual(["retry", "delete"]);
@@ -233,23 +232,17 @@ describe("allows / pauseKind: rows to button sets", () => {
       .toEqual(["refine", "edit", "delete", "activate"]);
   });
 
-  it("a v1 row (no actions) keeps the page's own condition, true or false", () => {
-    expect(allows({ flow: null }, "retry", true)).toBe(true);
-    expect(allows({ flow: null }, "retry", false)).toBe(false);
-    expect(allows({}, "fix", true)).toBe(true);
+  it("a row without actions shows no buttons", () => {
+    expect(hasAction({ flow: null }, "retry")).toBe(false);
+    expect(hasAction({}, "fix")).toBe(false);
+    expect(hasAction({ actions: [] }, "delete")).toBe(false);
   });
 
-  it("v2 ignores the legacy condition", () => {
-    expect(allows({ actions: [] }, "delete", true)).toBe(false);
-    expect(allows({ actions: ["delete"] }, "delete", false)).toBe(true);
-  });
-
-  it("pauseKind follows enabled on v1 and the declared list on v2", () => {
-    expect(pauseKind({ enabled: true })).toBe("pause");
-    expect(pauseKind({ enabled: false })).toBe("resume");
-    expect(pauseKind({ enabled: true, actions: ["pause"] })).toBe("pause");
-    expect(pauseKind({ enabled: false, actions: ["resume", "edit"] })).toBe("resume");
-    expect(pauseKind({ enabled: true, actions: ["cancel"] })).toBe("");
+  it("pauseKind follows the declared list", () => {
+    expect(pauseKind({})).toBe("");
+    expect(pauseKind({ actions: ["pause"] })).toBe("pause");
+    expect(pauseKind({ actions: ["resume", "edit"] })).toBe("resume");
+    expect(pauseKind({ actions: ["cancel"] })).toBe("");
   });
 });
 

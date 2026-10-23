@@ -2,7 +2,7 @@
 // while a card walks a creation flow, visibility handling, and the `gen` stale-response guard.
 // Dependencies are injected so the timing rules are unit-testable with fake timers.
 import type { NiBoardItem, NiFlowPoll } from "$lib/api";
-import { isFlowActive, rowActions } from "$lib/ni/flow";
+import { isFlowActive } from "$lib/ni/flow";
 
 export const SLOW_POLL_MS = 10_000;
 export const FAST_POLL_MS = 3_000;
@@ -10,9 +10,8 @@ export const FAST_POLL_MS = 3_000;
 export interface BoardDeps {
   fetchBoard: () => Promise<{ items: NiBoardItem[] }>;
   isUnlocked: () => boolean;
-  // v2 only: one item's flow fields (GET /api/ni/items/{id}/flow). When given, the 3 s fast poll
-  // reads only the active v2 items through it instead of the whole board; a v1 board (rows
-  // without `actions`) keeps the board-wide fast poll.
+  // One item's flow fields (GET /api/ni/items/{id}/flow). When given, the 3 s fast poll reads only
+  // the active items through it instead of the whole board.
   fetchFlow?: (id: string) => Promise<NiFlowPoll>;
   // Called for every non-stale load outcome: null on success, else the raw error (the page
   // turns it into words with describeError — kept out of here so the store has no api import).
@@ -59,7 +58,7 @@ export function createBoard(deps: BoardDeps) {
     }
   }
 
-  /** Poll ONE item's flow (v2). Merges {state, flow, awaiting_yes, actions} into its row; when the
+  /** Poll ONE item's flow. Merges {state, flow, awaiting_yes, actions} into its row; when the
    *  flow is no longer active (finished, failed, cancelled) the whole board reloads once so the
    *  card picks up its payload. Errors are ignored: the slow board poll reports them. */
   async function pollItem(id: string): Promise<void> {
@@ -85,14 +84,12 @@ export function createBoard(deps: BoardDeps) {
     }
   }
 
-  /** The 3 s tick while a card walks a flow: active v2 items poll one by one; any active v1 item
-   *  (or no fetchFlow) keeps the board-wide reload. */
+  /** The 3 s tick while a card walks a flow: active items poll one by one (no fetchFlow: the board reloads). */
   function fastTick(): void {
     if (document.visibilityState !== "visible") return;
     const active = items.filter((it) => isFlowActive(it.flow ?? null));
-    const v2 = active.filter((it) => rowActions(it) !== null);
-    if (!deps.fetchFlow || v2.length < active.length) { void load(); return; }
-    for (const it of v2) void pollItem(it.id);
+    if (!deps.fetchFlow) { void load(); return; }
+    for (const it of active) void pollItem(it.id);
   }
 
   function tick(): void {

@@ -130,8 +130,8 @@ def _row_defs() -> dict[str, dict]:
         "interpretation": STR, "query": ref("RowQuery"), "fit": ref("Fit"), "actions": arr(ref("ActionKind")),
         "rendered": BOOL, "render": nullable(ref("RowRender")), "draft": nullable(ref("RowDraft")),
         "preview": nullable(ref("RowPreview")), "brief": ref("BriefState"),
-    }, opt=("interpretation", "query", "fit", "actions", "rendered", "render", "draft", "preview", "brief"),
-        desc="One row of GET /api/ni/board. `actions` is present only under the v2 flow; `payload` is the bound scene.")
+    }, opt=("interpretation", "query", "fit", "rendered", "render", "draft", "preview", "brief"),
+        desc="One row of GET /api/ni/board. `actions` lists what the card offers; `payload` is the bound scene.")
     return {
         "NeedsItem": obj({"name": STR, "label": STR}), "Display": obj({"size": ref("DisplaySize")}),
         "AwaitingYes": obj({"from": enum(ni_routes.AWAITING_FROM), "host": STR, "title": STR, "used_key": BOOL},
@@ -149,7 +149,7 @@ def _row_defs() -> dict[str, dict]:
         "BoardRow": row,
         "FlowPoll": obj({"id": STR, "state": ref("ItemState"), "flow": nullable(ref("Flow")),
                          "awaiting_yes": nullable(ref("AwaitingYes")), "actions": arr(ref("ActionKind"))},
-                        desc="GET /api/ni/items/{id}/flow (v2): one item's flow fields."),
+                        desc="GET /api/ni/items/{id}/flow: one item's flow fields."),
     }
 
 

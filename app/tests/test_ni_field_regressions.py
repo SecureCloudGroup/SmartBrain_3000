@@ -78,8 +78,6 @@ def test_field_3_tides_fetch_failure_names_itself_with_two_roads(client) -> None
     assert flow["state"] == "failed"
     assert "fetched" in flow["reason"] or "fetch" in flow["reason"], flow
     assert set(flow["reopen"]) == {"retry", "pick_source"}
-    # The pick_source road actually works.
-    assert client.post(f"/api/ni/items/{iid}/flow/reopen").json()["state"] == "source"
 
 
 def test_field_5_wrong_value_note_is_journaled_and_rewinds_honestly(client) -> None:

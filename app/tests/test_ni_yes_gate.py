@@ -292,10 +292,9 @@ def test_no_re_lands_the_pick_without_the_declined_source(monkeypatch) -> None:
     item_id = _page_card(monkeypatch, store, ranked_search=copy.deepcopy(_ROWS))
     store.record_validation(item_id, False)
     out = ni_flow.decline_reading(store, item_id)
-    assert out["kind"] == "repick"
-    field = ni_flow.board_flow_field(store, item_id)
-    assert field["state"] == "source"
-    assert [s["url"] for s in field["suggestions"]] == ["https://storms.example.org/now"]
+    assert out["kind"] == "relocate"
+    record = ni_flow._flow_read(store, item_id)
+    assert _PAGE_URL in record["_declined"], "the next auto-pick skips the declined source"
     assert store.get_item(item_id)["state"] == "draft"
 
 
@@ -389,14 +388,14 @@ def test_yes_confirms_and_the_next_tick_may_promote(client, monkeypatch) -> None
 def test_no_journals_and_re_lands_the_pick(client, monkeypatch) -> None:
     item_id = _route_page_card(client, monkeypatch, rows=copy.deepcopy(_ROWS))
     r = client.post(f"/api/ni/items/{item_id}/validate", json={"ok": False})
-    assert r.status_code == 200 and r.json()["repick"] == "repick"
+    assert r.status_code == 200 and r.json()["repick"] == "relocate"
     store = client.app.state.ni
     assert store.get_item(item_id)["state"] == "draft"
     kinds = [e["kind"] for e in store.read_journal(item_id)]
     assert "c2_wrong" in kinds
     row = next(x for x in client.get("/api/ni/board").json()["items"] if x["id"] == item_id)
-    assert row["flow"]["state"] == "source"
-    assert [s["url"] for s in row["flow"]["suggestions"]] == ["https://storms.example.org/now"]
+    assert _PAGE_URL in (ni_flow._flow_read(store, item_id) or {}).get("_declined", [])
+    assert "suggestions" not in row["flow"]
     # the next pick builds and waits for its own YES
     assert row["awaiting_yes"] is None
 

@@ -31,7 +31,7 @@ def test_a_compare_the_build_cannot_answer_is_refused_at_build(monkeypatch) -> N
     ask = "temperature in Charleston vs Tulsa"
     out = fv._run(store, monkeypatch, "open_meteo_charleston", ask,
                   fv._intent(ask, "weather", ["temperature"], "Charleston"))
-    assert out["state"] == "unsupported", out["notes"]
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "compare_unbuildable", out["notes"]
     assert any("can't compare these yet" in n and "Tulsa" in n for n in out["notes"]), out["notes"]
 
 

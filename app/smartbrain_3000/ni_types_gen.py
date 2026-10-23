@@ -280,7 +280,7 @@ class BoardRow(TypedDict):
     interpretation: NotRequired[str]
     query: NotRequired[RowQuery]
     fit: NotRequired[Fit]
-    actions: NotRequired[list[ActionKind]]
+    actions: list[ActionKind]
     rendered: NotRequired[bool]
     render: NotRequired[RowRender | None]
     draft: NotRequired[RowDraft | None]

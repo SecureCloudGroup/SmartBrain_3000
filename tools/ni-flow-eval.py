@@ -98,7 +98,7 @@ _KNOWN_CASE_KEYS: frozenset[str] = frozenset({
 })
 _ENGINE_STATES: frozenset[str] = frozenset({
     "ready", "awaiting_params", "awaiting_credential",
-    "unsupported", "source", "failed",
+    "unsupported", "source", "declined", "failed",
 })
 _ENGINE_SETTLED: tuple[str, ...] = ("ready", "awaiting_params", "awaiting_credential")
 
@@ -769,7 +769,7 @@ def _run_case_recorded(case: dict) -> dict:
             out["image_format"] = fmt
             out["status"] = "PASS" if fmt else "FAIL(sniff)"
             return out
-        # BY-DESIGN rows (per ni-cases.md §B): failed/source outcomes are the
+        # BY-DESIGN rows (per the case registry, fixtures/ni_flow/cases.json): failed/source outcomes are the
         # feature, not a bug. Grade the fixture (if any) against the honest class.
         if expected_state == "source":
             out["status"] = "PASS(source_pause_by_design)"
@@ -1247,7 +1247,7 @@ def _check_ni_flow_module() -> str:
 def engine_gate_pass(results: list[dict]) -> bool:
     """Engine gate: every case reaches its registry-declared ``expected_state``.
 
-    Grading (per ni-cases.md §B — the honest outcome IS the feature for
+    Grading (per the case registry, fixtures/ni_flow/cases.json — the honest outcome IS the feature for
     safety-edge rows):
 
     - ``ready`` / ``awaiting_params`` / ``awaiting_credential`` rows also

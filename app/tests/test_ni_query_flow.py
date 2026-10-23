@@ -366,7 +366,7 @@ def test_a_team_named_in_no_row_is_the_honest_nothing(lib) -> None:
     out = ni_flow._sample_and_map(store, item_id, ask, _intent(ask, "result"), url,
                                   _model(_ir("games", where=[{"col": "*", "op": "names", "value": "Sharks"}])),
                                   lambda _u: copy.deepcopy(sample))
-    assert out["state"] == "unsupported" and "has nothing for this right now" in out["error"]
+    assert out["state"] == "declined", out
 
 
 def test_a_pushed_bound_and_a_stretch_refetch_and_seal_the_card(lib) -> None:

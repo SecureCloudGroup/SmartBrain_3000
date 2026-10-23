@@ -1827,10 +1827,6 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, value }),
     }),
-  niFlowReopen: (id: string) =>
-    req<{ ok: boolean; state: string }>(`/api/ni/items/${encodeURIComponent(id)}/flow/reopen`, {
-      method: "POST",
-    }),
   niFindings: () =>
     req<{ findings: NiFinding[] }>("/api/ni/findings"),
   niResolveFinding: (id: string) =>

@@ -11,11 +11,6 @@ from fastapi.testclient import TestClient
 from smartbrain_3000 import ni_flow
 
 
-@pytest.fixture(autouse=True)
-def _v2(monkeypatch):
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v2")
-
-
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
     monkeypatch.setenv("SMARTBRAIN_DB_PATH", str(tmp_path / "ni.duckdb"))
@@ -52,11 +47,8 @@ def test_a_card_without_a_flow_declares_its_item_actions(client) -> None:
     assert body["flow"] is None and body["actions"] == _board_row(client, iid)["actions"]
 
 
-def test_unknown_item_and_v1_are_404(client, monkeypatch) -> None:
+def test_unknown_item_is_404(client) -> None:
     assert client.get("/api/ni/items/nope/flow").status_code == 404
-    item_id = ni_flow.create_shell_item(client.app.state.ni, "another ask")
-    monkeypatch.setenv("SMARTBRAIN_NI_FLOW", "v1")
-    assert client.get(f"/api/ni/items/{item_id}/flow").status_code == 404
 
 
 def test_the_poll_never_mutates_what_the_board_read_would(client) -> None:
