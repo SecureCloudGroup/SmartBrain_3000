@@ -8,6 +8,7 @@
   // wrong" strip — mirror ni-format §10 verbs exactly.
   import { onDestroy, onMount, untrack } from "svelte";
   import { goto } from "$app/navigation";
+  import BriefSummary from "$lib/components/BriefSummary.svelte";
   import CardShell from "$lib/components/CardShell.svelte";
   import BuildProgress from "$lib/components/BuildProgress.svelte";
   import LinksStop from "$lib/components/LinksStop.svelte";
@@ -1289,6 +1290,7 @@
           {reason}
           rendered={item.rendered === true}
           {notice}
+          roomy={!!item.brief}
           {fit}
         >
           {#snippet chips()}
@@ -1629,6 +1631,10 @@
             {/if}
 
           {#snippet below()}
+          {#if item.brief && !item.flow}
+            <!-- S8: a headline brief's opt-in summary by the owner's LOCAL model; its form state stays in the component. -->
+            <BriefSummary {item} onchanged={load} />
+          {/if}
           {#if !item.flow && allows(item, "fix", !item.shell && (item.state === "failing" || item.state === "broken" || item.state === "degraded" || (item.state === "commissioning" && item.consecutive_failures > 0)))}
             <!-- P3: the card's Fix — re-derives against the card's OWN frozen
                  source (never a new host). Generic across every http card.
@@ -1791,7 +1797,7 @@
 
           {#snippet actions()}
             <span class="ni-actions">
-              {#if !formBoxChrome(state, !!formClir, notice)}
+              {#if !formBoxChrome(state, !!formClir, notice, !!item.brief)}
                 <button
                   class="linklike ni-history"
                   disabled={busyId === item.id || historyFor !== null}
@@ -1810,7 +1816,7 @@
               <details class="ni-more">
                 <summary title="More actions" aria-label="More actions">⋯</summary>
                 <div class="ni-more-menu">
-                  {#if formBoxChrome(state, !!formClir, notice)}
+                  {#if formBoxChrome(state, !!formClir, notice, !!item.brief)}
                     <!-- The tight form-card chrome (CardShell "formBoxChrome") has no
                          room for a visible History/Run now pair — they move into this
                          menu instead of disappearing. -->

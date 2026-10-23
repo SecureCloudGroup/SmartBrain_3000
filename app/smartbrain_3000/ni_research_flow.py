@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from . import gateway, ni, ni_flow, ni_recipe, ni_refresh
-from .ni_research import loop, policy
+from .ni_research import loop, policy, tools
 from .ni_research.ctx import ResearchCtx, normal_url, one_line
 
 log = logging.getLogger(__name__)
@@ -120,7 +120,7 @@ def _preview_of(ctx: ResearchCtx, spec: dict) -> dict:
     assert isinstance(spec, dict), "spec required"
     sample = ctx.samples.get(normal_url(str(spec["source"]["url"])))
     assert sample is not None, "propose_card ran on a stored sample"
-    return ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(sample["parsed"]))
+    return ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(tools.sample_payload(sample["parsed"])))
 
 
 def _can_land(ctx: ResearchCtx, item_id: str, request: str, proposal: dict) -> str | None:

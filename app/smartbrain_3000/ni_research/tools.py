@@ -10,7 +10,7 @@ import copy
 import json
 from urllib.parse import urlsplit
 
-from .. import ni, ni_fetch, ni_polite, ni_recipe, pagegraph
+from .. import ni, ni_brief, ni_fetch, ni_polite, ni_recipe, pagegraph
 from ..netguard import FetchError
 from ..ni_verify.classes import shadow_reasons
 from ..ni_verify.rows import SourceInfo, read_result
@@ -216,6 +216,32 @@ def checks_for(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[di
     return _checks(ctx, outputs, url, info)
 
 
+def sample_payload(parsed: object) -> object:
+    """A sample as the engine reads it at refresh: a bare list is wrapped as ``{"items": [...]}``."""
+    return ni_brief.normalize(parsed) or parsed
+
+
+def brief_spec(ctx: ResearchCtx, spec: dict, parsed: object) -> dict:
+    """S8: for a headline question (``text_brief`` / ``latest_items``) over a sample that holds a list of titled,
+    linked or dated items, the card is laid out by code (``ni_brief``): the model's source stays, its pipeline and
+    scene are replaced, so the headline text is extracted and never written by a model. Any other question or
+    sample keeps the draft as written."""
+    assert isinstance(ctx, ResearchCtx) and isinstance(spec, dict), "a ctx and a spec"
+    kind = ctx.question.get("kind")
+    if not ni_brief.is_brief_question(kind):
+        return spec
+    cadence = ni_recipe.CADENCE_MINUTES.get(ctx.question.get("cadence") or "hourly", 60)
+    built = ni_brief.build(parsed, title=str(spec.get("title") or ctx.question.get("subject") or "Headlines"),
+                           ask=ctx.request, now=ctx.now, source_url=str(spec["source"]["url"]),
+                           cadence_s=cadence * 60, viewer_tz=str(getattr(ctx.zone, "key", None) or "UTC"),
+                           question_kind=kind, wants=[])
+    if built is None:
+        return spec
+    from ..ni_forms.form_scene import display_size_for_span
+    return {**spec, "pipeline": built["pipeline"], "scene": built["scene"], "brief": built["brief"],
+            "display": {"size": display_size_for_span(str(built["scene"]["spans"]["desktop"]))}}
+
+
 def _run(ctx: ResearchCtx, draft: object) -> dict:
     """Validate ``draft`` as a researcher draft and run its pipeline on the stored sample (no network)."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
@@ -235,8 +261,9 @@ def _run(ctx: ResearchCtx, draft: object) -> dict:
         return error("no_sample", "fetch_sample the source URL first")
     if (source.get("format") or "json") != sample["format"]:
         return error("invalid_spec", f"source.format must be {sample['format']} like the sample")
+    spec = brief_spec(ctx, spec, sample["parsed"])
     try:
-        outputs = ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(sample["parsed"]))
+        outputs = ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(sample_payload(sample["parsed"])))
     except ni.NIError as exc:
         return error("pipeline_failed", f"{exc.kind}: {exc.detail}")
     info = ctx.urls.get(key) or {}

@@ -13,6 +13,13 @@ to know when a release changes behavior.
 
 ### Added
 
+- **Brief cards.** Ask for "the latest news on X" or "a brief on Y" and the card lists the
+  source's own headlines (title, link, time and where it came from), taken from any feed, list
+  or JSON items source. No model writes a headline. On a kept card you can turn on "Summary
+  from your local model": a short summary written on your computer by your own model after each
+  refresh, always labelled "Summary written by your local model". The headlines keep showing
+  with it on. With no local model the switch says so and stays off; a cloud model is never used
+  for a refresh.
 - **A new Neural Interface flow, off by default (`ni_flow = v2`).** A new card tries the
   best SmartBrain Library source by itself, falling through to the next ones when a
   source fails its checks. It shows the real card as a preview. SmartBrain reads that

@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from . import ni_recipe
+from . import ni_brief, ni_recipe
 from .zones import zone_named
 
 log = logging.getLogger("smartbrain.ni")
@@ -596,7 +596,7 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False, researcher:
                "_l1_last_attempt", "_l1_trial", "_template",
                "_l2_last_attempt", "_l2_proposal", "_research_last_attempt", "_born", "_shell",
                "_model_consent", "_model_consent_web", "_built_from", "_present_ok", "_fit", "query",
-               "interpretation", "_render_ok", "_feed_candidates", "recipe"}
+               "interpretation", "_render_ok", "_feed_candidates", "recipe", "brief"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
     _validate_built_from(body.get("_built_from"))
@@ -609,6 +609,8 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False, researcher:
     # S4a (plan 6.1/6.4): the sealed recipe block; a researcher-marked draft (or a caller that says so)
     # also meets the researcher rules (no llm / $secret / model or MCP source / chosen interval).
     ni_recipe.validate_recipe(body.get("recipe"))
+    # S8 (plan D4): the sealed ``brief`` key of a headline card; its summary (an llm stage) is a user action
+    # on a kept card, so it is checked against the pipeline below, after the stages themselves validate
     # W2 (2026-09-15): ``_shell`` is the flow's not-yet-finalized marker —
     # boolean-true or absent, nothing else (the commission door reads it).
     if "_shell" in body and body["_shell"] is not True:
@@ -636,6 +638,7 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False, researcher:
     if body.get("repair_policy") is not None:
         _validate_repair_policy(body["repair_policy"])
     _validate_model_override(body.get("model"))
+    ni_brief.validate(body)
     if "history" in body and body["history"] is not None:
         _validate_history_spec(body["history"], outputs)
     if "alerts" in body and body["alerts"] is not None:
@@ -1691,14 +1694,20 @@ def _validate_transform_op(op: object, i: int, j: int, outputs: set[str]) -> Non
         # time's ``zone``: a top-level output holding the source's zone (Open-Meteo ``timezone`` /
         # ``utc_offset_seconds``) — zoneless values are then anchored in it so a stale / next-event
         # judgement reads the source's wall clock against the user's clock honestly (R5-zone)
-        _closed_keys(node, {"fn", "field", "key", "utc", "clock", "unless", "zone"} if fn == "time"
+        # time's ``lenient``: a row whose time is empty or unreadable gets no time (null) instead of failing
+        # the run - feeds leave the date off some items (S8 briefs); needs ``key``, never with ``unless``
+        _closed_keys(node, {"fn", "field", "key", "utc", "clock", "unless", "zone", "lenient"} if fn == "time"
                      else {"fn", "field", "key"}, where)
         if node.get("key") is not None and not (isinstance(node["key"], str) and len(node["key"]) <= 120
                                                  and _ROW_KEY_RE.fullmatch(node["key"])):
             raise ValueError(f"{where}.key malformed")
-        for flag in ("utc", "clock"):
+        for flag in ("utc", "clock", "lenient"):
             if node.get(flag) is not None and not isinstance(node[flag], bool):
                 raise ValueError(f"{where}.{flag} must be true or false")
+        if "lenient" in node and not isinstance(node["lenient"], bool):
+            raise ValueError(f"{where}.lenient must be true or false")
+        if node.get("lenient") and (node.get("key") is None or node.get("unless") is not None):
+            raise ValueError(f"{where}.lenient needs a key and no unless")
         unless = node.get("unless")
         if unless is not None and not (isinstance(unless, str) and len(unless) <= 120 and (
                 _ROW_KEY_RE.fullmatch(unless) if node.get("key") is not None else _KEY_RE.match(unless))):
@@ -1808,7 +1817,7 @@ def _validate_llm_stage(st: dict, i: int, outputs: set[str]) -> None:
     assert isinstance(outputs, set), "outputs must be a set"
     assert i >= 0, "stage index must be non-negative"
     where = f"spec.pipeline[{i}]"
-    _closed_keys(st, {"op", "instruction", "output"}, where)
+    _closed_keys(st, {"op", "instruction", "output", "optional", "max_chars"}, where)
     instruction = _require_str(st.get("instruction"), f"{where}.instruction",
                                 max_len=_MAX_LLM_INSTRUCTION)
     if "{{param:" in instruction:
@@ -1830,6 +1839,24 @@ def _validate_llm_stage(st: dict, i: int, outputs: set[str]) -> None:
                 f"{where}.output.{name} type must be one of {sorted(_LLM_OUTPUT_TYPES)}"
             )
         outputs.add(name)
+    # S8: ``optional`` - a model that is missing, busy or answers badly leaves the (string) outputs empty instead
+    # of failing the run; ``max_chars`` - every string output is cut to this many characters. Both closed.
+    if "optional" in st:
+        if st["optional"] is not True:
+            raise ValueError(f"{where}.optional is true when present")
+        if any(kind != "string" for kind in output.values()):
+            raise ValueError(f"{where}.optional needs string outputs only")
+    if "max_chars" in st:
+        cap = st["max_chars"]
+        if not isinstance(cap, int) or isinstance(cap, bool) or not 1 <= cap <= _MAX_LLM_STRING_CHARS:
+            raise ValueError(f"{where}.max_chars must be an integer 1..{_MAX_LLM_STRING_CHARS}")
+
+
+def _llm_stages_optional(spec: dict) -> bool:
+    """True when the spec has llm stages and every one is ``optional`` (S8: a brief's summary)."""
+    assert isinstance(spec, dict), "spec must be a dict"
+    stages = [s for s in (spec.get("pipeline") or []) if isinstance(s, dict) and s.get("op") == "llm"]
+    return bool(stages) and all(s.get("optional") is True for s in stages)
 
 
 def _spec_has_llm_stage(spec: dict) -> bool:
@@ -2728,7 +2755,7 @@ def run_pipeline(stages: list[dict], payload: object,
         elif op == "transform":
             current = _apply_transform(stage.get("apply") or [], current, history=hist)
         elif op == "llm":
-            if llm_call is None:
+            if llm_call is None and stage.get("optional") is not True:
                 raise NIError("llm_unrouted", "no local model call available")
             current = _apply_llm(stage, current, llm_call)
         elif op == "graph_extract":
@@ -3035,8 +3062,13 @@ def _txf_time(payload: dict, field: str, op: dict, zone: tzinfo | None = None) -
     "sunset 18:36" declared in Denver reads at 20:13 EDT as 20:36 EDT, not a past 18:36 EDT."""
     utc, clock, key, unless = bool(op.get("utc")), bool(op.get("clock")), op.get("key"), op.get("unless")
 
-    def shown(value: object) -> _TimeText:
-        moment = _time_moment(value, naive_utc=utc, zone=zone)
+    def shown(value: object) -> _TimeText | None:
+        try:
+            moment = _time_moment(value, naive_utc=utc, zone=zone)
+        except NIError:
+            if op.get("lenient"):
+                return None  # S8: this row has no readable time; it stays, without one
+            raise
         return _time_text(_moment_text(moment, clock), moment)
 
     def tbd(value: object) -> _TimeText:
@@ -3679,11 +3711,46 @@ def _apply_llm(stage: dict, current: object, llm_call: object) -> dict:
     (§13 "one retry with the parse error appended"); a second failure raises
     ``NIError('llm_output')`` and last_good keeps rendering.
     """
-    assert isinstance(stage, dict) and llm_call is not None, "stage + llm_call required"
+    assert isinstance(stage, dict), "stage required"
+    assert llm_call is not None or stage.get("optional") is True, "llm_call required unless the stage is optional"
     if not isinstance(current, dict):
         raise NIError("llm_input", "llm stage requires a pipeline dict")
     schema = dict(stage.get("output") or {})
     instruction = str(stage.get("instruction") or "")
+    try:
+        if llm_call is None:
+            raise NIError("llm_unrouted", "no local model call available")
+        parsed = _ask_llm_stage(llm_call, instruction, current, schema)
+    except NIError as exc:
+        if stage.get("optional") is not True or exc.kind not in _LLM_SOFT_KINDS:
+            raise
+        # S8: an optional stage (string outputs only) leaves them empty - the rest of the card still refreshes
+        parsed = dict.fromkeys(schema, "")
+    cap = stage.get("max_chars")
+    merged = dict(current)
+    for name, value in parsed.items():  # bounded by _MAX_LLM_OUTPUTS
+        merged[name] = _clip_text(value, cap) if isinstance(cap, int) and isinstance(value, str) else value
+    return merged
+
+
+# the llm failures an ``optional`` stage absorbs: the model is not routed, not local, errored or answered badly
+_LLM_SOFT_KINDS: frozenset[str] = frozenset({"llm_unrouted", "llm_requires_local", "llm_error", "llm_output"})
+
+
+def _clip_text(text: str, cap: int) -> str:
+    """``text`` cut to at most ``cap`` characters at a word boundary, with an ellipsis when something was cut."""
+    assert isinstance(text, str) and cap >= 1, "text and a positive cap"
+    if len(text) <= cap:
+        return text
+    cut = text[: max(cap - 1, 0)]
+    space = cut.rfind(" ")
+    if space >= cap // 2:
+        cut = cut[:space]
+    return cut.rstrip() + "\u2026"
+
+
+def _ask_llm_stage(llm_call: object, instruction: str, current: dict, schema: dict) -> dict:
+    """The two-shot ask of one llm stage: the parsed reply, or ``llm_output`` after the one retry."""
     prompt = _build_llm_stage_prompt(instruction, current, schema)
     first_reply = _invoke_llm_call(llm_call, prompt)
     parsed = _try_parse_llm_output(first_reply, schema)
@@ -3697,10 +3764,7 @@ def _apply_llm(stage: dict, current: object, llm_call: object) -> dict:
         parsed = _try_parse_llm_output(second_reply, schema)
         if parsed is None:
             raise NIError("llm_output", "reply did not match output schema after retry")
-    merged = dict(current)
-    for name, value in parsed.items():  # bounded by _MAX_LLM_OUTPUTS
-        merged[name] = value
-    return merged
+    return parsed
 
 
 def _build_llm_stage_prompt(instruction: str, current: dict, schema: dict) -> str:
@@ -6068,7 +6132,11 @@ def _source_hash(payload: object) -> str:
 
     Canonical JSON (sorted keys) so dict ordering never fakes a change; the
     hash lives in the sealed ``llm_state`` slot and is compared before any
-    model runs — an unchanged source costs zero llm tokens on that tick.
+    model runs — an unchanged source costs zero llm tokens on that tick. The
+    slot also records the ``spec_rev`` it was written at and the skip needs it
+    to match, so any revision (an llm stage added, removed or edited, by any
+    writer) runs the model once even on identical bytes; a row from before
+    that field has no ``spec_rev`` and so runs once, then records it.
     """
     try:
         blob = json.dumps(payload, sort_keys=True, ensure_ascii=False,
@@ -6271,7 +6339,13 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         spec = substitute_params(item["spec"])
         llm_call = None
         if _spec_has_llm_stage(spec):
-            llm_call = _make_llm_call(store, spec, gateway_mod)
+            try:
+                llm_call = _make_llm_call(store, spec, gateway_mod)
+            except NIError as exc:
+                # S8: a card whose every llm stage is optional (a brief's summary) still refreshes its headlines
+                # when no LOCAL model is routed; the stage then leaves its outputs empty. Never a cloud call.
+                if not _llm_stages_optional(spec) or exc.kind not in _LLM_SOFT_KINDS:
+                    raise
         payload, image_blob = _fetch_source(spec, item_id, gateway_mod, secrets_store,
                                              schedules_store, store, kb)
         fetched_at = datetime.now(UTC)  # §34: the form bind's ``now`` + Context.fetched_at
@@ -6289,17 +6363,19 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         # (3) run continuity: the previous values ride the stage input so the
         #     model can dedupe/frame deltas instead of re-deriving cold.
         llm_fields: set[str] = set()
+        src_hash: str | None = None
+        for _st in (spec.get("pipeline") or []):
+            if isinstance(_st, dict) and _st.get("op") == "llm":
+                llm_fields = set((_st.get("output") or {}).keys())
+                break
         if llm_call is not None:
-            for _st in (spec.get("pipeline") or []):
-                if isinstance(_st, dict) and _st.get("op") == "llm":
-                    llm_fields = set((_st.get("output") or {}).keys())
-                    break
             src_hash = _source_hash(payload)
             prev_state = store.read_snapshot(item_id, "llm_state")
             prev_values = (prev_state or {}).get("payload", {}).get("values")
             if (item["state"] == "live" and prev_state is not None
                     and prev_state.get("ok")
                     and prev_state["payload"].get("src_hash") == src_hash
+                    and prev_state["payload"].get("spec_rev") == started_rev
                     and isinstance(prev_values, dict)):
                 duration_ms = int((time.monotonic() - started) * 1000)
                 store.record_run(item_id, "unchanged", duration_ms=duration_ms,
@@ -6334,11 +6410,14 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
         #     rendering), never a blank card marked ok (live field 2026-09-29: Lakers next game)
         if (spec.get("source") or {}).get("type") == "http_page" and isinstance(outputs, dict):
             _refuse_blank_page_run(spec, outputs, llm_fields)
-        if llm_call is not None and isinstance(outputs, dict):
+        if llm_fields and isinstance(outputs, dict):
+            # an optional stage that left every output empty wrote nothing: not a state to skip the model on
+            wrote = llm_call is not None and any(outputs.get(name) not in (None, "") for name in llm_fields)
             store.write_snapshot(item_id, "llm_state", {
                 "src_hash": src_hash,
+                "spec_rev": started_rev,
                 "values": {name: outputs.get(name) for name in llm_fields},
-            }, ok=True)
+            }, ok=wrote or not _llm_stages_optional(spec))
     except NIError as exc:
         if exc.kind in CAPACITY_KINDS:
             raise  # B3a: busy / unavailable is never a failure — no run row, latest, streak or L1
@@ -8661,6 +8740,19 @@ def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore, item_id:
     return {"text": text}
 
 
+_OPTIONAL_LLM_ACQUIRE_S = 1.0   # how long an optional llm stage waits for the local slot before giving way
+
+
+def _first_local_route(routes: dict, gateway_mod) -> str | None:
+    """The first LOCAL model on the ni / chat / agent routes, or None (a cloud route is never returned)."""
+    assert isinstance(routes, dict), "routes required"
+    for capability in ("ni", "chat", "agent"):  # bounded to 3
+        model = gateway_mod.resolve_model(capability, routes)
+        if model and gateway_mod.is_local(model):
+            return model
+    return None
+
+
 def _make_llm_call(store: NIStore, spec: dict, gateway_mod) -> object | None:
     """Build the ``(prompt) -> reply`` closure for the pipeline's llm stage (§13).
 
@@ -8675,19 +8767,35 @@ def _make_llm_call(store: NIStore, spec: dict, gateway_mod) -> object | None:
     if hasattr(gateway_mod, "load_routes"):
         routes = gateway_mod.load_routes(store.conn)
     override = spec.get("model")
-    model = override or gateway_mod.resolve_model("ni", routes)
+    if override == ni_brief.LOCAL_MODEL:
+        # S8: the sentinel a brief's summary seals; the local model is resolved NOW, from the routes as they are
+        # at this run, so a switched local server keeps working. Only a local id is ever returned.
+        model = _first_local_route(routes, gateway_mod)
+        if not model:
+            raise NIError("llm_unrouted", "no local model routed")
+    else:
+        model = override or gateway_mod.resolve_model("ni", routes)
     if not model:
         raise NIError("llm_unrouted", "no ni model route configured")
     if not gateway_mod.is_local(model):
         raise NIError("llm_requires_local", model)
+    # a card whose every llm stage is optional (a brief's summary) never waits on the local slot: a busy model is
+    # a soft ``llm_error`` and the headlines refresh without it
+    wait = _OPTIONAL_LLM_ACQUIRE_S if _llm_stages_optional(spec) else None
+    busy = getattr(gateway_mod, "LocalBusy", None)
 
     def _call(prompt: str) -> str:
         """One local model turn — no tools, no streaming; return the completion text."""
         assert isinstance(prompt, str) and prompt, "prompt required"
+        extra = {} if wait is None else {"acquire_timeout": wait}
         try:
-            data = gateway_mod.chat([{"role": "user", "content": prompt}], model)
+            data = gateway_mod.chat([{"role": "user", "content": prompt}], model, **extra)
         except gateway_mod.GatewayError as exc:
             raise NIError("llm_error", str(exc.status_code)) from None
+        except Exception as exc:
+            if busy is not None and isinstance(exc, busy):
+                raise NIError("llm_error", "local model busy") from None
+            raise
         return gateway_mod.completion_text(data) or ""
 
     return _call

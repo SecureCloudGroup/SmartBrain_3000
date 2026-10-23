@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from . import profile
 from .enumerate import enumerate as enumerate_cands
 from .enumerate import fallback as fallback_cand
+from .enumerate import phone_pick
 from .layout import layout_span
 from .present import present
 from .record import from_answers, history_key
@@ -176,11 +177,26 @@ def design(chosen: list[dict], outputs: dict, *, title: str, ask: str,
                             title=title, cadence_s=cadence_s, rows_output_name=rows_output_name,
                             question_kind=frame["kind"] if frame else None,
                             wants=frame["wants"] if frame else None)
+    return design_record(rec, inp, now=now, rows_output_name=rows_output_name, frame=frame, call_model=call_model)
+
+
+def design_record(rec: DataRecord, inp: object, *, now: datetime, rows_output_name: str | None, frame: dict | None,
+                  call_model: Callable[[str], str] | None = None, prefer_form: str | None = None,
+                  prefer_spans: tuple[str, ...] = ()) -> Design:
+    """The design steps after the record exists: profile → enumerate → present → the sealed §34 node.
+    ``prefer_form`` (S8 briefs): when a candidate of that form survives enumeration it is the pick, with no
+    model asked - the card's shape is fixed by code, not chosen by a model. ``prefer_spans``: desktop span keys
+    to try, in order, for that pick (the first that lays out red-free at both its spans replaces the default)."""
+    assert isinstance(rec, DataRecord), "rec must be a DataRecord"
+    assert isinstance(now, datetime) and now.tzinfo is not None, "now must be an aware datetime"
     prof = profile.profile(rec, inp, now)
     cands = enumerate_cands(rec, prof, inp, now)
     assert cands, "enumerate always returns a candidate (the universal fallback)"
-    res = present(cands, rec, prof, inp, call=_flow_model_adapter(call_model))
-    chosen_cand, second_cand = _pick_candidate(res, cands)
+    preferred = next((c for c in cands if prefer_form and c.form == prefer_form), None)
+    if preferred is not None:
+        _prefer_span(preferred, rec, prof, inp, now, prefer_spans)
+    res = present(cands, rec, prof, inp, call=None if preferred is not None else _flow_model_adapter(call_model))
+    chosen_cand, second_cand = (preferred, None) if preferred is not None else _pick_candidate(res, cands)
     chosen_cand, pick, gates = _select_clean_design(cands, chosen_cand, rec, prof, inp, now)
     if second_cand is not None and second_cand.id == chosen_cand.id:
         second_cand = None   # the runner-up is never the same design as the pick
@@ -233,6 +249,22 @@ def form_scene(chosen: list[dict], outputs: dict, *, title: str, ask: str,
     return design(chosen, outputs, title=title, ask=ask, now=now, source_url=source_url, cadence_s=cadence_s,
                   rows_output_name=rows_output_name, call_model=call_model, viewer_tz=viewer_tz,
                   question_kind=question_kind, wants=wants).node
+
+
+def _prefer_span(cand: Candidate, rec: DataRecord, prof, inp, now: datetime, keys: tuple[str, ...]) -> None:
+    """Move ``cand``'s default span to the first of ``keys`` it supports and lays out red-free (desktop and the
+    phone span the engine pairs with it); no key fits, the default stays."""
+    assert isinstance(cand, Candidate), "cand must be a Candidate"
+    assert isinstance(keys, tuple), "keys are a tuple"
+    valid = {Span.parse(k) for k in cand.plans}
+    for key in keys[:4]:  # bounded: a short preference list
+        if key not in cand.plans:
+            continue
+        phone = phone_pick(key, valid, cand)
+        spans = {"desktop": key, "phone": phone.key if phone else f"p2x{Span.parse(key).rows}"}
+        if _spans_red_free(cand, rec, prof, inp, spans, now):
+            cand.default_span, cand.phone_span = key, phone.key if phone else None
+            return
 
 
 def _spans_red_free(cand: Candidate, rec: DataRecord, prof, inp, spans: dict, now: datetime) -> bool:

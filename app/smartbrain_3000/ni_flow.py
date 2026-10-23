@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 
 from . import browsers as _browsers_mod
 from . import claudecli as _claudecli_mod
-from . import db, ni, ni_master, ni_query, page_verify, pagegraph
+from . import db, ni, ni_brief, ni_master, ni_query, page_verify, pagegraph
 from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
@@ -5545,6 +5545,14 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             if moved is not None:
                 return moved
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
+    # S8 (plan D4): a headline ask ("latest news on X", "a brief on Y") over a feed or a list of items lands the
+    # brief card - code extracts the headlines, no model. A source whose Library row declares its answers keeps
+    # them, except a feed (the brief is the better card for one); a source without them builds the brief
+    # instead of moving on. Fresh builds only.
+    if not remap:
+        landed = _try_brief_build(store, item_id, request, intent, url, sample, live, picked, fetch_now)
+        if landed is not None:
+            return landed
     # A tapped Library source that declares its answers builds the card from them — no model
     # path-guessing. Fresh builds only (a Fix re-derives). Ruling 2026-10-05 ("Library cards; web as
     # links"): a tapped Library row builds ONLY from its declared answers — a source without them, or
@@ -5755,6 +5763,41 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                     fetch_now=fetch_now)
 
 
+def _is_parsed_feed(sample: object) -> bool:
+    """True for what ``formats.parse_feed`` returns (an RSS or Atom document): ``{title, items: [{guid, ...}]}``."""
+    items = sample.get("items") if isinstance(sample, dict) else None
+    return (isinstance(items, list) and bool(items) and isinstance(items[0], dict) and "guid" in items[0]
+            and set(sample) == {"title", "items"})  # type: ignore[arg-type]
+
+
+def _try_brief_build(store: ni.NIStore, item_id: str, request: str, intent: dict, url: str, sample: object,
+                     live: dict, picked: bool, fetch_now: datetime) -> dict | None:
+    """S8: build the headline brief for a brief-shaped ask (``text_brief`` / ``latest_items``) when the sample holds
+    a list of titled, linked or dated items; the flow record when it lands, None otherwise (the caller builds what
+    it would have). v2 only. A tapped Library row that declares its answers keeps them unless the sample is an
+    RSS / Atom feed. The card is held for the user's Keep like every card the program picked itself."""
+    assert store is not None and item_id, "args required"
+    kind = intent.get("frame_kind")
+    if not ni_brief.is_brief_question(kind) or not _is_v2(store):
+        return None
+    if picked and _library_answers(str(live.get("_library_source") or "")) and not _is_parsed_feed(sample):
+        return None
+    cadence = max(_MIN_CADENCE, int(intent.get("cadence_minutes") or _DEFAULT_CADENCE))
+    title = str(intent.get("subject") or request.splitlines()[0] if request else "")[:ni._MAX_TITLE] or "Headlines"
+    built = ni_brief.build(sample, title=title, ask=request, now=fetch_now.astimezone(UTC), source_url=url,
+                           cadence_s=cadence * 60, viewer_tz=ni.user_timezone_name(), question_kind=kind,
+                           wants=list(_frame_wants(intent)))
+    if built is None:
+        return None
+    count = len(built["preview_payload"].get("rows") or [])
+    note = f"built as a headline brief: {count} headlines read from {_host_hint(url)}; no model wrote them"
+    _transition(store, item_id, "assembling", source_url=url, note=note)
+    _try_journal(store, item_id, "updated", note)
+    return _handoff(store, item_id, request, intent, url, built, {}, _DISPLAY_LIST, converted=[], judge=None,
+                    degrade_note=note, remap=False, keep_source=None, keep_params=None, fetch_now=fetch_now,
+                    path="auto" if live.get("_auto_picked") else "mapping")
+
+
 def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: str,
              built: dict, fields: dict, klass: str, *, converted: list, judge: dict | None,
              degrade_note: str | None, remap: bool, keep_source: dict | None,
@@ -5813,6 +5856,8 @@ def _handoff(store: ni.NIStore, item_id: str, request: str, intent: dict, url: s
         track = history_track_for(built["scene"]["record"]["fields"], built["scene"]["record"]["rows"])
         if track is not None:
             spec["history"] = track
+    if isinstance(built.get("brief"), dict):  # S8: a headline card seals its (summary-off) brief key
+        spec["brief"] = dict(built["brief"])
     if fit is not None:
         spec["_fit"] = {"answers_ask": fit.answers_ask, "missing": list(fit.missing),
                         "wrong": list(fit.wrong), "evidence": list(fit.evidence)}

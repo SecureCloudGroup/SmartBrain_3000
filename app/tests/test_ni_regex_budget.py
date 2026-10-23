@@ -18,6 +18,7 @@ import pytest
 from smartbrain_3000 import (
     formats,
     netguard,
+    ni_brief,
     ni_fetch,
     ni_polite,
     ni_refresh,
@@ -29,7 +30,7 @@ from smartbrain_3000.ni_research import digest
 from smartbrain_3000.ni_verify import constraints
 
 # every ni_research module reads fetched text or model replies, so the package is walked, not listed
-MODULES = (formats, netguard, ni_fetch, ni_polite, pagegraph,
+MODULES = (formats, netguard, ni_brief, ni_fetch, ni_polite, pagegraph,
            *(importlib.import_module(f"{ni_research.__name__}.{m.name}") for m in pkgutil.iter_modules(ni_research.__path__)),
            # ni_verify reads the request and the fetched outputs for the refresh re-check, so it is walked too
            *(importlib.import_module(f"{ni_verify.__name__}.{m.name}") for m in pkgutil.iter_modules(ni_verify.__path__)))
@@ -83,6 +84,9 @@ ENTRY_POINTS = {
     "formats.parse_xml": formats.parse_xml,
     "formats.parse_text": formats.parse_text,
     "formats.sniff_format": lambda text: formats.sniff_format("text/plain", text),
+    "ni_brief.layout_of": lambda text: ni_brief.layout_of(
+        {"items": [{"title": text, "url": text, "published": text, text[:60]: text}] * 30}),
+    "ni_brief.layout_of_feed": lambda text: ni_brief.layout_of(formats.parse_feed(text)),
     "digest.clean_text": digest.clean_text,
     "digest.digest": lambda text: digest.digest("https://x.example.org/a", "json", {"field": text, "list": [text]}),
     "digest.clean_search_rows": lambda text: digest.clean_search_rows(

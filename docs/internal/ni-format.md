@@ -3854,3 +3854,55 @@ first segment — one line with an ellipsis, the whole line in its `title` — b
 · cadence, which wrap to their own line when both do not fit, at any width. A bound form
 card's footer is its CLIR's (`ni_forms/shell.py`, laid out per face) and CardShell adds no
 second one, so a live form card shows the line in its footer only once that shell lays it out.
+
+## 37. Brief cards (plan S8, decision D4 "Headlines + local")
+
+An ask for "the latest news on X" or "a brief on Y" (question kinds `latest_items`, `text_brief`) lands as a
+**brief card**: a list of the source's own headlines, written by code, never by a model. `ni_brief.py` owns it.
+
+**Headlines.** `ni_brief.layout_of(parsed)` looks (breadth first, three levels deep, at most 200 containers) for the
+list of objects that reads as headlines: a title key (`title`, `headline`, `name`, ...) plus a link key (https only)
+or a time key. The key tables are generic; no site, feed or ask is named. A bare list is wrapped as
+`{"items": list}`. `pipeline_for` seals the stages: `extract rows <path>[0:24]`, `where title ne ""`, `reverse`
+only for an oldest-first source, `top_n 8`, `time` (with `lenient: true`, so one junk date leaves that row without a
+time instead of failing the run) and `pick` of the title, link and time. `form_node` lays out a `ranked_list` form
+(numbered titles, a time and source host line from the link, the link in the hit map) through
+`ni_forms.form_scene.design_record(prefer_form=, prefer_spans=)`, which skips the presentation model. A source with
+no such list builds nothing and the caller builds what it would have. The same function serves three doors:
+the auto-pick / mapping flow (`ni_flow._try_brief_build`, sealed `_built_from.path` `auto` or `mapping`, held for Keep),
+and the researcher (`ni_research.tools.brief_spec` replaces the draft's pipeline, scene and display and keeps its
+source). A Library row that declares its answers keeps them, unless the sample is an RSS / Atom feed.
+
+**The sealed `brief` key.** Closed shape `{summary: bool}`; absent on every other card. Off: no `llm` stage and
+`model` null. On: exactly one `llm` stage whose only output is the string `brief_summary`, `optional: true`,
+`max_chars <= 600`, and `spec.model` names a model. A researcher draft may carry neither an `llm` stage nor a brief
+with the summary on (`ni_recipe.check_researcher_draft`, `validate_spec(researcher=True)`). Export and template
+install strip `brief` (`ni_routes._EXPORT_STRIP_KEYS`, `ni_library`); an export of a card with the summary on first
+drops the summary (`ni_brief.without_summary`).
+
+**Grammar additions.** `llm` stage: `optional` (only `true`; string outputs only; any soft failure of the stage,
+meaning no local model, a busy slot, an error or a bad reply, yields empty outputs and the run continues; an optional
+stage waits at most `_OPTIONAL_LLM_ACQUIRE_S` (1 s) for the local-model slot, `gateway.chat(acquire_timeout=)` raises
+`LocalBusy`, and `_make_llm_call` maps it to a soft `llm_error`, so the headlines never queue behind a chat) and
+`max_chars` (int 1..2000; the string outputs are clipped). `time` transform: `lenient` (bool, needs `key`, refused with `unless`).
+`run_item` tolerates the `llm_requires_local` / `llm_unrouted` refusal of `_make_llm_call` when every llm stage is
+optional, leaving the call unset, so a non-local model is never constructed or called (§13 is unchanged).
+
+**The opt-in.** `POST /api/ni/items/{id}/brief-summary {on}` (Desktop-local): 404 missing; 409 not a brief; 409 not
+kept (state not live / degraded / failing / paused, or held for Keep); 409 with a plain reason when no local model
+exists (`BRIEF_NO_LOCAL`); on requires a local model on the ni / chat / agent routes, seals the sentinel `local/auto` in `spec.model` and
+adds the stage (`_make_llm_call` resolves the first local model on those routes each time the card runs, so
+switching local servers keeps the summary working, and never resolves a non-local one), off removes both (`store.update_spec(origin="user")`, journal line, audit `ni_brief_summary_set`). The summary
+is written by the next refresh (the web triggers one run). The §13 monitor hash in `llm_state` records the `spec_rev`
+it was written at and the skip needs it to match, so turning the summary on, off and on again runs the model each
+time it is on even over unchanged bytes (an `llm_state` row without `spec_rev` runs once, then records it). Applying
+a re-research proposal to a card with the summary on carries the summary stage and `brief.summary` to the
+replacement only when the replacement is also a brief (`ni_brief.carry_summary`). Headlines refresh every time, with the summary on or off.
+
+**Board row.** A brief card's row carries `brief: {summary, local, state, label, text}` (`state` is `off`, `pending`,
+`ready` or `unavailable`; `label` is "Summary written by your local model"; `text` is at most 600 characters and only
+read from the stored outputs when the summary is on). The text is drawn only by the web component, under the label;
+it is never part of the form scene, so a model's words never sit in the headline list.
+
+**Client.** `BriefSummary.svelte` owns the toggle (its busy and refusal state are its own) and sits at the top of the
+card's `below` slot; CardShell takes a `roomy` prop so a brief keeps the bare-form chrome off. The painter is unchanged.

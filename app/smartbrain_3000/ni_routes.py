@@ -28,6 +28,7 @@ from . import (
     library_index,
     netguard,
     ni,
+    ni_brief,
     ni_flow,
     ni_library,
     ni_master,
@@ -77,6 +78,12 @@ class PatchIn(BaseModel):
     display: dict | None = None
     title: str | None = Field(default=None, max_length=300)
     interval_minutes: int | None = Field(default=None, ge=1, le=10080)
+
+
+class BriefSummaryIn(BaseModel):
+    """S8: turn a brief card's local-model summary on or off (a user action on a kept card)."""
+
+    on: bool
 
 
 class CredentialIn(BaseModel):
@@ -240,6 +247,8 @@ def _board_row(store: ni.NIStore, item: dict, *,
     fit = visible_fit(item["spec"], snap["payload"] if snap else None)
     if fit is not None:
         row["fit"] = fit
+    if ni_brief.is_brief(item["spec"]):  # S8: the headline card's summary block (closed keys, absent elsewhere)
+        row["brief"] = _brief_field(store, item)
     if ni.spec_renders(item["spec"]):  # Round 20 (B3a): ride only on a page-browser card
         row.update(_render_fields(item))
     if ni_flow.flow_mode(store.conn) == "v2":  # v1 rows omit the key
@@ -249,6 +258,15 @@ def _board_row(store: ni.NIStore, item: dict, *,
                 "", {}, shell=row["shell"], awaiting_yes=row["awaiting_yes"] is not None,
                 item_state=item["state"], has_payload=snap is not None)
     return row
+
+
+def _brief_field(store: ni.NIStore, item: dict) -> dict:
+    """S8: the board row's ``brief`` block of a headline card, from the sealed spec, the stored outputs of the last
+    run (read only while the summary is on) and whether a local model is set up."""
+    assert store is not None and isinstance(item, dict), "store + item required"
+    spec = item["spec"]
+    outputs = store.read_snapshot(item["id"], "outputs") if ni_brief.summary_on(spec) else None
+    return ni_brief.board_field(spec, outputs, local=ni_flow._local_flow_model(store) is not None)
 
 
 def _render_fields(item: dict) -> dict:
@@ -1561,6 +1579,55 @@ def set_repair_policy(request: Request, item_id: str, body: RepairPolicyIn) -> d
     return {"ok": True, "repair_policy": new_spec["repair_policy"]}
 
 
+# The honest reasons the summary toggle is refused (S8): the card's own words, shown as written.
+BRIEF_NO_LOCAL = ("There is no local model set up on this computer, so no summary can be written. Summaries are "
+                  "written only by a model that runs here; nothing is ever sent to a cloud model for this.")
+_BRIEF_NOT_KEPT = "Keep this card first; a summary can be turned on once it is kept."
+_BRIEF_NOT_A_BRIEF = "This card is not a headline brief."
+_BRIEF_STATES = frozenset({"live", "degraded", "failing", "paused"})
+
+
+@router.post("/api/ni/items/{item_id}/brief-summary")
+def set_brief_summary(request: Request, item_id: str, body: BriefSummaryIn) -> dict:
+    """S8 (plan D4): turn the local-model summary of a kept brief card on or off.
+
+    On: the card is pinned to a LOCAL model (the first local model on the ni / chat / agent routes) and gains the
+    optional llm stage over its extracted headlines. Refused with a plain reason (409) when the card is not a
+    brief, is not kept yet, or no local model exists: there is never a fallback to a cloud model, and the
+    headlines are untouched either way. Off: the stage and the pin are removed. The next refresh writes the
+    summary (the card's Refresh)."""
+    _require_desktop_local(request)
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    spec = item["spec"]
+    if not ni_brief.is_brief(spec):
+        raise HTTPException(status_code=409, detail=_BRIEF_NOT_A_BRIEF)
+    if item["state"] not in _BRIEF_STATES or ni.awaits_yes(item):
+        raise HTTPException(status_code=409, detail=_BRIEF_NOT_KEPT)
+    if body.on:
+        model = ni_flow._local_flow_model(store)
+        if model is None:
+            raise HTTPException(status_code=409, detail=BRIEF_NO_LOCAL)
+        new_spec = ni_brief.with_summary(spec)   # the sentinel: the local model is resolved when the card runs
+    else:
+        new_spec = ni_brief.without_summary(spec)
+    try:
+        store.update_spec(item_id, new_spec, origin="user")
+    except (ValueError, ni.NIError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    _journal_best_effort(store, item_id, "updated",
+                         "summary turned on: written by your local model after each refresh" if body.on
+                         else "summary turned off: headlines only")
+    request.app.state.audit.append(
+        "user", "ni_brief_summary_set", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "on": body.on}),
+        result_summary=tools.summarize({"summary": body.on}),
+    )
+    return {"ok": True, "brief": _brief_field(store, store.get_item(item_id) or item)}
+
+
 # --- §23 L2 frontier proposal apply/dismiss ---------------------------------
 
 @router.post("/api/ni/items/{item_id}/l2-proposal/apply")
@@ -1596,6 +1663,8 @@ def apply_l2_proposal(request: Request, item_id: str) -> dict:
                     else ni._spec_with_repaired_stages(item["spec"], proposal["stages"]))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    if replace:  # S8: a brief's summary rides over to a replacement that is also a brief (else it ends with the card)
+        new_spec = ni_brief.carry_summary(item["spec"], new_spec)
     # ``_spec_with_repaired_stages`` pops ``_l2_proposal`` alongside the _l1_*
     # markers, so apply_repair's seal-write REPLACES the sealed spec with a
     # proposal-free body atomically. On a spec_changed abort the sealed state
@@ -2088,7 +2157,7 @@ def _build_export_template(store: ni.NIStore, item: dict, secrets_store) -> dict
 _EXPORT_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_attempt", "_l1_trial",
                       "_l2_last_attempt", "_l2_proposal", "_research_last_attempt", "_template", "repair_policy",
                       "_born", "_model_consent", "_model_consent_web", "_built_from", "query", "interpretation",
-                      "_render_ok", "_feed_candidates", "recipe")
+                      "_render_ok", "_feed_candidates", "recipe", "brief")
 # B3a: the page-browser seal lives INSIDE the source — an exported template is a plain page card
 _EXPORT_STRIP_SOURCE_KEYS = ("render", "sites")
 
@@ -2100,6 +2169,8 @@ def _sanitize_spec_for_export(item: dict, secrets_store) -> dict:
     """
     assert isinstance(item, dict), "item must be a dict"
     spec = ni_library._deep_copy_json(item["spec"])
+    if ni_brief.summary_on(spec):  # a template ships the headlines, never the installer's model or its summary
+        spec = ni_brief.without_summary(spec)
     for key in _EXPORT_STRIP_KEYS:
         spec.pop(key, None)
     for key in _EXPORT_STRIP_SOURCE_KEYS:  # bounded: two keys

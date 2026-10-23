@@ -28,12 +28,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "app"))
 
-from smartbrain_3000 import ni, ni_flow, ni_master, ni_recipe, ni_routes
+from smartbrain_3000 import ni, ni_brief, ni_flow, ni_master, ni_recipe, ni_routes
 from smartbrain_3000.ni_forms import types as ni_form_types
 from smartbrain_3000.ni_forms import verdict as ni_form_verdict
 
 # The modules that own the wire vocabularies; ``enum`` takes only a constant one of them defines.
-OWNERS = (ni, ni_flow, ni_master, ni_recipe, ni_routes, ni_form_types, ni_form_verdict)
+OWNERS = (ni, ni_brief, ni_flow, ni_master, ni_recipe, ni_routes, ni_form_types, ni_form_verdict)
 
 OUT_SCHEMA = ROOT / "app" / "smartbrain_3000" / "ni_schema.json"
 OUT_PY = ROOT / "app" / "smartbrain_3000" / "ni_types_gen.py"
@@ -124,8 +124,8 @@ def _row_defs() -> dict[str, dict]:
         "payload_ok": nullable(BOOL), "payload": {},
         "interpretation": STR, "query": ref("RowQuery"), "fit": ref("Fit"), "actions": arr(ref("ActionKind")),
         "rendered": BOOL, "render": nullable(ref("RowRender")), "draft": nullable(ref("RowDraft")),
-        "preview": nullable(ref("RowPreview")),
-    }, opt=("interpretation", "query", "fit", "actions", "rendered", "render", "draft", "preview"),
+        "preview": nullable(ref("RowPreview")), "brief": ref("BriefState"),
+    }, opt=("interpretation", "query", "fit", "actions", "rendered", "render", "draft", "preview", "brief"),
         desc="One row of GET /api/ni/board. `actions` is present only under the v2 flow; `payload` is the bound scene.")
     return {
         "NeedsItem": obj({"name": STR, "label": STR}), "Display": obj({"size": ref("DisplaySize")}),
@@ -136,6 +136,10 @@ def _row_defs() -> dict[str, dict]:
         "RowRender": obj({"sites": arr(STR), "unavailable": BOOL}),
         "RowDraft": obj({"reason": enum(ni_routes.DRAFT_REASONS), "sites": arr(STR)}),
         "RowPreview": obj({"feed_candidates": arr(ref("FeedCandidate"))}),
+        "BriefState": obj({"summary": BOOL, "local": BOOL, "state": ref("BriefSummaryState"), "label": STR,
+                           "text": text(ni_brief.SUMMARY_MAX_CHARS)},
+                          desc="A headline card's summary block: on or off, whether a local model exists to write it, "
+                               "the label that says who wrote it, and the text (empty unless the summary is ready)."),
         "RowQuery": obj({"coverage": {"type": "object", "additionalProperties": ref("QueryCoverage")}}, opt=("coverage",)),
         "BoardRow": row,
         "FlowPoll": obj({"id": STR, "state": ref("ItemState"), "flow": nullable(ref("Flow")),
@@ -199,7 +203,7 @@ def build_schema() -> dict:
         "ItemState": enum(ni._STATES), "DisplaySize": enum(ni._DISPLAY_SIZES), "FlowState": enum(ni_flow.FLOW_STATES),
         "QueryCoverage": enum(ni._QUERY_COVERAGE_VALUES),
         "ActionKind": enum(ni_master.ACTION_KINDS), "FlowQuestionKind": enum(ni_master.QUESTION_KINDS),
-        "ReopenKind": enum(ni_master.REOPEN_KINDS), "CardKind": enum(ni_form_types.KINDS),
+        "ReopenKind": enum(ni_master.REOPEN_KINDS), "BriefSummaryState": enum(ni_brief.SUMMARY_STATES), "CardKind": enum(ni_form_types.KINDS),
         "QualityTier": enum(ni_recipe.QUALITY_TIERS), "RecipeQuestionKind": enum(ni_recipe.QUESTION_KINDS),
         "Cadence": enum(ni_recipe.CADENCES), "RecipeCheckName": enum(ni_recipe.CHECKS),
         "SourceKind": enum(ni_recipe.SOURCE_KINDS), "Verdict": enum(ni_recipe.VERDICTS), "Tool": enum(ni_recipe.TOOLS),
