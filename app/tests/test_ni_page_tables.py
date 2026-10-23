@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from test_ni_answers import lib  # noqa: F401  (a fixture)
-from test_ni_research_loop import _ASK, Script, _v2, _wrap, call, reply  # noqa: F401  (_v2: autouse fixture)
+from test_ni_research_loop import _ASK, Script, _v2, _wrap, call, reply, text_reply  # noqa: F401  (_v2: autouse fixture)
 from test_ni_research_tools import FakeLibrary, _ctx, _row
 
 from smartbrain_3000 import (
@@ -401,7 +401,8 @@ def test_odd_drafts_on_a_page_table_are_typed_errors_and_the_run_declines_not_cr
     ctx, _ = _loop_ctx(monkeypatch)
     script = Script(reply(call("web_search", query="river levels")), reply(call("fetch_sample", url=URL)),
                     reply(call("try_recipe", draft_spec=bad)), reply(call("propose_card", draft_spec=bad)),
-                    reply(call("propose_card", draft_spec=bad)))
+                    reply(call("propose_card", draft_spec=bad)),
+                    *[text_reply("still looking")] * 3)   # the model stops: a verdict, not a fault
     out = loop.run_research(ctx, script)
     assert out.status == "declined" and out.proposal is None and out.reasons
 
@@ -409,7 +410,7 @@ def test_odd_drafts_on_a_page_table_are_typed_errors_and_the_run_declines_not_cr
 def test_a_model_that_never_stops_searching_pages_ends_on_budget_with_an_honest_decline(monkeypatch) -> None:
     ctx, _ = _loop_ctx(monkeypatch)
     ctx.max_fetches = 2
-    steps = [reply(call("web_search", query="river levels")), *[reply(call("fetch_sample", url=URL))] * 4]
+    steps = [reply(call("web_search", query="river levels")), *[reply(call("fetch_sample", url=URL))] * 40]   # outlasts every budget
     out = loop.run_research(ctx, Script(*steps))
     assert out.status == "declined" and ctx.fetches == 2
 
