@@ -19,9 +19,10 @@ to know when a release changes behavior.
   **Keep**. This is what `SMARTBRAIN_NI_FLOW=v2` turned on; the setting and the `ni_flow` meta key no longer do
   anything. A leftover `SMARTBRAIN_NI_FLOW=v1` is logged as a warning at start-up and ignored (it does not
   stop the app). What goes away: the pick card that asked you to tap a Library source and the searched web
-  pages it listed, the "Pick a source" button on a stopped card (use Try again, or paste a link on the stop
-  card), the pre-read of up to four search-result pages while a card is created (the cloud researcher still
-  searches, with your consent), and `POST /api/ni/items/{id}/flow/reopen`. `GET .../flow` and
+  pages it listed, and the pre-read of up to four search-result pages while a card is created (the cloud
+  researcher still searches, with your consent). A card that couldn't be built offers **Try again** and **Paste
+  a link** (it reopens the card so you can paste a link to the data); every way out a stopped card names is now a
+  button the backend declares in its `actions` (`pick_source` is `POST .../flow/reopen`). `GET .../flow` and
   `POST .../flow/cancel` no longer answer 404 for lack of the setting, and every board row now carries
   `actions`. Cards you already have are untouched: they refresh, edit, export and import as before.
   `tools/ni-eval.py --flow` is removed (any value is an error); the eval always runs the one flow.
