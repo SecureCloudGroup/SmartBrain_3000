@@ -1,0 +1,198 @@
+{
+ "ask_id": "CI8",
+ "fetches": [
+  {
+   "key": "safe_fetch_json https://data.example.org/quote/alpha",
+   "ok": true,
+   "value": {
+    "quote": {
+     "price": 131.5,
+     "currency": "USD"
+    }
+   }
+  },
+  {
+   "key": "safe_fetch_json https://data.example.org/quote/beta",
+   "ok": true,
+   "value": {
+    "quote": {
+     "price": 150.25,
+     "currency": "USD"
+    }
+   }
+  }
+ ],
+ "meta": {
+  "built_by_hand": "synthetic compare ask: two addresses, five scripted tool turns",
+  "model": "scripted",
+  "research": "cloud"
+ },
+ "model": [
+  {
+   "reply": "{\"kind\": \"external_data\", \"subject\": \"Alpha Corp and Beta Corp stock prices\", \"cadence_minutes\": 60, \"wants\": [\"price\"], \"threshold\": null, \"display_hint\": \"value\"}",
+   "sha": null
+  }
+ ],
+ "research": [
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"query\": \"Alpha Corp stock price\"}",
+          "name": "library_search"
+         },
+         "id": "c0",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 4200,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 0,
+      "cached_write_tokens": 3900
+     }
+    }
+   },
+   "sha": null
+  },
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"query\": \"Beta Corp stock price\"}",
+          "name": "library_search"
+         },
+         "id": "c1",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 5000,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 3900,
+      "cached_write_tokens": 200
+     }
+    }
+   },
+   "sha": null
+  },
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"url\": \"https://data.example.org/quote/alpha\"}",
+          "name": "fetch_sample"
+         },
+         "id": "c2",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 6000,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 4100,
+      "cached_write_tokens": 200
+     }
+    }
+   },
+   "sha": null
+  },
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"url\": \"https://data.example.org/quote/beta\"}",
+          "name": "fetch_sample"
+         },
+         "id": "c3",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 7000,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 4300,
+      "cached_write_tokens": 200
+     }
+    }
+   },
+   "sha": null
+  },
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "reply": {
+    "choices": [
+     {
+      "message": {
+       "content": "",
+       "role": "assistant",
+       "tool_calls": [
+        {
+         "function": {
+          "arguments": "{\"compare\": {\"metric\": \"Price\", \"unit\": \"USD\", \"things\": [{\"name\": \"Alpha Corp\", \"url\": \"https://data.example.org/quote/alpha\", \"path\": \"quote.price\"}, {\"name\": \"Beta Corp\", \"url\": \"https://data.example.org/quote/beta\", \"path\": \"quote.price\"}]}}",
+          "name": "propose_compare"
+         },
+         "id": "c4",
+         "type": "function"
+        }
+       ]
+      }
+     }
+    ],
+    "usage": {
+     "completion_tokens": 60,
+     "prompt_tokens": 8000,
+     "prompt_tokens_details": {
+      "cached_read_tokens": 4500,
+      "cached_write_tokens": 300
+     }
+    }
+   },
+   "sha": null
+  }
+ ]
+}

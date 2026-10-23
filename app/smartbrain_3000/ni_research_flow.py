@@ -22,7 +22,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from . import gateway, ni, ni_flow, ni_recipe, ni_refresh
+from . import gateway, ni, ni_compare, ni_flow, ni_recipe, ni_refresh
 from .ni_research import loop, policy, tools
 from .ni_research.ctx import ResearchCtx, normal_url, one_line
 
@@ -78,11 +78,12 @@ def question_from_intent(request: str, intent: dict) -> dict:
     cadence = next(name for name, cap in (("realtime", 30), ("hourly", 120), ("daily", 2880), ("weekly", 10**9))
                    if minutes <= cap)
     assert cadence in ni_recipe.CADENCE_MINUTES, "a closed cadence"
-    return {"kind": kind if kind in ni_recipe.QUESTION_KINDS else "lookup",
+    things = ni_compare.asked(request)[: ni_compare.MAX_ENTITIES]   # S7: the things a compare ask names, as written
+    return {"kind": "compare" if things else kind if kind in ni_recipe.QUESTION_KINDS else "lookup",
             "subject": one_line(intent.get("subject") or request, 120),
-            "places": [one_line(place, 80)] if isinstance(place, str) and place.strip() else [],
-            "entities": [], "window": None, "threshold": None, "order": [], "limit": None,
-            "compare_count": 0, "units": None, "cadence": cadence}
+            "places": [one_line(place, 80)] if not things and isinstance(place, str) and place.strip() else [],
+            "entities": [one_line(t, 80) for t in things], "window": None, "threshold": None, "order": [],
+            "limit": None, "compare_count": len(things), "units": None, "cadence": cadence}
 
 
 class _Library:
@@ -118,6 +119,11 @@ def _stamp(spec: dict, request: str) -> dict:
 def _preview_of(ctx: ResearchCtx, spec: dict) -> dict:
     """The full pipeline outputs on the stored sample (the bounded preview the model saw is not the card's data)."""
     assert isinstance(spec, dict), "spec required"
+    if ni_compare.is_compare(spec):   # S7: one stored sample per compared thing
+        things = ni_compare.sealed(spec)
+        values = [ni_compare.number_at(ctx.samples[normal_url(t["url"])]["parsed"], t["path"]) for t in things]
+        assert all(v is not None for v in values), "propose_compare ran on stored samples"
+        return ni.run_pipeline(copy.deepcopy(spec["pipeline"]), ni_compare.payload_of(things, values))
     sample = ctx.samples.get(normal_url(str(spec["source"]["url"])))
     assert sample is not None, "propose_card ran on a stored sample"
     return ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(tools.sample_payload(sample["parsed"])))
@@ -137,7 +143,7 @@ def _can_land(ctx: ResearchCtx, item_id: str, request: str, proposal: dict) -> s
                       form_ctx=ni._form_bind_context(spec, ctx.now), alternatives=True)
     except (ni.NIError, ValueError, KeyError, AssertionError) as exc:
         return f"the card cannot be shown: {one_line(exc, 150)}"
-    return None
+    return ni_compare.refusal(spec, preview)   # S7: the build check every path runs, so the model can fix it
 
 
 def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, proposal: dict, out: loop.Outcome) -> dict:
@@ -220,17 +226,19 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
         return ni_flow._ask_model_consent(store, item_id, plan.model or "", plan.local, research=True)
     now = ni._clock().astimezone(UTC)
     web = plan.mode == "cloud" and plan.web  # the closed-world local tier never has the web
-    ctx = ResearchCtx(request=request, question=question_from_intent(request, intent), now=now,
+    question = question_from_intent(request, intent)
+    # a compare is searched one thing at a time: the intent's one place must not steer every search
+    hint = {**ni_flow._library_hint(intent), **({"place": None} if question["entities"] else {})}
+    ctx = ResearchCtx(request=request, question=question, now=now,
                       zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=ORIGINS_WEB if web else ORIGINS_LIBRARY,
-                      searcher=_searcher() if web else None,
-                      library=_Library(lib, ni_flow._library_hint(intent), set(record.get("_declined") or [])))
+                      searcher=_searcher() if web else None, library=_Library(lib, hint, set(record.get("_declined") or [])))
     ni_flow._transition(store, item_id, record.get("state") or "source", error=record.get("error"),
                         note=f"researching ({plan.mode}) for a Library source" if not web
                         else "researching (cloud) in the Library and on the web")
     _audit(item_id, plan)
     chat = _chat_for(store, plan.model or "", plan.mode == "local")
     accept = lambda proposal: _can_land(ctx, item_id, request, proposal)
-    place = str(intent.get("place") or "")
+    place = "" if question["entities"] else str(intent.get("place") or "")
     out = (loop.run_research(ctx, chat, place=place, accept=accept) if plan.mode == "cloud"
            else loop.run_closed_world(ctx, chat, accept=accept))
     if out.status == "proposed" and out.proposal is not None:

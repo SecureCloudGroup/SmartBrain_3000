@@ -25,15 +25,14 @@ def test_a_clean_build_records_an_empty_shadow(monkeypatch) -> None:
     assert _record(store, out["_item"]).get("_verify_shadow") == {}
 
 
-def test_a_compare_the_build_cannot_answer_is_recorded_not_refused(monkeypatch) -> None:
+def test_a_compare_the_build_cannot_answer_is_refused_at_build(monkeypatch) -> None:
+    """S7 turned the S6 shadow record into a build gate: a one-city card for a two-city ask is never shipped."""
     store = fv._store()
     ask = "temperature in Charleston vs Tulsa"
     out = fv._run(store, monkeypatch, "open_meteo_charleston", ask,
                   fv._intent(ask, "weather", ["temperature"], "Charleston"))
-    shadow = _record(store, out["_item"]).get("_verify_shadow")
-    assert out["state"] == "ready", out["notes"]            # shadow mode: the card still ships
-    assert set(shadow) == {"compare"}, shadow
-    assert "tulsa" in shadow["compare"][0]
+    assert out["state"] == "unsupported", out["notes"]
+    assert any("can't compare these yet" in n and "Tulsa" in n for n in out["notes"]), out["notes"]
 
 
 def test_the_shadow_never_raises_and_says_what_failed(monkeypatch) -> None:

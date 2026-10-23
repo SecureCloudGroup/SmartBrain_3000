@@ -278,7 +278,8 @@ class FlowPoll(TypedDict):
     actions: list[ActionKind]
 
 Tool = Literal[
-    "fetch_sample", "library_search", "propose_card", "resolve_entity", "try_recipe", "web_search"
+    "fetch_sample", "library_search", "propose_card", "propose_compare", "resolve_entity", "try_recipe",
+    "web_search"
 ]
 
 class RecipeTurn(TypedDict):

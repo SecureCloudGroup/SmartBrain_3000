@@ -748,7 +748,7 @@ _TEMPLATE_STRIP_KEYS = ("contract", "_c2_ok", "_present_ok", "_fit", "_l1_last_a
                         "repair_policy", "_born", "_shell", "_model_consent", "_model_consent_web",
                         "_built_from", "query", "interpretation", "_render_ok", "_feed_candidates", "recipe", "brief")
 # B3a: the page-browser seal inside the source (``render`` + ``sites``) — never installed
-_TEMPLATE_STRIP_SOURCE_KEYS = ("render", "sites")
+_TEMPLATE_STRIP_SOURCE_KEYS = ("render", "sites", "compare")
 
 
 def build_installed_spec(template: dict, param_values: dict) -> dict:
@@ -777,7 +777,7 @@ def build_installed_spec(template: dict, param_values: dict) -> dict:
     spec = _deep_copy_json(spec_template)
     for key in _TEMPLATE_STRIP_KEYS:
         spec.pop(key, None)
-    for key in _TEMPLATE_STRIP_SOURCE_KEYS:  # bounded: two keys (B3a — never an installed seal)
+    for key in _TEMPLATE_STRIP_SOURCE_KEYS:  # bounded: three keys (B3a — never an installed seal)
         if isinstance(spec.get("source"), dict):
             spec["source"].pop(key, None)
     # D2c: default repair policy is the installer's LOCAL choice; force the safe

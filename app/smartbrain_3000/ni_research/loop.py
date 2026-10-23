@@ -160,8 +160,11 @@ def _left(ctx: ResearchCtx) -> dict:
             "seconds_left": max(int(ctx.max_seconds - ctx.elapsed()), 0)}
 
 
-def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None) -> dict:
-    """``propose_card``'s result after the caller's own landing check (a proposal that cannot land is a verify failure)."""
+PROPOSE_TOOLS = ("propose_card", "propose_compare")   # the tools that end a run with a proposal
+
+
+def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None, tool: str = "propose_card") -> dict:
+    """A propose tool's result after the caller's own landing check (a proposal that cannot land is a verify failure)."""
     assert ctx.max_turns > 0, "a turn budget"
     assert isinstance(result, dict), "a result"
     if not result.get("ok") or accept is None:
@@ -169,7 +172,7 @@ def _proposal_result(ctx: ResearchCtx, result: dict, accept: AcceptFn | None) ->
     why = accept(result["proposal"])
     if not why:
         return result
-    ctx.note("propose_card", "draft", f"cannot land: {why}")
+    ctx.note(tool, "draft", f"cannot land: {why}")
     return {**error("verify_failed", why), "reasons": [one_line(why, 200)]}
 
 
@@ -220,8 +223,8 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
         for n, call in enumerate(calls[:MAX_CALLS_PER_TURN]):  # bounded by the per-reply cap
             result = (error("invalid_args", "arguments must be a JSON object") if call["args"] is None
                       else schemas.run_tool(ctx, call["name"], call["args"]))
-            if call["name"] == "propose_card":
-                result = _proposal_result(ctx, result, accept)
+            if call["name"] in PROPOSE_TOOLS:
+                result = _proposal_result(ctx, result, accept, call["name"])
                 if result.get("ok"):
                     out.status, out.proposal, out.reasons = "proposed", result["proposal"], []
                     return out
@@ -345,6 +348,8 @@ def _closed_world(ctx: ResearchCtx, chat: ChatFn, out: Outcome, accept: AcceptFn
     assert isinstance(out, Outcome), "an outcome"
     assert callable(chat), "a chat seam"
     reasons, fills = [], 0
+    if len(ctx.question.get("entities") or []) >= 2:   # S7: comparing needs one search per thing; the local tier has none
+        return _decline(ctx, out, ["the local tier compares only through the Library; no source reads them side by side"])
     rows, why = _ranked(ctx)
     if not rows:
         return _decline(ctx, out, [why or "the Library has no source for this ask"])

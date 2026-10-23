@@ -395,7 +395,7 @@ def test_html_and_non_data_pages_are_not_samples(monkeypatch) -> None:
 
 # --- schemas -----------------------------------------------------------------------------------------------------
 
-PINNED_SCHEMA_SHA256 = "5cff55dcfcbbeb00661483ce1de23c9877564663fc052513b3bc8ebdae46a4bf"  # S5b: + web_search; exact addresses only
+PINNED_SCHEMA_SHA256 = "14be45c6823f1e1c218c1bb67e31fe6faa30243a2e860a781f4f83b55ec4e0a8"  # S5b: + web_search; exact addresses only
 
 
 def test_tool_schemas_are_byte_stable_and_anthropic_shaped() -> None:
@@ -403,7 +403,7 @@ def test_tool_schemas_are_byte_stable_and_anthropic_shaped() -> None:
     assert first == second == json.dumps(json.loads(schemas.TOOLS_JSON), sort_keys=True)
     assert schemas.TOOLS_JSON == json.dumps(json.loads(schemas.TOOLS_JSON), sort_keys=True, separators=(",", ":"))
     names = [t["name"] for t in schemas.tool_schemas()]
-    assert names == sorted(names) == ["fetch_sample", "library_search", "propose_card", "resolve_entity", "try_recipe",
+    assert names == sorted(names) == ["fetch_sample", "library_search", "propose_card", "propose_compare", "resolve_entity", "try_recipe",
                                                     "web_search"]
     assert set(names) <= ni_recipe.TOOLS
     for t in schemas.tool_schemas():

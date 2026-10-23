@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 
 from . import browsers as _browsers_mod
 from . import claudecli as _claudecli_mod
-from . import db, ni, ni_brief, ni_master, ni_query, page_verify, pagegraph
+from . import db, ni, ni_brief, ni_compare, ni_master, ni_query, page_verify, pagegraph
 from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
@@ -4012,6 +4012,10 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     and asks for it on the card. Nothing recurs until Keep (the card is held, ``_built_from.path`` auto).
     No buildable row: the existing honest stop (links; ruling 2026-10-05)."""
     assert store is not None and item_id, "store + id required"
+    from . import ni_compare_flow  # local: it builds on this module's helpers
+    compared = ni_compare_flow.try_compare(store, item_id, request, intent, do_fetch)  # S7: an ask that compares things
+    if compared is not None:
+        return compared
     rows = _without_declined(store, item_id, _library_candidates(request, intent, limit=_AUTO_ROWS))
     buildable = _buildable(rows)
     if not buildable:
@@ -5281,6 +5285,8 @@ def _run_remap(store: ni.NIStore, item_id: str, record: dict,
     item = store.get_item(item_id)
     if item is None:
         return _fail(store, item_id, "remap", "item not found for remap")
+    if ni_compare.is_compare(item["spec"]):  # S7: one source address per thing; a remap re-reads one, so it cannot fix this
+        return _fail(store, item_id, "remap", "a compare card reads one address per thing; ask again to rebuild it")
     intent = _remap_intent_from_spec(item["spec"], record.get("request") or "")
     request = str(record.get("request") or item["spec"].get("goal") or "remap")
     # G4a (SUSTAIN.refine): a sealed user note joins the goal — the °F
@@ -6520,6 +6526,11 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     assert born is None or born in BORN_MARKERS, "born marker must be closed"
     if (_flow_read(store, item_id) or {}).get("_cancel"):  # v2 Cancel: the user stopped it; seal nothing
         return _flow_read(store, item_id) or {}
+    # S7: the build check every path runs (declared answers, mapping, pages, the researcher): an ask that compares
+    # N things never lands on a card that shows fewer than N, each with its own value. An honest decline instead.
+    why = ni_compare.refusal(spec, preview)
+    if why is not None:
+        return _terminate_unsupported(store, item_id, why)
     if built_from is not None:
         spec["_built_from"] = built_from
     if render is not None and render.get("feeds"):
