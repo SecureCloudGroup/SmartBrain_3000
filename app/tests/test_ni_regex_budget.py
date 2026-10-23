@@ -24,14 +24,16 @@ from smartbrain_3000 import (
     ni_polite,
     ni_refresh,
     ni_research,
+    ni_table,
     ni_verify,
+    page_verify,
     pagegraph,
 )
 from smartbrain_3000.ni_research import digest
 from smartbrain_3000.ni_verify import constraints
 
 # every ni_research module reads fetched text or model replies, so the package is walked, not listed
-MODULES = (formats, netguard, ni_brief, ni_compare, ni_fetch, ni_polite, pagegraph,
+MODULES = (formats, netguard, ni_brief, ni_compare, ni_fetch, ni_polite, ni_table, page_verify, pagegraph,
            *(importlib.import_module(f"{ni_research.__name__}.{m.name}") for m in pkgutil.iter_modules(ni_research.__path__)),
            # ni_verify reads the request and the fetched outputs for the refresh re-check, so it is walked too
            *(importlib.import_module(f"{ni_verify.__name__}.{m.name}") for m in pkgutil.iter_modules(ni_verify.__path__)))
@@ -76,6 +78,15 @@ def _drift(text: str) -> object:
     return ni_refresh.drift_reasons(copy.deepcopy(spec), {"a": text, "b": [text], "c": {"d": text}}, datetime.now(UTC))
 
 
+def _locate(text: str) -> None:
+    """A page of eight hostile twin tables against a locator: found, ambiguous or gone, always quickly."""
+    tables = ni_table.read_all([{"headers": [text, "b"], "caption": text, "rows": [[text, text]] * 400}] * 8)
+    try:
+        ni_table.locate(tables, {"headers": [ni_table.norm(text, 50) or "x", "b"], "context": ni_table.norm(text, 50) or "x"})
+    except ni_table.TableGone:
+        pass
+
+
 ENTRY_POINTS = {
     "ni_refresh.drift_reasons": _drift,
     "ni_verify.constraints.parse_entities": lambda text: constraints.parse_entities("compare " + text),
@@ -96,6 +107,14 @@ ENTRY_POINTS = {
     "digest.digest": lambda text: digest.digest("https://x.example.org/a", "json", {"field": text, "list": [text]}),
     "digest.clean_search_rows": lambda text: digest.clean_search_rows(
         [{"url": "https://x.example.org/" + text[:200], "title": text, "snippet": text}] * 8),
+    "ni_table.read_all": lambda text: ni_table.read_all(
+        [{"caption": text, "heading": text, "headers": [text, text[:50], "a"], "rows": [[text, text, text]] * 400}] * 8),
+    "ni_table.read_headerless": lambda text: ni_table.read_all(
+        [{"headers": [], "rows": [[text[:300], text[300:600]]] + [[text, text]] * 400}]),
+    "ni_table.locate": lambda text: _locate(text),
+    "digest.table_digest": lambda text: digest.table_digest(
+        "https://x.example.org/a", ni_table.read_all([{"headers": [text, "b"], "caption": text, "rows": [[text, text]] * 400}] * 8),
+        [text] * 8, [text] * 8),
     "digest.search_digest": lambda text: digest.search_digest(text, [{"title": text, "url": "https://x.example.org/",
                                                                       "snippet": text}]),
 }

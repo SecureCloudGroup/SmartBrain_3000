@@ -412,7 +412,9 @@ class Session:
                    "kind": getattr(exc, "kind", None), "status": getattr(exc, "status", None)}
             self.data["fetches"].append({"key": key, "ok": False, "error": err})
             raise
-        self.data["fetches"].append({"key": key, "ok": True, "value": value})
+        # a cassette is JSON text: the raw ``content`` bytes of a text fetch are not recorded (replay reads ``text``)
+        kept = {k: v for k, v in value.items() if not isinstance(v, (bytes, bytearray))} if isinstance(value, dict) else value
+        self.data["fetches"].append({"key": key, "ok": True, "value": kept})
         return value
 
 
@@ -626,7 +628,7 @@ def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) 
                 out["outcome"] = "awaiting-yes"
                 tier = (item["spec"].get("recipe") or {}).get("tier") or ""
                 out["tier"] = tier  # curated = a Library row; verified_endpoint / page_reading = found on the web
-                out["from"] = {"kind": "dataset" if tier not in ("", "curated") else "library",
+                out["from"] = {"kind": "page" if tier == "page_reading" else "dataset" if tier not in ("", "curated") else "library",
                                "host": built.get("host") or "", "title": built.get("title") or ""}
     except Exception as exc:
         out["outcome"], out["detail"] = "crash", f"{type(exc).__name__}: {str(exc)[:160]}"

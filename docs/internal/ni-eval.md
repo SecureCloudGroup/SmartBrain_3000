@@ -115,7 +115,11 @@ tokens, cache reads and cost per ask. Open web (S5b): the cloud tier also runs `
 Searches are recorded in the cassette's `search` list (keyed by query, failures included) and the page fetches
 ride the netguard patch, so a held-out run replays offline; `--research-web off` gives a Library-only run of the
 same asks (`CI7` is a hand-built web ask: the card lands `verified_endpoint`, held for Keep; `CI8` is a hand-built compare ask: two addresses, five scripted tool turns ending in
-`propose_compare`, the card shows both things). Measure S4c on the
+`propose_compare`, the card shows both things; `CI10` is a hand-built page-table ask: the search result is an HTML
+page, the recorded text fetch carries its body, the researcher reads its data table and the card lands `page_reading`,
+held for Keep, `from.kind` `page`). A web page the researcher reaches by the sniff path (JSON refused, then text)
+records and replays like any other text fetch; a page read through `netguard.safe_fetch_page` (a Library row whose
+format is `html`, or a refresh) is still not replayable, as above. Measure S4c on the
 gold with, for example:
 
 ```

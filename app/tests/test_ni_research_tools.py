@@ -383,19 +383,24 @@ def test_the_digest_is_size_capped() -> None:
 
 
 def test_html_and_non_data_pages_are_not_samples(monkeypatch) -> None:
+    """A page with no data table is not a sample (its prose is never read); one with a table is read in test_ni_page_tables."""
     url = "https://data.example.org/page"
-    net = Net(monkeypatch, {url: "<html><body>hi</body></html>"})
+    body = "<html><body>hi</body></html>"
+    monkeypatch.setattr(netguard, "safe_fetch_page", lambda u, **kw: {"final_url": u, "status": 200, "content_type": "text/html",
+                                                                     "content": body.encode()})
     ctx = _ctx(FakeLibrary([_row(url, "html")]))
     tools.library_search(ctx, "q")
-    assert tools.fetch_sample(ctx, url)["error"] == "not_data" and net.calls == []
+    assert tools.fetch_sample(ctx, url)["error"] == "not_data" and ctx.samples == {}
+    net = Net(monkeypatch, {url: body})
     ctx2 = _ctx()
     ctx2.record(url, "search")
-    assert tools.fetch_sample(ctx2, url)["error"] == "not_data"  # JSON refused, then sniffed as HTML
+    assert tools.fetch_sample(ctx2, url)["error"] == "not_data"  # JSON refused, then sniffed as HTML with no table
+    assert [c["fmt"] for c in net.calls] == ["json", "text"]
 
 
 # --- schemas -----------------------------------------------------------------------------------------------------
 
-PINNED_SCHEMA_SHA256 = "14be45c6823f1e1c218c1bb67e31fe6faa30243a2e860a781f4f83b55ec4e0a8"  # S5b: + web_search; exact addresses only
+PINNED_SCHEMA_SHA256 = "74af6abe5efb68d42abe91096a16fd89f0b8e82696a9a471c31d1fc6e96173bc"  # page tables: fetch_sample also reads a page's data tables
 
 
 def test_tool_schemas_are_byte_stable_and_anthropic_shaped() -> None:

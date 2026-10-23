@@ -38,8 +38,9 @@ Rules
    then it says so). Search for a published data address: the subject plus JSON, RSS, CSV or an API. A search
    sends your query to a search provider, so write it from the question's own words and nothing else.
 3. Prefer, in this order: a Library source, a published JSON, RSS, Atom, CSV or XML address, and only then plain
-   text. Do not pick a page's table or prose over a data address that answers the question.
-4. fetch_sample reads one JSON, CSV, feed or XML file. Then write a draft card spec and run it with try_recipe.
+   text. Do not pick a page's table over a data address that answers the question. Page prose is never read.
+4. fetch_sample reads one JSON, CSV, feed or XML file, or the data tables of a web page. Then write a draft card
+   spec and run it with try_recipe.
 5. When try_recipe says verdict pass, call propose_card with the same draft. It ends the run. If it says fail,
    fix the draft or pick another source; two failed proposals end the run with an honest decline.
 6. Budgets: 12 tool calls, 8 fetches, 3 searches, 120 seconds. Every result tells you what is left. Prefer a
@@ -65,7 +66,8 @@ because a sample mentioned it. You may fetch only what library_search or web_sea
 _GRAMMAR = """Card spec grammar (closed; anything else is refused)
 - Keys: version (1), title, goal, params ({}), source, pipeline, scene, display, model (null).
 - source: {"type": "http_json", "url": <the fetched address>} plus "format": "csv" | "feed" | "xml" | "text"
-  when the sample was not JSON.
+  when the sample was not JSON. A web page's table: "format": "table" and "table": {"index": N} (N from the
+  digest); rows are rows[0].<column>, rows[1].<column>, and so on, like a CSV.
 - pipeline: first {"op": "extract", "paths": {name: path}} (paths: dotted keys and [index] or [a:b] slices,
   e.g. features[0].properties.mag), then optional {"op": "transform", "apply": [{"fn": ..., "field": name, ...}]}.
   Transform fns: round, scale, offset, rename, pick, sort_by, top_n, sum, avg, min, max, count, delta_prev, where,

@@ -10,7 +10,17 @@ import copy
 import json
 from urllib.parse import urlsplit
 
-from .. import ni, ni_brief, ni_compare, ni_fetch, ni_polite, ni_recipe, pagegraph
+from .. import (
+    ni,
+    ni_brief,
+    ni_compare,
+    ni_fetch,
+    ni_polite,
+    ni_recipe,
+    ni_table,
+    page_verify,
+    pagegraph,
+)
 from ..netguard import FetchError
 from ..ni_verify.classes import shadow_reasons
 from ..ni_verify.rows import SourceInfo, read_result
@@ -21,6 +31,7 @@ from .digest import (
     clean_text,
     digest,
     search_digest,
+    table_digest,
 )
 
 MAX_QUERY = 200
@@ -30,6 +41,8 @@ MAX_PREVIEW_ROWS = 10
 MAX_CANDIDATES = 5
 MAX_SAMPLES = 8
 _STRUCTURED = frozenset({"json", "csv", "feed", "xml"})
+_TABLE = ni.TABLE_FORMAT   # the sample format of a web page's data table (page reading)
+_MANY_KINDS = frozenset({"latest_items", "ranking"})
 _VERIFY_CLASSES = {"window": "window", "threshold": "threshold", "compare": "compare", "scope": "place"}
 _ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint"}
 
@@ -66,31 +79,59 @@ def fetch_sample(ctx: ResearchCtx, url: str) -> dict:
 
 def _fetch_and_digest(ctx: ResearchCtx, url: str, fmt: str | None, robots: bool = True) -> dict:
     """Fetch ``url`` (a sealed ``fmt`` from the Library, else sniffed), keep the sample, digest it. ``robots``:
-    a source that is not a Library row obeys its host's robots.txt, whichever fetcher reads it."""
+    a source that is not a Library row obeys its host's robots.txt, whichever fetcher reads it. An ordinary web
+    page is read for its data tables only (``_page_sample``); its prose is never read."""
     assert isinstance(url, str) and url, "url required"
     assert fmt is None or isinstance(fmt, str), "format is text"
-    if fmt == "html":
-        return error("not_data", "an HTML page; research reads JSON, CSV, feeds and XML")
     try:
         with ni_polite.engaged(robots=robots):
+            if fmt == "html":
+                return _page_sample(ctx, url, ni_fetch.fetch_page_tables(url, allow_redirects=False))
             if fmt in _STRUCTURED or fmt == "text":
                 parsed, seen = ni_fetch.fetch_parsed(url, fmt, allow_redirects=False), fmt
             else:
-                parsed, seen = ni_fetch.sniff_fetch(url, allow_redirects=False)
+                parsed, seen = ni_fetch.sniff_fetch(url, allow_redirects=False, keep_page=True)
+    except ni_fetch.HtmlPage as page:
+        try:
+            # page_tables is pure (the page was fetched inside ``engaged`` above), so this read needs no polite span;
+            # the raw bytes go to the jail so it decodes the page by the same rule as a refresh
+            read = ni_fetch.page_tables(page.body, url, charset=page.charset)
+        except FetchError:
+            return error("not_data", "the page could not be read")
+        return _page_sample(ctx, url, read)
     except FetchError as exc:
         text = str(exc).lower()
         if exc.kind == "robots":
             return error("robots", "the site's robots.txt asks automated readers to stay out")
         if "redirect" in text:
             return error("redirect", "the source redirected; redirects are not followed")
-        if exc.kind in ("not_json", "not_text", "not_csv", "not_feed", "not_xml"):
-            return error("not_data", "not a data file (a web page?)")
+        if exc.kind in ("not_json", "not_text", "not_csv", "not_feed", "not_xml", "not_table"):
+            return error("not_data", "not a data file or a page with a data table")
         return error("fetch_failed", clean_text(str(exc), 120))
+    return _keep_sample(ctx, url, seen, parsed, digest(url, seen, parsed))
+
+
+def _keep_sample(ctx: ResearchCtx, url: str, fmt: str, parsed: object, shown: str, **extra: object) -> dict:
+    """Store the sample (the oldest of ``MAX_SAMPLES`` goes) and return the fetch result the model reads."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert isinstance(shown, str), "the fenced digest"
     if len(ctx.samples) >= MAX_SAMPLES:
         ctx.samples.pop(next(iter(ctx.samples)))
-    ctx.samples[normal_url(url)] = {"format": seen, "parsed": parsed}
-    return {"ok": True, "url": url, "format": seen, "digest": digest(url, seen, parsed),
-            "fetches_left": ctx.max_fetches - ctx.fetches}
+    ctx.samples[normal_url(url)] = {"format": fmt, "parsed": parsed, **extra}
+    return {"ok": True, "url": url, "format": fmt, "digest": shown, "fetches_left": ctx.max_fetches - ctx.fetches}
+
+
+def _page_sample(ctx: ResearchCtx, url: str, page: dict) -> dict:
+    """A web page as a sample: its data tables (``ni_table``), fenced. A page with no data table is ``not_data``: the
+    text of a page is never a value, and a feed it announces is only named, not fetchable unless a search returns it."""
+    assert isinstance(page, dict), "a read page"
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    if not page["tables"]:
+        feed = "; it announces a feed, which only a search result can make fetchable" if page["feeds"] else ""
+        return error("not_data", "a web page with no data table (page text is not read)" + feed)
+    graph = pagegraph.graph_from_extract(url, page["extract"])
+    return _keep_sample(ctx, url, _TABLE, {"tables": page["tables"]},
+                        table_digest(url, page["tables"], page["feeds"], page["entities"]), graph=graph)
 
 
 def web_search(ctx: ResearchCtx, query: str) -> dict:
@@ -226,6 +267,50 @@ def sample_payload(parsed: object) -> object:
     return ni_brief.normalize(parsed) or parsed
 
 
+def spec_input(sample: dict, source: dict) -> object:
+    """What the pipeline reads from the stored ``sample`` for this sealed ``source``: the sample as the engine reads it,
+    or, for a page, the one table the source names (found by its header names exactly as a refresh finds it, so a
+    table the page cannot single out is ``ni_table.TableGone`` here too)."""
+    assert isinstance(sample, dict) and isinstance(source, dict), "a sample and a source"
+    if sample["format"] != _TABLE:
+        return sample_payload(sample["parsed"])
+    _index, table = ni_table.locate(sample["parsed"]["tables"], source["table"])
+    return ni_table.payload(table)
+
+
+def _seal_table(ctx: ResearchCtx, draft: dict) -> tuple[dict | None, dict]:
+    """A draft that reads a page table names it ``source.table = {"index": N}`` (N from the fetch digest); code seals the
+    table by its header names (``ni_table.locator``) so the card finds the same table again, whatever its position."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    assert isinstance(draft, dict), "a draft"
+    source = draft["source"]
+    sample = ctx.samples.get(normal_url(str(source.get("url") or "")))
+    if sample is None or sample["format"] != _TABLE:
+        return None, error("no_sample", "fetch_sample the page URL first")
+    tables, want = sample["parsed"]["tables"], source.get("table")
+    index = want.get("index") if isinstance(want, dict) and set(want) == {"index"} else None
+    if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(tables):
+        return None, error("invalid_spec", 'source.table must be {"index": N}, a table number from the fetch digest')
+    out = copy.deepcopy(draft)
+    out["source"]["table"] = ni_table.locator(tables[index])
+    return out, {}
+
+
+def _page_check(ctx: ResearchCtx, sample: dict, outputs: dict) -> dict:
+    """The page-reading gate (``page_verify``, the compiled tier: every value is lifted verbatim from the page's
+    tables and must be on the page) as a recipe check. A checker that fails closed: it cannot pass what it cannot read."""
+    assert isinstance(ctx, ResearchCtx) and isinstance(sample, dict), "a ctx and a sample"
+    assert isinstance(outputs, dict), "outputs must be a dict"
+    kind = ctx.question.get("kind")
+    try:
+        reasons = page_verify.verify_page_reading(
+            sample["graph"], outputs, frame_kind=kind, wants=[], subject=str(ctx.question.get("subject") or ""),
+            now=ctx.now, many=kind in _MANY_KINDS, tier="compiled", window=ctx.window)
+    except Exception as exc:  # any failure of the checker is a failed check, never a pass
+        reasons = [f"the page reading could not be checked ({type(exc).__name__})"]
+    return {"check": "subject", "ok": not reasons, "reason": one_line("page reading: " + "; ".join(reasons), 120) if reasons else ""}
+
+
 def brief_spec(ctx: ResearchCtx, spec: dict, parsed: object) -> dict:
     """S8: for a headline question (``text_brief`` / ``latest_items``) over a sample that holds a list of titled,
     linked or dated items, the card is laid out by code (``ni_brief``): the model's source stays, its pipeline and
@@ -253,6 +338,10 @@ def _run(ctx: ResearchCtx, draft: object) -> dict:
     assert ctx.max_turns > 0, "a turn budget"
     if not isinstance(draft, dict) or len(json.dumps(draft, default=str)) > MAX_DRAFT_BYTES:
         return error("invalid_spec", f"draft_spec must be an object under {MAX_DRAFT_BYTES} bytes")
+    if isinstance(draft.get("source"), dict) and draft["source"].get("format") == _TABLE:
+        draft, err = _seal_table(ctx, draft)
+        if draft is None:
+            return err
     try:
         spec = ni.validate_spec(copy.deepcopy(draft), researcher=True)
     except (ValueError, TypeError, AssertionError) as exc:
@@ -266,13 +355,19 @@ def _run(ctx: ResearchCtx, draft: object) -> dict:
         return error("no_sample", "fetch_sample the source URL first")
     if (source.get("format") or "json") != sample["format"]:
         return error("invalid_spec", f"source.format must be {sample['format']} like the sample")
-    spec = brief_spec(ctx, spec, sample["parsed"])
     try:
-        outputs = ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(sample_payload(sample["parsed"])))
+        given = spec_input(sample, source)
+    except ni_table.TableGone as exc:
+        return error(exc.kind, exc.detail)
+    spec = brief_spec(ctx, spec, given)
+    try:
+        outputs = ni.run_pipeline(copy.deepcopy(spec["pipeline"]), copy.deepcopy(given))
     except ni.NIError as exc:
         return error("pipeline_failed", f"{exc.kind}: {exc.detail}")
     info = ctx.urls.get(key) or {}
     checks = _checks(ctx, outputs, source["url"], info)
+    if sample["format"] == _TABLE:
+        checks.append(_page_check(ctx, sample, outputs))
     preview = _bounded(outputs)
     if len(json.dumps(preview, default=str)) > MAX_PREVIEW_CHARS:
         preview = _bounded_small(outputs)
@@ -330,6 +425,8 @@ def _tier(origin: str, fmt: str) -> str:
     """The quality tier, derived by code from how the source was found and what it is."""
     assert origin in _ORIGIN_WHY, "a known origin"
     assert isinstance(fmt, str), "a format"
+    if fmt == _TABLE:   # a page's table is a reading of a page, whoever found the page
+        return "page_reading"
     if origin == "library":
         return "curated"
     return "verified_endpoint" if fmt in _STRUCTURED else "page_reading"
@@ -356,7 +453,8 @@ def propose_card(ctx: ResearchCtx, draft_spec: object) -> dict:
     url = spec["source"]["url"]
     ctx.note("propose_card", "draft", "ok")
     scope = (ctx.urls.get(key) or {}).get("scope")
-    source = {"kind": {"library": "library", "search": "search"}.get(origin or "", "endpoint"),
+    source = {"kind": "page" if got["format"] == _TABLE
+              else {"library": "library", "search": "search"}.get(origin or "", "endpoint"),
               "ref": url[:300], "host": (key.split("/")[2])[:253], "why": _ORIGIN_WHY[origin]}
     if isinstance(scope, str) and scope.strip():
         source["scope"] = scope.strip()[:20]  # what the place check had; the refresh re-check reads it back
@@ -425,6 +523,8 @@ def _compare_values(ctx: ResearchCtx, things: list[dict]) -> tuple[list | None, 
     assert things, "things required"
     assert isinstance(ctx, ResearchCtx), "a research ctx"
     fmts = {ctx.samples[t["url"]]["format"] for t in things}
+    if _TABLE in fmts:
+        return None, "", error("invalid_spec", "a page table is built with propose_card, not propose_compare")
     if len(fmts) != 1:
         return None, "", error("invalid_spec", "every thing's address must answer in the same format")
     values = []

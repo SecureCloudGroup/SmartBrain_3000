@@ -133,8 +133,10 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     """The board's ``awaiting_yes`` block for one item (None unless it waits for the user's YES / Keep)."""
     assert isinstance(item, dict), "item required"
     built_from = item["spec"].get("_built_from") or {}
-    web = (item["spec"].get("recipe") or {}).get("tier") not in (None, "curated")  # a researched card from the open web
-    block = ({"from": {"page": "page", "auto": "library", "research": "dataset" if web else "library"}.get(
+    tier = (item["spec"].get("recipe") or {}).get("tier")
+    web = tier not in (None, "curated")  # a researched card from the open web
+    research = "page" if tier == "page_reading" else "dataset" if web else "library"   # a page's table is a page
+    block = ({"from": {"page": "page", "auto": "library", "research": research}.get(
                   built_from.get("path"), "dataset"),
               "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
              if ni.awaits_yes(item) else None)

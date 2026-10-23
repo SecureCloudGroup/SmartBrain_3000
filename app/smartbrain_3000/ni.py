@@ -147,7 +147,10 @@ _SOURCE_TYPES: frozenset[str] = frozenset(
 # ``smartbrain_3000.formats`` turns into the walker-shaped dict the pipeline
 # grammar already consumes. Refused when absent from a candidate spec.
 _HTTP_JSON_FORMATS: frozenset[str] = frozenset({"json", "csv", "feed", "xml", "text"})
-_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format", "secret_query", "contact_ua", "port", "compare"})
+_HTTP_JSON_EXTRA_KEYS: frozenset[str] = frozenset({"format", "secret_query", "contact_ua", "port", "compare", "table"})
+# ``format: "table"`` (page reading): the source is an ordinary web page and ``table`` names the one data table the
+# card reads, by its header names (``ni_table``). Only a researched card carries it; it has no key, no header.
+TABLE_FORMAT = "table"
 # The user's own key as a query parameter (most free-key APIs: ``?api_key=``): resolved
 # host-bound at fetch time exactly like a ``$secret`` header, never stored in the URL.
 _SECRET_QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\-]{1,40}\Z")
@@ -621,6 +624,7 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False, researcher:
     _require_str(body.get("goal"), "spec.goal", max_len=_MAX_GOAL)
     _validate_params(body.get("params") or {}, allow_empty=allow_empty_params)
     _validate_source(body.get("source"))
+    _validate_table_owner(body, researcher)
     _validate_render_ok(body.get("_render_ok"), body.get("source"))
     _validate_feed_candidates(body.get("_feed_candidates"), body.get("source"))
     outputs = _validate_pipeline(body.get("pipeline") or [])
@@ -1193,9 +1197,10 @@ def _validate_http_json_source(s: dict) -> None:
     """
     _validate_http_source_shape(s, "http_json", extra_keys=_HTTP_JSON_EXTRA_KEYS)
     fmt = s.get("format")
-    if fmt is not None and fmt not in _HTTP_JSON_FORMATS:  # absent = "json", the historical shape
+    if fmt is not None and fmt not in _HTTP_JSON_FORMATS and fmt != TABLE_FORMAT:  # absent = "json"
         raise ValueError(
-            f"spec.source.format must be one of {sorted(_HTTP_JSON_FORMATS)}")
+            f"spec.source.format must be one of {sorted(_HTTP_JSON_FORMATS | {TABLE_FORMAT})}")
+    _validate_table_source(s, fmt)
     query = s.get("secret_query")
     if query is not None:
         node = _require_dict(query, "spec.source.secret_query")
@@ -1219,6 +1224,36 @@ def _validate_http_json_source(s: dict) -> None:
         raise ValueError("spec.source.port must be a TCP port number")
     if s.get("compare") is not None:  # S7: one sealed address per compared thing (ni_compare)
         ni_compare.validate_source(s)
+
+
+def _validate_table_source(s: dict, fmt: object) -> None:
+    """A ``table`` source names its table (``ni_table.validate_locator``) and is a public https page: no header, no
+    key, no contact email, no compare. Any other format carries no ``table``."""
+    assert isinstance(s, dict), "source must be a dict"
+    if fmt != TABLE_FORMAT:
+        if s.get("table") is not None:
+            raise ValueError("spec.source.table needs format 'table'")
+        return
+    from . import ni_table  # lazy: keep the fetch layer off ni's import graph edges
+    ni_table.validate_locator(s.get("table"))
+    if not str(s.get("url") or "").lower().startswith("https://"):
+        raise ValueError("spec.source (table) needs an https:// url")
+    if s.get("headers") or s.get("secret_query") or s.get("contact_ua") or s.get("compare") is not None:
+        raise ValueError("spec.source (table) is a public page: no headers, key, contact email or compare")
+
+
+def _validate_table_owner(body: dict, researcher: bool) -> None:
+    """A page-table source belongs to a researched card: the sealed spec carries a ``page_reading`` recipe (a template,
+    an import or a hand-written spec cannot name one), and a researcher draft has no recipe yet."""
+    assert isinstance(body, dict), "spec must be a dict"
+    source = body.get("source")
+    if not isinstance(source, dict) or source.get("format") != TABLE_FORMAT:
+        return
+    recipe = body.get("recipe")
+    if recipe is None and researcher:
+        return
+    if not isinstance(recipe, dict) or recipe.get("tier") != "page_reading":
+        raise ValueError("spec.source.format 'table' belongs to a researched page_reading card")
 
 
 def _validate_http_page_source(s: dict) -> None:
@@ -8222,6 +8257,8 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
     fmt = source.get("format") or "json"
     from . import ni_polite  # lazy, like the imports above
     port = ni_polite.declared_port(source)  # S5a: the Library row's port, or the sealed URL's own
+    if fmt == TABLE_FORMAT:
+        return _fetch_http_table(url, source["table"], port)
     if fmt == "json":
         try:
             return ni_fetch.fetch_parsed(
@@ -8232,6 +8269,28 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
         except netguard.FetchError as exc:
             raise _fetch_error(exc) from None
     return _fetch_http_textual(url, fmt, resolved_headers, has_headers, port)
+
+
+def _fetch_http_table(url: str, locator: dict, port: int | None) -> dict:
+    """``format: "table"``: the page's sealed table as rows (``ni_fetch.fetch_table``, the one polite path). A page
+    that no longer has the table, or has several that fit equally, is a failed fetch (``table_gone`` /
+    ``table_ambiguous``): the card keeps its last good value and never reads a different table. A redirect is
+    refused, as in the research that found the page: the consent was for this exact address."""
+    from . import (  # lazy: keep the fetch layer off ni's import graph edges
+        ni_fetch,
+        ni_table,
+    )
+
+    assert isinstance(locator, dict), "a sealed locator"
+    assert isinstance(url, str) and url, "url required"
+    try:
+        return ni_fetch.fetch_table(url, locator, allow_redirects=False, port=port)
+    except ni_table.TableGone as exc:
+        raise NIError("fetch_failed", exc.kind) from None
+    except ni_fetch.netguard.FetchError as exc:
+        if getattr(exc, "kind", None) == "not_table":
+            raise NIError("fetch_failed", "not_table") from None
+        raise _fetch_error(exc) from None
 
 
 def _fetch_compare(source: dict) -> dict:
@@ -8387,7 +8446,7 @@ def _fetch_http_page_polite(source: dict, item_id: str, secrets_store, *,
     # F4: forward the HTTP header's charset to the jail so a page with no BOM
     # and no <meta charset> still decodes correctly ("Content-Type:
     # text/html; charset=ISO-8859-1" on real latin-1 bytes).
-    charset = netguard._declared_charset(str(got.get("content_type") or ""))
+    charset = netguard.declared_charset(str(got.get("content_type") or ""))
     try:
         extracted = jailrun.run_extractor(bytes(body), url_hint=url,
                                            declared_charset=charset)

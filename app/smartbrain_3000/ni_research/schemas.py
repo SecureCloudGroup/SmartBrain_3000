@@ -37,7 +37,7 @@ _COMPARE = {"type": "object", "additionalProperties": False, "required": ["metri
                         "path": {"type": "string", "maxLength": 200, "description": "Path to the number in its sample."}}}}}}
 
 _TOOLS = [
-    _tool("fetch_sample", "Fetch one data sample (JSON, CSV, feed or XML) with a plain GET and read a fenced digest. "
+    _tool("fetch_sample", "Fetch one data sample (JSON, CSV, feed, XML or a web page's data tables) with a plain GET and read a fenced digest. "
           "Only a URL library_search or web_search returned, exactly as returned. At most 8 per run.",
           "url", {"type": "string", "maxLength": 2000}),
     _tool("library_search", "Find vetted Library sources for a question. Highest trust: use first; "

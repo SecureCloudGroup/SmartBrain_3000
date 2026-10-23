@@ -4058,3 +4058,76 @@ a shell `["retry", "delete"]`, a finished card `["retry", "fix", "refine", "dele
 most three) and the reopen buttons the page declares; the page owns the requests. Terminal states are
 `TERMINAL_FLOW_STATES` in `lib/ni/flow.ts`.
 
+## 40. Page tables (the `table` source format)
+
+Decision (T, 2026-10-22): research may read data from an ordinary web page's **`<table>` grids**, never from its
+prose. It reverses the 2026-10-05 "pages are links only" ruling, which followed 9 wrong page readings in 15. The
+safeguards: every build runs the verifier checks, a web card is always held for the user's Keep, and the card is
+labelled quality tier `page_reading`. The mechanism is general (any page with a data table); nothing in it names a
+site or an ask.
+
+**Source.** `{"type": "http_json", "url": "https://...", "format": "table", "table": {"headers": [...], "context": "..."}}`
+(`ni._validate_table_source`). `format: "table"` is an `http_json` format beside csv/feed/xml/text but is not in
+`_HTTP_JSON_FORMATS` (no Library row or flow pick carries it). The URL is https; the source has no headers, key,
+contact email or compare. `table` is the **locator** (`ni_table.validate_locator`): the table's normalised header
+names (2..12, lower-cased, whitespace collapsed, at most 60 characters each; an unnamed column is left out) and,
+when the table has one, the caption or the heading it sits under (`context`, at most 80). `ni._validate_table_owner`:
+only a spec whose `recipe.tier` is `page_reading` carries it (a researcher draft has no recipe yet), so a template,
+an import or a hand-written spec cannot.
+
+**One decode rule.** A page is decoded once, by the jail, from its raw bytes (BOM, then `<meta charset>`, then the
+HTTP header charset, `netguard.declared_charset`). Research (the sniff path: `netguard.safe_fetch_text` returns `content`
+beside `text`, `ni_fetch.HtmlPage` carries the bytes and the content type, `tools._fetch_and_digest` hands them to
+`page_tables`) and refresh (`fetch_page_tables`) therefore read the same text, so a sealed locator matches on refresh. The
+decoded `text` of the sniff is for sniffing only. An eval cassette records text without bytes; its replay reads the text
+as UTF-8.
+
+**Reading a page.** `ni_fetch.fetch_page_tables` fetches the page once (`netguard.safe_fetch_page`, the one polite
+path: per-host budget, robots.txt, port policy, no redirect) and reads it in the jail (`jail_extract`; HTML never parses
+in-process). The jail's `tables` layer now also carries each table's `<caption>` text and the `heading` (latest h1-h3)
+it sits under; a cell inside a hidden element is not a cell value, and a row opened while hidden adds no row. `ni_table.read` turns a jail table into a data table
+(at least two named columns and one data row; a grid with no `<th>` row promotes its first row to the header when every
+cell of it is a distinct label and two rows of data follow; rows padded or cut to the header width), `ni_table.payload`
+into rows shaped like a CSV: `{"columns": [...keys], "rows": [{key: cell}]}` in the page's order (no re-sorting), keys
+slugged from the header by the CSV rule, a collision suffixed in column order. Cells are strings; the pipeline's `number`
+transform coerces them.
+
+**Finding the table again.** `ni_table.locate(tables, locator)`: exact header match first, else a table that still holds
+every sealed header in order (a column added later is fine; reorder-safe because keys are names). With several
+candidates the sealed `context` must single one out. None, or several it cannot tell apart, is `TableGone`
+(`table_gone` / `table_ambiguous`); position alone is never a name. `ni._fetch_http_table` maps it to
+`NIError("fetch_failed", "table_gone" | "table_ambiguous")`: the card keeps its last good value, the failure streak runs,
+and `ni_refresh` treats it as `source_dead` (the `page_reading` tier asks for a re-research once the card is failing; a
+re-research reads the Library only). A robots refusal is `fetch_failed: robots_disallowed`; a redirect is refused.
+
+**Researcher.** `fetch_sample` on an HTML body (a search result sniffed as a page, or a Library row whose format is
+`html`) returns a fenced digest (`ni_research.digest.table_digest`): at most four tables (the largest, in page order) with
+`table` (index), `about` (caption or heading), `columns` (the pipeline keys), `rows` and three sample rows of at most 40
+characters a cell, plus feed links and JSON-LD types the page announces (named, not fetchable: only a search result or a
+Library row is a legal address). The whole digest is under 3,200 characters (`MAX_TABLE_DIGEST_CHARS`; about 800
+tokens at worst). A page without a data table is `not_data`; page text is never echoed, with one exception: the one
+non-table string a page reading uses is the table's caption or, with none, the nearest heading above it (at most 80
+characters, cleaned and fenced). It is sealed as the locator's `context` and shown as `about`, as a name for the table
+and a tie-break between twins, never as a value. A heading is page text outside the table; that is the whole of it. Every string passes
+`clean_text`; the fence cannot be forged. The sample is `{format: "table", parsed: {tables}, graph}`; the graph (the page
+as `pagegraph` reads it) is kept in memory for the verifier alone. A draft names the table `source.table = {"index": N}`;
+`tools._seal_table` replaces it with the locator and `tools.spec_input` finds the table with `ni_table.locate`, exactly as a
+refresh will, so a table the page cannot single out fails at research time too. `_checks` gains one check, `subject`, from
+`page_verify.verify_page_reading` (compiled tier: every value must be on the page; right-now asks need a freshness signal,
+`ResearchCtx.window`); a checker error is a failed check. This page gate runs at Keep (build time) only: `subject` is not
+in `ni_refresh.RECHECKED` and refresh has no page graph, so a refresh re-runs the constraint checks but not the
+freshness signal. "Checked against the page" means as it was at Keep. `propose_card` stamps `tier: page_reading` and the source kind
+`page`; `propose_compare` refuses a page table. The prompt prefix and the `fetch_sample` description changed (rule 3, rule
+4, the source grammar), so `PINNED_PREFIX_SHA256` and `PINNED_SCHEMA_SHA256` were re-pinned.
+
+**Held for Keep.** The landed card's `_built_from.path` is `research`, an open path: `awaits_yes` holds it in
+`commissioning`, `due_items` does not list it and nothing recurs before Keep. The awaiting block's `from` is `page` for a
+`page_reading` card (`ni_routes._awaiting_yes_of`).
+
+**Bounds.** Everything over fetched bytes is capped before it is scanned: the jail keeps 8 tables x 500 rows x 12 columns
+x 120 characters; `ni_table` cuts every cell at 200 and every header at 60 before splitting, uses no regex, and
+`tests/test_ni_regex_budget.py` sweeps `ni_table`, `page_verify` and the table digest on hostile shapes.
+
+**Eval.** CI10 (`tests/ni_eval/cassettes/ci/CI10.json`, hand-built, tuning set) is a page-table ask: library_search,
+web_search, fetch_sample (the page arrives through the recorded text fetch), try_recipe, propose_card; it lands
+`page_reading`, held for Keep, `from.kind` `page`.
