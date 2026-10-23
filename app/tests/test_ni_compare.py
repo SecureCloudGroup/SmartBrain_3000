@@ -495,18 +495,18 @@ def test_shared_address_rows_build_one_fetch_two_paths(lib, monkeypatch) -> None
 
 
 @pytest.mark.parametrize("params", [None, {"quote": "EUR"}], ids=["path-per-thing", "same-reading"])
-def test_shared_address_rows_end_ready_or_unsupported_never_failed(lib, monkeypatch, params) -> None:  # noqa: F811
+def test_shared_address_rows_end_ready_or_declined_never_failed(lib, monkeypatch, params) -> None:  # noqa: F811
     _store_, _id, out, _ = _run_shared(lib, monkeypatch, "compare EUR and GBP exchange rates", params)
-    assert out["state"] in ("ready", "unsupported"), out
+    assert out["state"] in ("ready", "declined"), out
     if params:
-        assert out["state"] == "unsupported" and "can't compare these yet" in str(out)
+        assert out["state"] == "declined" and "can't compare these yet" in str(out)
 
 
 def test_a_long_token_in_the_ask_never_fails_the_item(lib, monkeypatch) -> None:  # noqa: F811
     request = "compare EUR and GBP exchange rates " + "x" * 300
     bodies = {_RATE_URL.format(q=c): {"rates": {c: 1.0}} for c in ("EUR", "GBP")}
     _s, _i, out, _f = _run_flow(lib, monkeypatch, request, bodies)
-    assert out["state"] in ("ready", "unsupported"), out
+    assert out["state"] in ("ready", "declined"), out
     assert ni_compare_flow.metric_for(request, ("EUR", "GBP"), [])[0] is None   # no raise on its own either
 
 
@@ -516,7 +516,7 @@ def test_a_seal_error_in_one_source_is_that_sources_reason_not_a_crash(lib, monk
     monkeypatch.setattr(ni_flow, "build_final_spec", boom)
     bodies = {_RATE_URL.format(q=c): {"rates": {c: 1.0}} for c in ("EUR", "GBP")}
     _s, _i, out, _f = _run_flow(lib, monkeypatch, "compare EUR and GBP exchange rates", bodies)
-    assert out["state"] == "unsupported", out
+    assert out["state"] == "declined", out
 
 
 def test_auto_pick_declines_honestly_when_no_source_serves_every_thing(lib, monkeypatch) -> None:  # noqa: F811
