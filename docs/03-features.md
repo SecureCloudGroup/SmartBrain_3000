@@ -773,6 +773,10 @@ place to look when something seems off.
 - **Knowledge**, **Schedules**, **Feeds**, **Remote access** — document and embedded-chunk
   counts, enabled schedules, feed subscriptions (with a **failing** count when a feed
   can't be fetched), and paired devices.
+- **Neural Interface cards** — for each way a card was built (the SmartBrain Library, a
+  source you kept, research, a link you pasted), how many cards you kept or said no to, and
+  how many kept cards still worked 7 days later. **Export** saves the counts as a file.
+  Counted on this device only; nothing is sent.
 
 ### Cloud providers
 

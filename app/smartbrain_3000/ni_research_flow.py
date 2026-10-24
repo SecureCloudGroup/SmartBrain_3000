@@ -165,9 +165,10 @@ def _can_land(ctx: ResearchCtx, item_id: str, request: str, proposal: dict,
 
 
 def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, proposal: dict, out: loop.Outcome,
-          note: str | None = None) -> dict:
+          note: str | None = None, path: str = "research") -> dict:
     """Land the proposal as a held card (preview, nothing recurs until Keep), noting how it was built (``note``: the
-    caller's own words for it, as a kept source's reuse says)."""
+    caller's own words for it, as a kept source's reuse says; ``path``: the sealed ``_built_from.path``, ``kept`` for
+    a source the user kept before)."""
     assert isinstance(proposal, dict), "a proposal"
     assert store is not None and item_id, "args required"
     spec = _stamp(proposal["spec"], request)
@@ -180,7 +181,7 @@ def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, propo
     ni_flow._transition(store, item_id, "assembling", source_url=url, note=note)
     ni_flow._try_journal(store, item_id, "updated", note)
     return ni_flow._finalize(store, item_id, spec, preview, note=note, born="flow", fetched_at=ctx.now,
-                             built_from=ni_flow._built_from_of(store, item_id, "research", url, title))
+                             built_from=ni_flow._built_from_of(store, item_id, path, url, title))
 
 
 def _chat_for(store: ni.NIStore, model: str, local: bool) -> Callable[[list, list | None], dict]:

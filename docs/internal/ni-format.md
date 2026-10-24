@@ -860,7 +860,7 @@ as a vote (`{source_id, "yes", app_version}`) queued in a sealed outbox (reserve
 queues a record with parameter values, headers, tier, origin and votes removed.
 
 **Kept sources (intake).** On Keep (`POST /items/{id}/validate {ok: true}` on a held card), `ni_intake.remember`
-writes a card whose `_built_from.path` is `research` or `mapping` into the user's own sources (`LocalSources`, id
+writes a card whose `_built_from.path` is `research`, `mapping` or `kept` into the user's own sources (`LocalSources`, id
 `local-k<hash>`, `origin.by: keep`), with `kept = {key: normal_url, entries: [{question, request, draft, title, at,
 misses}]}` (at most 5 entries; at the source cap the oldest kept row goes, never a typed one). Only a replayable
 `http_json` draft over https with no compare entities is kept (`ni_recipe.check_researcher_draft`). Before the
@@ -869,7 +869,7 @@ the same place words, every new subject word among the entry's subject and reque
 not what it was kept for, so it counts only for names), and every name the new ask carries (`ni_verify.named`) known
 to the entry's request, subject, title or address. The kept draft runs through the researcher's `fetch_sample` and
 `propose_card` with only the `kept` origin allowed, so every check runs against the new ask, and the card lands held
-for Keep (`why: a source you kept before`). No model is called. The read is audited (`ni_kept_pick`, with the host)
+for Keep (`why: a source you kept before`, `_built_from.path: kept`). No model is called. The read is audited (`ni_kept_pick`, with the host)
 and does not happen while `ni_research_web` is off. A fault in intake, or a row or entry this version cannot read,
 is skipped and the ask goes on to the Library. A fetch error counts a miss (3 in a row forget the entry), and No on a
 held card drops the entries at its address that match its question (`ni_intake.forget`).
@@ -993,11 +993,11 @@ a path other than a Library source's declared answers is held until the user kee
 
 - **Seal.** `_finalize` seals `_built_from: {path, host, title}` (closed, `ni._validate_built_from`). `path` is
   `declared` (a Library source's declared answers), `auto` (the same build picked by the auto-pick), `page`
-  (an `http_page` card), `mapping` (a pasted or harvested JSON link, a Fix, a remap) or `research` (a
-  researcher's recipe). `host` is the fetched host; `title` is the page's own title, else the picked row's.
+  (an `http_page` card), `mapping` (a pasted or harvested JSON link, a Fix, a remap), `research` (a
+  researcher's recipe) or `kept` (a source the user kept before, §30). `host` is the fetched host; `title` is the page's own title, else the picked row's.
   Export strips it and packs refuse it.
 - **Held.** `ni.awaits_yes(item)`: state `commissioning`, `_built_from.path` in the open set (`page`, `mapping`,
-  `auto`, `research`) and no `_c2_ok`. A held card lands `commissioning` like any other and differs only in
+  `auto`, `research`, `kept`) and no `_c2_ok`. A held card lands `commissioning` like any other and differs only in
   that the due query skips it (no cadence fetch before Keep), and the board shows the reading the flow found
   (`preview`, or a manual run's ok `latest`) with `awaiting_yes {from: library|page|dataset, host, title,
   used_key?}`. Nothing sets `_c2_ok` except `POST /validate ok=true`; the scheduler, runs, repairs, export,
@@ -1472,3 +1472,23 @@ list it, and the awaiting block's `from` is `page`.
 **Bounds.** Everything over fetched bytes is capped before it is scanned: `ni_table` cuts every cell at 200 and every
 header at 60, uses no regex, and `tests/test_ni_regex_budget.py` sweeps `ni_table`, `page_verify` and the digest on
 hostile shapes.
+
+## 41. The live measure
+
+The measure of "great" is the outcome a person sees: a card they keep that keeps working. `ni_measure` records it
+locally and replaces the gold list as the release measure (the held-out set stays the safety check).
+
+- **Rows.** One row per verdict, in the plaintext `meta` row `ni_outcomes`, a JSON list of at most 500 (the oldest
+  drop off): `{item, path, verdict, at, day7}`. `item` is the card's random id; `path` is its sealed
+  `_built_from.path` (§33), or `other` when it has none this version knows, so no host, title or ask text is ever
+  written. `verdict` is `kept` (`POST /validate ok=true`) or `dismissed` (`ok=false`, or deleting a card still
+  held for Keep). Recording is best effort: a fault is logged and never fails the tap. A row this version cannot
+  read is skipped.
+- **Day 7.** Each scheduler pass (`ni_measure.check_due`, its own error boundary) stamps `day7` on at most 20 kept
+  rows seven days old, from the card as it stands: `live`, `paused`, `gone` (deleted) or `failing` (any other
+  state). A row is stamped once.
+- **View.** `GET /api/ni/measure` (desktop only) returns `{since, by_source, total, rows}`. `by_source` groups by how
+  the card was built: `library` (`declared`, `auto`), `own` (`kept`), `research`, `paste` (`page`, `mapping`) and
+  `other`; each count is `{kept, dismissed, waiting, live, failing, paused, gone}`, where `waiting` is a kept card
+  not yet seven days old. **Settings → Status** shows one line per source, and its **Export** saves this JSON for the eval.
+- **Local only.** Nothing in the measure is sent anywhere, and the Library outbox never reads it.
