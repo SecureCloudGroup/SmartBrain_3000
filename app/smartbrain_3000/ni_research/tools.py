@@ -56,7 +56,7 @@ _TABLE = ni.TABLE_FORMAT   # the sample format of a web page's data table (page 
 _MANY_KINDS = frozenset({"latest_items", "ranking"})
 _VERIFY_CLASSES = {"window": "window", "threshold": "threshold", "compare": "compare", "scope": "place"}
 _ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint",
-               "kept": "a source you kept before"}
+               "kept": "a source you kept before", "seed": "a source SmartBrain checked"}
 
 
 def _done(ctx: ResearchCtx, tool: str, arg: object, result: dict) -> dict:
@@ -368,7 +368,9 @@ def spec_input(sample: dict, source: dict) -> object:
 
 def _seal_table(ctx: ResearchCtx, draft: dict) -> tuple[dict | None, dict]:
     """A draft that reads a page table names it ``source.table = {"index": N}`` (N from the fetch digest); code seals the
-    table by its header names (``ni_table.locator``) so the card finds the same table again, whatever its position."""
+    table by its header names (``ni_table.locator``) so the card finds the same table again, whatever its position.
+    A kept card's draft (a source the user kept, or the bundled seed) carries that sealed locator, and finds its table
+    on the page read now exactly as a refresh does."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
     assert isinstance(draft, dict), "a draft"
     source = draft["source"]
@@ -377,6 +379,11 @@ def _seal_table(ctx: ResearchCtx, draft: dict) -> tuple[dict | None, dict]:
         return None, error("no_sample", "fetch_sample the page URL first")
     tables, want = sample["parsed"]["tables"], source.get("table")
     index = want.get("index") if isinstance(want, dict) and set(want) == {"index"} else None
+    if isinstance(want, dict) and "headers" in want:
+        try:
+            index, _table = ni_table.locate(tables, want)
+        except (ni_table.TableGone, ValueError) as exc:
+            return None, error("invalid_spec", f"source.table: {exc}", limit=MAX_SPEC_DETAIL)
     if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(tables):
         return None, error("invalid_spec", 'source.table must be {"index": N}, a table number from the fetch digest')
     out = copy.deepcopy(draft)
@@ -420,6 +427,12 @@ def brief_spec(ctx: ResearchCtx, spec: dict, parsed: object) -> dict:
             "display": {"size": display_size_for_span(str(built["scene"]["spans"]["desktop"]))}}
 
 
+def plain_source(source: object) -> bool:
+    """Is ``source`` the one kind a researcher draft reads: a plain http_json source, no headers, no secret query?"""
+    return (isinstance(source, dict) and source.get("type") == "http_json" and not source.get("headers")
+            and not source.get("secret_query"))
+
+
 def _run(ctx: ResearchCtx, draft: object) -> dict:
     """Validate ``draft`` as a researcher draft and run its pipeline on the stored sample (no network)."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
@@ -435,7 +448,7 @@ def _run(ctx: ResearchCtx, draft: object) -> dict:
     except (ValueError, TypeError, AssertionError) as exc:
         return error("invalid_spec", str(exc), limit=MAX_SPEC_DETAIL)
     source = spec.get("source") or {}
-    if source.get("type") != "http_json" or source.get("headers") or source.get("secret_query"):
+    if not plain_source(source):
         return error("invalid_spec", "a researcher draft reads one plain http_json source")
     key = normal_url(str(source.get("url") or ""))
     sample = ctx.samples.get(key)

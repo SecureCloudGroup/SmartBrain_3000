@@ -1,0 +1,77 @@
+# Release P5 seed asks: everyday asks across the families the tuning gold shows (weather, scores, prices, feeds,
+# transit, status, and the kinds alerts, count, forecast, latest items, lookup, next event, ranking, result,
+# schedule, trend). Written for seeding only; never taken from the held-out set. An ask that turned out to match
+# a held-out ask, even reworded, is removed (#551 review), so a held-out run does not measure the seed.
+
+# weather and sea
+current temperature in Omaha
+humidity in Tampa right now
+wind speed in Wichita
+7 day forecast for Spokane
+chance of rain in Raleigh tomorrow
+snow forecast for Salt Lake City
+tide times in Portland Maine
+water temperature in San Diego
+surf forecast for Santa Cruz
+pollen count in Richmond
+air quality in Salt Lake City
+UV index in Las Vegas today
+
+# alerts and hazards
+weather alerts for Oklahoma
+earthquakes in California today
+active wildfires in Oregon
+volcano alerts in Alaska
+space weather alerts
+
+# prices and markets
+bitcoin price
+dogecoin price
+gold price per ounce
+silver price per ounce
+crude oil price
+natural gas price
+pound to dollar exchange rate
+Canadian dollar exchange rate
+average gas price in the US
+30 year mortgage rate
+
+# economy
+US unemployment rate
+US inflation rate
+US GDP growth
+federal funds rate
+
+# scores and sports
+NBA scores today
+NHL scores today
+MLB standings
+next Chelsea match
+latest NFL scores
+
+# feeds and news
+top stories on Hacker News
+NPR news headlines
+latest NASA news
+latest Rust release
+top posts on Lobsters
+
+# transit and travel
+BART service alerts
+MBTA service alerts
+NYC subway status
+flight delays at Denver airport
+International Space Station location
+
+# status
+is GitHub down
+is Cloudflare having an outage
+Discord status
+OpenStreetMap status
+
+# lookups and counts
+population of Canada
+sunrise time in Boston
+moon phase today
+next full moon
+next rocket launch

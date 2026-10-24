@@ -4147,10 +4147,10 @@ def set_audit_sink(provider: Callable[[], object] | None) -> None:
 
 def _audit_auto_pick(item_id: str, host: str, mark: dict, tool: str = "ni_auto_pick") -> bool:
     """Record one fetch the user did not tap for on this card: a v2 auto-picked Library row (``ni_auto_pick``) or
-    a source they kept before (``ni_kept_pick``), with the host. Best effort: a locked or unwired log never stops
-    the build. True when a row was written."""
+    a source they kept before (``ni_kept_pick``) or one from the bundled seed (``ni_seed_pick``), with the host.
+    Best effort: a locked or unwired log never stops the build. True when a row was written."""
     assert item_id and isinstance(mark, dict), "item id + mark required"
-    assert tool in ("ni_auto_pick", "ni_kept_pick"), "a known fetch"
+    assert tool in ("ni_auto_pick", "ni_kept_pick", "ni_seed_pick"), "a known fetch"
     try:
         log_ = _AUDIT_PROVIDER() if _AUDIT_PROVIDER is not None else None
         if log_ is None:

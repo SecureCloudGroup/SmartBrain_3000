@@ -30,6 +30,12 @@ to know when a release changes behavior.
   card was built (the SmartBrain Library, a source you kept, research, a link you pasted), how many you kept and
   how many you said no to, and how many kept cards were still working a week later. **Export** saves the counts as
   a file. Only a card's random id and how it was built are recorded, and nothing is sent anywhere.
+- **Sources SmartBrain checked, shipped with the app.** A few sources SmartBrain found on its own runs and a person
+  checked by hand against the source now ship with the app: pollen in Richmond, active wildfires in Oregon, the
+  next Formula 1 race and Canada's population. An ask that matches one builds from it in seconds, with no model and
+  no research, after any source you kept yourself, and the card says it was built from "a source SmartBrain
+  checked". It still shows as a preview for your **Keep**. Keep makes it one of your own sources; No, or three
+  failed reads in a row, turns it off for you only. Nothing about it leaves your device.
 
 ### Changed
 

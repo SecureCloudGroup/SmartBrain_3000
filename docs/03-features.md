@@ -427,8 +427,13 @@ How a card comes to life:
    the next ask for the same thing builds from it in seconds, with no model and
    no research (still shown as a preview for your Keep). A source you say No to
    is not offered for that question again, and one that stops answering is
-   forgotten. Browse the Library, or add your own sources, from the **Library**
-   link on the Neural page.
+   forgotten. SmartBrain also ships a few sources it found on its own runs and
+   a person checked by hand (pollen, wildfires, the next Formula 1 race, a
+   country's population): an ask that matches one builds from it the same way,
+   after your own sources, and says it was built from *a source SmartBrain
+   checked*. Keep makes it one of yours; No turns it off for you. Browse the
+   Library, or add your own sources, from the **Library** link on the Neural
+   page.
 2. **Built from real data.** The engine samples the source and builds the
    pipeline and layout against what actually came back — the preview you see is
    real data, not an invention. If something looks off, say so on the card

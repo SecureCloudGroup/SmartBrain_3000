@@ -1,0 +1,633 @@
+{
+ "made": "2026-10-24",
+ "rows": [
+  {
+   "access": {
+    "auth": "none",
+    "docs_url": "https://pollencount.org/pollen/united-states/richmond/",
+    "headers": {},
+    "kind": "http_json",
+    "params": [],
+    "url_template": "https://pollencount.org/pollen/united-states/richmond/"
+   },
+   "categories": [],
+   "coverage": {
+    "entity": "",
+    "geo": "local"
+   },
+   "description": "Kept for: pollen count in Richmond",
+   "examples": [],
+   "freshness": {
+    "cadence": "irregular"
+   },
+   "id": "seed-b7fc60a420a",
+   "kept": {
+    "entries": [
+     {
+      "at": "2026-10-24T21:56:49.178761+00:00",
+      "draft": {
+       "display": {
+        "size": "small"
+       },
+       "goal": "pollen count in Richmond",
+       "model": null,
+       "params": {},
+       "pipeline": [
+        {
+         "op": "extract",
+         "paths": {
+          "count": "rows[0].count",
+          "level": "rows[0].level",
+          "species": "rows[0].species"
+         }
+        }
+       ],
+       "scene": {
+        "children": [
+         {
+          "role": "title",
+          "size": "md",
+          "tone": "default",
+          "type": "text",
+          "value": "Pollen in Richmond, VA"
+         },
+         {
+          "role": "label",
+          "size": "sm",
+          "tone": "default",
+          "type": "text",
+          "value": "{{species}}"
+         },
+         {
+          "kind": "accent",
+          "type": "chip",
+          "value": "{{level}}"
+         },
+         {
+          "role": "value",
+          "size": "md",
+          "tone": "default",
+          "type": "text",
+          "value": "{{count}}"
+         }
+        ],
+        "dir": "v",
+        "gap": "sm",
+        "type": "stack"
+       },
+       "source": {
+        "format": "table",
+        "table": {
+         "context": "pollen count & forecast for richmond, va",
+         "headers": [
+          "species",
+          "level",
+          "count"
+         ]
+        },
+        "type": "http_json",
+        "url": "https://pollencount.org/pollen/united-states/richmond/"
+       },
+       "title": "Pollen count in Richmond, VA",
+       "version": 1
+      },
+      "misses": 0,
+      "question": {
+       "cadence": "realtime",
+       "compare_count": 0,
+       "entities": [],
+       "kind": "lookup",
+       "limit": null,
+       "order": [],
+       "places": [
+        "Richmond"
+       ],
+       "subject": "pollen count",
+       "threshold": null,
+       "units": null,
+       "window": null
+      },
+      "request": "pollen count in Richmond",
+      "title": "Pollen Count in Richmond, VA Today | Hourly Forecast | Pollen Count"
+     }
+    ],
+    "key": "https://pollencount.org/pollen/united-states/richmond/"
+   },
+   "kinds": [
+    "lookup"
+   ],
+   "name": "Pollen Count in Richmond, VA Today | Hourly Forecast | Pollen Count",
+   "notes": "",
+   "origin": {
+    "at": "2026-10-24T21:56:49.178761+00:00",
+    "by": "seed"
+   },
+   "provider": {
+    "authority": "community",
+    "id": "local",
+    "name": "pollencount.org",
+    "url": "https://pollencount.org"
+   },
+   "terms": {
+    "note": "checked by SmartBrain",
+    "status": "unverified",
+    "terms_url": ""
+   },
+   "tier": "local",
+   "validation": {
+    "status": "unvalidated"
+   },
+   "votes": {
+    "no": 0,
+    "yes": 0
+   }
+  },
+  {
+   "access": {
+    "auth": "none",
+    "docs_url": "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0/query?where=POOState%3D%27US-OR%27&outFields=IncidentName,IncidentSize,PercentContained,FireDiscoveryDateTime,POOCounty&orderByFields=IncidentSize+DESC&resultRecordCount=25&f=json",
+    "headers": {},
+    "kind": "http_json",
+    "params": [],
+    "url_template": "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0/query?where=POOState%3D%27US-OR%27&outFields=IncidentName,IncidentSize,PercentContained,FireDiscoveryDateTime,POOCounty&orderByFields=IncidentSize+DESC&resultRecordCount=25&f=json"
+   },
+   "categories": [],
+   "coverage": {
+    "entity": "",
+    "geo": "local"
+   },
+   "description": "Kept for: active wildfires in Oregon",
+   "examples": [],
+   "freshness": {
+    "cadence": "irregular"
+   },
+   "id": "seed-6d4242a95c4",
+   "kept": {
+    "entries": [
+     {
+      "at": "2026-10-24T21:58:22.599036+00:00",
+      "draft": {
+       "display": {
+        "size": "wide"
+       },
+       "goal": "active wildfires in Oregon",
+       "model": null,
+       "params": {},
+       "pipeline": [
+        {
+         "op": "extract",
+         "paths": {
+          "c0": "features[0].attributes.POOCounty",
+          "c1": "features[1].attributes.POOCounty",
+          "c2": "features[2].attributes.POOCounty",
+          "n0": "features[0].attributes.IncidentName",
+          "n1": "features[1].attributes.IncidentName",
+          "n2": "features[2].attributes.IncidentName",
+          "p0": "features[0].attributes.PercentContained",
+          "p1": "features[1].attributes.PercentContained",
+          "p2": "features[2].attributes.PercentContained",
+          "s0": "features[0].attributes.IncidentSize",
+          "s1": "features[1].attributes.IncidentSize",
+          "s2": "features[2].attributes.IncidentSize"
+         }
+        }
+       ],
+       "scene": {
+        "children": [
+         {
+          "role": "title",
+          "size": "md",
+          "tone": "default",
+          "type": "text",
+          "value": "Largest current wildfires in Oregon"
+         },
+         {
+          "children": [
+           {
+            "role": "label",
+            "size": "sm",
+            "tone": "default",
+            "type": "text",
+            "value": "{{n0}} ({{c0}})"
+           },
+           {
+            "format": "plain",
+            "size": "sm",
+            "tone": "default",
+            "type": "number",
+            "unit": "acres",
+            "value": {
+             "$bind": "s0"
+            }
+           },
+           {
+            "format": "plain",
+            "size": "sm",
+            "tone": "default",
+            "type": "number",
+            "unit": "% contained",
+            "value": {
+             "$bind": "p0"
+            }
+           }
+          ],
+          "dir": "h",
+          "gap": "sm",
+          "type": "stack"
+         },
+         {
+          "children": [
+           {
+            "role": "label",
+            "size": "sm",
+            "tone": "default",
+            "type": "text",
+            "value": "{{n1}} ({{c1}})"
+           },
+           {
+            "format": "plain",
+            "size": "sm",
+            "tone": "default",
+            "type": "number",
+            "unit": "acres",
+            "value": {
+             "$bind": "s1"
+            }
+           },
+           {
+            "format": "plain",
+            "size": "sm",
+            "tone": "default",
+            "type": "number",
+            "unit": "% contained",
+            "value": {
+             "$bind": "p1"
+            }
+           }
+          ],
+          "dir": "h",
+          "gap": "sm",
+          "type": "stack"
+         },
+         {
+          "children": [
+           {
+            "role": "label",
+            "size": "sm",
+            "tone": "default",
+            "type": "text",
+            "value": "{{n2}} ({{c2}})"
+           },
+           {
+            "format": "plain",
+            "size": "sm",
+            "tone": "default",
+            "type": "number",
+            "unit": "acres",
+            "value": {
+             "$bind": "s2"
+            }
+           },
+           {
+            "format": "plain",
+            "size": "sm",
+            "tone": "default",
+            "type": "number",
+            "unit": "% contained",
+            "value": {
+             "$bind": "p2"
+            }
+           }
+          ],
+          "dir": "h",
+          "gap": "sm",
+          "type": "stack"
+         }
+        ],
+        "dir": "v",
+        "gap": "sm",
+        "type": "stack"
+       },
+       "source": {
+        "type": "http_json",
+        "url": "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0/query?where=POOState%3D%27US-OR%27&outFields=IncidentName,IncidentSize,PercentContained,FireDiscoveryDateTime,POOCounty&orderByFields=IncidentSize+DESC&resultRecordCount=25&f=json"
+       },
+       "title": "Active wildfires in Oregon",
+       "version": 1
+      },
+      "misses": 0,
+      "question": {
+       "cadence": "realtime",
+       "compare_count": 0,
+       "entities": [],
+       "kind": "lookup",
+       "limit": null,
+       "order": [],
+       "places": [
+        "Oregon"
+       ],
+       "subject": "wildfires",
+       "threshold": null,
+       "units": null,
+       "window": null
+      },
+      "request": "active wildfires in Oregon",
+      "title": "NIFC current wildfire incidents"
+     }
+    ],
+    "key": "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0/query?where=POOState%3D%27US-OR%27&outFields=IncidentName,IncidentSize,PercentContained,FireDiscoveryDateTime,POOCounty&orderByFields=IncidentSize+DESC&resultRecordCount=25&f=json"
+   },
+   "kinds": [
+    "lookup"
+   ],
+   "name": "NIFC current wildfire incidents",
+   "notes": "",
+   "origin": {
+    "at": "2026-10-24T21:58:22.599036+00:00",
+    "by": "seed"
+   },
+   "provider": {
+    "authority": "community",
+    "id": "local",
+    "name": "services3.arcgis.com",
+    "url": "https://services3.arcgis.com"
+   },
+   "terms": {
+    "note": "checked by SmartBrain",
+    "status": "unverified",
+    "terms_url": ""
+   },
+   "tier": "local",
+   "validation": {
+    "status": "unvalidated"
+   },
+   "votes": {
+    "no": 0,
+    "yes": 0
+   }
+  },
+  {
+   "access": {
+    "auth": "none",
+    "docs_url": "https://api.jolpi.ca/ergast/f1/current/next/races/",
+    "headers": {},
+    "kind": "http_json",
+    "params": [],
+    "url_template": "https://api.jolpi.ca/ergast/f1/current/next/races/"
+   },
+   "categories": [],
+   "coverage": {
+    "entity": "",
+    "geo": "local"
+   },
+   "description": "Kept for: Formula 1 next race",
+   "examples": [],
+   "freshness": {
+    "cadence": "irregular"
+   },
+   "id": "seed-bde6e71c7ee",
+   "kept": {
+    "entries": [
+     {
+      "at": "2026-10-24T22:04:10.086360+00:00",
+      "draft": {
+       "display": {
+        "size": "small"
+       },
+       "goal": "Formula 1 next race",
+       "model": null,
+       "params": {},
+       "pipeline": [
+        {
+         "op": "extract",
+         "paths": {
+          "circuit": "MRData.RaceTable.Races[0].Circuit.circuitName",
+          "date": "MRData.RaceTable.Races[0].date",
+          "name": "MRData.RaceTable.Races[0].raceName",
+          "time": "MRData.RaceTable.Races[0].time"
+         }
+        }
+       ],
+       "scene": {
+        "children": [
+         {
+          "role": "title",
+          "size": "md",
+          "tone": "default",
+          "type": "text",
+          "value": "{{name}}"
+         },
+         {
+          "role": "value",
+          "size": "lg",
+          "tone": "default",
+          "type": "text",
+          "value": "{{date}} {{time}}"
+         },
+         {
+          "role": "caption",
+          "size": "sm",
+          "tone": "default",
+          "type": "text",
+          "value": "{{circuit}}"
+         }
+        ],
+        "dir": "v",
+        "gap": "sm",
+        "type": "stack"
+       },
+       "source": {
+        "type": "http_json",
+        "url": "https://api.jolpi.ca/ergast/f1/current/next/races/"
+       },
+       "title": "Next Formula 1 race",
+       "version": 1
+      },
+      "misses": 0,
+      "question": {
+       "cadence": "realtime",
+       "compare_count": 0,
+       "entities": [],
+       "kind": "next_event",
+       "limit": null,
+       "order": [],
+       "places": [],
+       "subject": "Formula 1 next race",
+       "threshold": null,
+       "units": null,
+       "window": null
+      },
+      "request": "Formula 1 next race",
+      "title": "F1 next race"
+     }
+    ],
+    "key": "https://api.jolpi.ca/ergast/f1/current/next/races/"
+   },
+   "kinds": [
+    "lookup"
+   ],
+   "name": "F1 next race",
+   "notes": "",
+   "origin": {
+    "at": "2026-10-24T22:04:10.086360+00:00",
+    "by": "seed"
+   },
+   "provider": {
+    "authority": "community",
+    "id": "local",
+    "name": "api.jolpi.ca",
+    "url": "https://api.jolpi.ca"
+   },
+   "terms": {
+    "note": "checked by SmartBrain",
+    "status": "unverified",
+    "terms_url": ""
+   },
+   "tier": "local",
+   "validation": {
+    "status": "unvalidated"
+   },
+   "votes": {
+    "no": 0,
+    "yes": 0
+   }
+  },
+  {
+   "access": {
+    "auth": "none",
+    "docs_url": "https://apiardata.com/statistics/ca-population/",
+    "headers": {},
+    "kind": "http_json",
+    "params": [],
+    "url_template": "https://apiardata.com/statistics/ca-population/"
+   },
+   "categories": [],
+   "coverage": {
+    "entity": "",
+    "geo": "local"
+   },
+   "description": "Kept for: population of Canada",
+   "examples": [],
+   "freshness": {
+    "cadence": "irregular"
+   },
+   "id": "seed-83c542efaf3",
+   "kept": {
+    "entries": [
+     {
+      "at": "2026-10-24T22:11:13.013284+00:00",
+      "draft": {
+       "display": {
+        "size": "small"
+       },
+       "goal": "population of Canada",
+       "model": null,
+       "params": {},
+       "pipeline": [
+        {
+         "op": "extract",
+         "paths": {
+          "chg": "rows[0].yoy_change",
+          "pop": "rows[0].persons",
+          "year": "rows[0].year"
+         }
+        }
+       ],
+       "scene": {
+        "children": [
+         {
+          "role": "title",
+          "size": "md",
+          "tone": "default",
+          "type": "text",
+          "value": "Canada population ({{year}})"
+         },
+         {
+          "role": "value",
+          "size": "lg",
+          "tone": "default",
+          "type": "text",
+          "value": "{{pop}}"
+         },
+         {
+          "role": "caption",
+          "size": "sm",
+          "tone": "default",
+          "type": "text",
+          "value": "Change vs prior year: {{chg}} (World Bank data)"
+         }
+        ],
+        "dir": "v",
+        "gap": "sm",
+        "type": "stack"
+       },
+       "source": {
+        "format": "table",
+        "table": {
+         "context": "canada total population (2025) — source data. world bank.",
+         "headers": [
+          "year",
+          "persons",
+          "yoy change"
+         ]
+        },
+        "type": "http_json",
+        "url": "https://apiardata.com/statistics/ca-population/"
+       },
+       "title": "Population of Canada",
+       "version": 1
+      },
+      "misses": 0,
+      "question": {
+       "cadence": "realtime",
+       "compare_count": 0,
+       "entities": [],
+       "kind": "lookup",
+       "limit": null,
+       "order": [],
+       "places": [
+        "Canada"
+       ],
+       "subject": "population",
+       "threshold": null,
+       "units": null,
+       "window": null
+      },
+      "request": "population of Canada",
+      "title": "Canada Total Population (2025) - Apiar Data"
+     }
+    ],
+    "key": "https://apiardata.com/statistics/ca-population/"
+   },
+   "kinds": [
+    "lookup"
+   ],
+   "name": "Canada Total Population (2025) - Apiar Data",
+   "notes": "",
+   "origin": {
+    "at": "2026-10-24T22:11:13.013284+00:00",
+    "by": "seed"
+   },
+   "provider": {
+    "authority": "community",
+    "id": "local",
+    "name": "apiardata.com",
+    "url": "https://apiardata.com"
+   },
+   "terms": {
+    "note": "checked by SmartBrain",
+    "status": "unverified",
+    "terms_url": ""
+   },
+   "tier": "local",
+   "validation": {
+    "status": "unvalidated"
+   },
+   "votes": {
+    "no": 0,
+    "yes": 0
+   }
+  }
+ ],
+ "version": 1
+}

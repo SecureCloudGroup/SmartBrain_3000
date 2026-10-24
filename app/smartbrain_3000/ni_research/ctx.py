@@ -23,7 +23,8 @@ MAX_SAMPLES = 8
 _MAX_URLS = 200
 _MAX_QUERIES = 4
 _BAD_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".lan", ".home", ".corp")
-ORIGINS = ("library", "search", "preview", "kept")
+ORIGINS = ("library", "search", "preview", "kept", "seed")
+WEB_ORIGINS = frozenset({"search", "kept", "seed"})   # addresses from the open web: read over https only
 PROPOSE_TOOLS = frozenset({"propose_card", "propose_compare"})   # the tools that end a run with a proposal
 MAX_REPLAYS = 3         # repeats of an identical call answered from memory without a turn
 MAX_MEMO = 32           # remembered call results
@@ -177,14 +178,14 @@ class ResearchCtx:
 
     def record(self, url: str, kind: str, **info: object) -> None:
         """Remember a result URL, exactly, as a fetch origin: ``library`` | ``search`` | ``preview`` | ``kept`` (a
-        source the user kept, ``ni_intake``). A search
-        result counts only over https: an address from the open web is never read in the clear. ``query`` (S7):
+        source the user kept, ``ni_intake``) | ``seed``. An address from the open web (a search result, a kept or
+        seed source) counts only over https: it is never read in the clear. ``query`` (S7):
         the search that handed it over, kept (a few, bounded) so a compare can tell which thing an address is for."""
         assert isinstance(url, str), "url must be text"
         assert kind in ORIGINS, "a known origin"
         if host_refusal(url) is not None or len(self.urls) >= _MAX_URLS:
             return
-        if kind == "search" and urlsplit(url.strip()).scheme.lower() != "https":
+        if kind in WEB_ORIGINS and urlsplit(url.strip()).scheme.lower() != "https":
             return
         query = info.pop("query", None)
         entry = self.urls.setdefault(normal_url(url), {"kind": kind, **info})
