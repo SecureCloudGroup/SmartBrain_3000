@@ -130,6 +130,10 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **A card researched on the web now comes from the source you named.** Asking for "AP top story" could
+  give you a card built from another outlet's feed. When your ask names a publisher, an agency or a subject,
+  the researcher now only offers a card whose source is that one, by its address, its listed name or what it
+  serves, and otherwise keeps looking or says it couldn't find one.
 - **A new card no longer gives up on a source because SmartBrain was spacing out its own requests.**
   SmartBrain sends a site at most five requests at once, then one every 30 seconds. A card being built
   treated that self-imposed wait as the source failing, so after a few cards on one site (several weather
