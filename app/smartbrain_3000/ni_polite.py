@@ -147,6 +147,7 @@ class Politeness:
                 raise netguard.FetchError("host is over its request budget", kind="host_busy")
             self._local.wait = allowance - need
             _sleep(need)
+            self._local.slept = float(getattr(self._local, "slept", 0.0) or 0.0) + need
         raise netguard.FetchError("host is over its request budget", kind="host_busy")
 
     def _take(self, host: str) -> float:
@@ -307,14 +308,23 @@ def engaged(port: int | None = None, robots: bool | None = None):
 @contextlib.contextmanager
 def waiting(seconds: float = BUILD_WAIT_S):
     """Run the body (a card build someone is waiting on) so a host over SmartBrain's own budget is waited for, up to
-    ``seconds`` in all on this thread, instead of refused. Refreshes never wait: a busy host defers them."""
+    ``seconds`` in all on this thread, instead of refused. Refreshes never wait: a busy host defers them. Nested, it
+    never grants more than the allowance left, and what the inner body waits is charged to the outer one."""
     assert 0.0 <= seconds <= RETRY_AFTER_CAP_S, "a bounded wait"
-    saved = getattr(SHARED._local, "wait", 0.0)
-    SHARED._local.wait = float(seconds)
+    saved = getattr(SHARED._local, "wait", None)
+    granted = float(seconds) if saved is None else min(float(saved), float(seconds))
+    SHARED._local.wait = granted
     try:
         yield SHARED
     finally:
-        SHARED._local.wait = saved
+        used = granted - float(getattr(SHARED._local, "wait", 0.0) or 0.0)
+        SHARED._local.wait = None if saved is None else max(0.0, float(saved) - used)
+
+
+def work_clock() -> float:
+    """A monotonic clock that stops while this thread waits for a host's budget (``waiting()``): research measures
+    its time budget by it, so SmartBrain's own spacing never spends the researcher's clock."""
+    return _clock() - float(getattr(SHARED._local, "slept", 0.0) or 0.0)
 
 
 def robots_for(spec: object) -> bool:

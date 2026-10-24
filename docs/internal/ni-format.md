@@ -114,7 +114,9 @@ The closed set (`_SOURCE_TYPES`; validators refuse anything else): `http_json`, 
   a Library row). A host over budget defers the card (`host_busy`), it is never a failure. A card build
   (`run_flow`, inside `ni_polite.waiting()`) waits for the bucket instead, up to `BUILD_WAIT_S` (60 s) in all,
   so SmartBrain's own spacing never drops a source or sends the build to research; a pause the host asked
-  for (429 / 503) is never waited out.
+  for (429 / 503) is never waited out. Research measures its time budget by `ni_polite.work_clock`, which stops
+  during those waits, so they never spend the researcher's 120 s. A waiting build keeps its worker slot (two
+  run at once), so a third build started meanwhile ends `failed(busy)` with Retry.
 - `validate_public_url` runs on the param-substituted URL at every create, update and commission. The
   scheme and authority are literal: `{{param:...}}` may appear only in the path or query. Param values are
   percent-encoded at substitution (`quote(safe="")`).

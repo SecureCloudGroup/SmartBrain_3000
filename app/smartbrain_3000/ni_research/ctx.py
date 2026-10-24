@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, tzinfo
 from urllib.parse import urlsplit
 
-from .. import ni_recipe
+from .. import ni_polite, ni_recipe
 
 MAX_FETCHES = 8
 MAX_SEARCHES = 3
@@ -93,7 +92,7 @@ class ResearchCtx:
     max_searches: int = MAX_SEARCHES
     max_seconds: float = MAX_SECONDS
     token_cap: int = TOKEN_CAP
-    clock: Callable[[], float] = time.monotonic
+    clock: Callable[[], float] = ni_polite.work_clock   # stops while a build waits for a host's budget
     allowed_origins: frozenset = frozenset(ORIGINS)  # {"library"}: no web
     resolver: Callable[[str, str], dict] | None = None
     searcher: Callable[[str, int], dict] | None = None   # (query, limit) -> {"results": [{title,url,snippet}]}

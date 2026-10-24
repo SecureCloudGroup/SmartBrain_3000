@@ -143,7 +143,7 @@ def test_a_build_waits_for_the_bucket_where_a_refresh_defers(wire, monkeypatch) 
     with ni_polite.waiting():
         assert _fetch("https://bucket-host.example/v1/build") == {"text": "hello"}
     assert len(slept) == 1 and slept[0] <= ni_polite.HOST_REFILL_S
-    assert getattr(ni_polite.SHARED._local, "wait", 0.0) == 0.0, "the allowance ends with the build"
+    assert not getattr(ni_polite.SHARED._local, "wait", None), "the allowance ends with the build"
 
 
 def test_a_build_waits_at_most_its_allowance(wire, monkeypatch) -> None:
@@ -176,7 +176,33 @@ def test_run_flow_builds_inside_the_wait(monkeypatch) -> None:
     monkeypatch.setattr(ni_flow, "_run_flow", lambda *a: seen.append(ni_polite.SHARED._local.wait) or {})
     ni_flow.run_flow(object(), "item-1")
     assert seen == [ni_polite.BUILD_WAIT_S]
-    assert getattr(ni_polite.SHARED._local, "wait", 0.0) == 0.0
+    assert not getattr(ni_polite.SHARED._local, "wait", None)
+
+
+def test_a_nested_wait_never_grants_more_and_is_charged_to_the_outer(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    with ni_polite.waiting(40.0):
+        with ni_polite.waiting(ni_polite.BUILD_WAIT_S):
+            assert ni_polite.SHARED._local.wait == 40.0, "never more than the allowance left"
+            for n in range(ni_polite.HOST_BURST + 1):
+                _fetch(f"https://bucket-host.example/v3/{n}")
+        assert ni_polite.SHARED._local.wait == 40.0 - sum(slept), "the inner wait is charged to the outer"
+    assert not getattr(ni_polite.SHARED._local, "wait", None)
+
+
+def test_research_time_stops_while_a_build_waits_for_a_host(wire, monkeypatch) -> None:
+    """PR #544 review S1: the wait must not spend the researcher's 120 s clock (a run that would have found a second
+    source must not end on its time budget because SmartBrain was spacing its own requests)."""
+    from smartbrain_3000.ni_research.ctx import ResearchCtx
+
+    slept = _sleeps(wire, monkeypatch)
+    ctx = ResearchCtx(request="weather", question={})
+    with ni_polite.waiting():
+        for n in range(ni_polite.HOST_BURST + 1):
+            _fetch(f"https://bucket-host.example/v4/{n}")
+    assert slept and ctx.elapsed() == 0.0
+    wire.now[0] += 5.0
+    assert ctx.elapsed() == 5.0, "work time still counts"
 
 
 # --- Retry-After ---------------------------------------------------------------------------
