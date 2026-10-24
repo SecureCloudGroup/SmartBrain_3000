@@ -1,6 +1,7 @@
 # Release P5 seed asks: everyday asks across the families the tuning gold shows (weather, scores, prices, feeds,
 # transit, status, and the kinds alerts, count, forecast, latest items, lookup, next event, ranking, result,
-# schedule, trend). Written for seeding only; never taken from the held-out set.
+# schedule, trend). Written for seeding only; never taken from the held-out set. An ask that turned out to match
+# a held-out ask, even reworded, is removed (#551 review), so a held-out run does not measure the seed.
 
 # weather and sea
 current temperature in Omaha
@@ -25,13 +26,11 @@ space weather alerts
 
 # prices and markets
 bitcoin price
-ethereum price
 dogecoin price
 gold price per ounce
 silver price per ounce
 crude oil price
 natural gas price
-euro to dollar exchange rate
 pound to dollar exchange rate
 Canadian dollar exchange rate
 average gas price in the US
@@ -47,17 +46,13 @@ federal funds rate
 NBA scores today
 NHL scores today
 MLB standings
-Premier League table
 next Chelsea match
-Formula 1 next race
 latest NFL scores
 
 # feeds and news
 top stories on Hacker News
 NPR news headlines
 latest NASA news
-latest arXiv papers on machine learning
-newest Python release
 latest Rust release
 top posts on Lobsters
 
@@ -71,13 +66,11 @@ International Space Station location
 # status
 is GitHub down
 is Cloudflare having an outage
-AWS service health
 Discord status
 OpenStreetMap status
 
 # lookups and counts
 population of Canada
-how many people are in space right now
 sunrise time in Boston
 moon phase today
 next full moon

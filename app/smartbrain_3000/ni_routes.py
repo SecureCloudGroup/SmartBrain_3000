@@ -139,7 +139,8 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     tier = (item["spec"].get("recipe") or {}).get("tier")
     web = tier not in (None, "curated")  # a researched card from the open web
     research = "page" if tier == "page_reading" else "dataset" if web else "library"   # a page's table is a page
-    froms = {"page": "page", "auto": "library", "seed": "library", "research": research, "kept": research}
+    # a source built outside the Library (researched, kept, seeded) is labelled by what it reads: a page or a dataset
+    froms = {"page": "page", "auto": "library", "research": research, "kept": research, "seed": research}
     block = ({"from": froms.get(built_from.get("path"), "dataset"),
               "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
              if ni.awaits_yes(item) else None)

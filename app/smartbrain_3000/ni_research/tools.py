@@ -368,7 +368,9 @@ def spec_input(sample: dict, source: dict) -> object:
 
 def _seal_table(ctx: ResearchCtx, draft: dict) -> tuple[dict | None, dict]:
     """A draft that reads a page table names it ``source.table = {"index": N}`` (N from the fetch digest); code seals the
-    table by its header names (``ni_table.locator``) so the card finds the same table again, whatever its position."""
+    table by its header names (``ni_table.locator``) so the card finds the same table again, whatever its position.
+    A kept card's draft (a source the user kept, or the bundled seed) carries that sealed locator, and finds its table
+    on the page read now exactly as a refresh does."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
     assert isinstance(draft, dict), "a draft"
     source = draft["source"]
@@ -377,6 +379,11 @@ def _seal_table(ctx: ResearchCtx, draft: dict) -> tuple[dict | None, dict]:
         return None, error("no_sample", "fetch_sample the page URL first")
     tables, want = sample["parsed"]["tables"], source.get("table")
     index = want.get("index") if isinstance(want, dict) and set(want) == {"index"} else None
+    if isinstance(want, dict) and "headers" in want:
+        try:
+            index, _table = ni_table.locate(tables, want)
+        except (ni_table.TableGone, ValueError) as exc:
+            return None, error("invalid_spec", f"source.table: {exc}", limit=MAX_SPEC_DETAIL)
     if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(tables):
         return None, error("invalid_spec", 'source.table must be {"index": N}, a table number from the fetch digest')
     out = copy.deepcopy(draft)

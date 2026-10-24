@@ -249,6 +249,8 @@ def check_researcher_draft(spec: dict) -> None:
     """Plan 6.4: a researcher draft may not carry an ``llm`` stage (so no brief summary either), a ``$secret`` (or secret param), a model
     or MCP source, or a model-chosen interval (the cadence comes from the question, stamped by code)."""
     assert isinstance(spec, dict), "spec must be a dict"
+    if not isinstance(spec.get("pipeline") or [], list):
+        raise ValueError("researcher draft: pipeline must be a list of stages")  # noqa: TRY004
     if any(isinstance(s, dict) and s.get("op") == "llm" for s in (spec.get("pipeline") or [])):
         raise ValueError("researcher draft: llm stages are refused")
     if isinstance(spec.get("brief"), dict) and spec["brief"].get("summary") is not False:

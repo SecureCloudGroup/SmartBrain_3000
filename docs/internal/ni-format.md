@@ -891,6 +891,10 @@ address: `access.url_template` is https, `kept.key` is its normal form, `provide
 row, entry or file this version cannot read, an entry over its caps (request 500, title 200 characters), or a draft
 the researcher's tools would not replay (one plain https `http_json` source: no headers, no secret query, no key, no
 model step) is skipped, one row at a time. Every open-web origin (`search`, `kept`, `seed`) is read over https only.
+A kept or seed draft that reads a page table carries its sealed locator, and `propose_card` finds that table on the
+page read now exactly as a refresh does. A seed card is labelled like a kept one, by what it reads (a page or a
+dataset), never as a Library row. `tools/ni-seed.py` counts a candidate only when its row builds the ask again for
+another new user through the real flow, and `check` replays every shipped entry that way before a release.
 
 ## 31. The user's own key and contact email
 

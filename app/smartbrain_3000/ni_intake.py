@@ -355,8 +355,9 @@ def _try(store: ni.NIStore, item_id: str, request: str, intent: dict, question: 
     if not got["ok"]:
         return None
     proposed = tools.propose_card(ctx, {**copy.deepcopy(entry["draft"]), "goal": request})
-    if not proposed.get("ok"):
-        log.info("ni_intake: kept source did not fit: %s", one_line("; ".join(proposed.get("reasons") or []), 200))
+    if not proposed.get("ok"):   # an answer is not a dead source (nothing to show today is still an answer)
+        log.info("ni_intake: kept source did not fit: %s", one_line(
+            "; ".join(proposed.get("reasons") or []) or f"{proposed.get('error')}: {proposed.get('detail')}", 200))
         return None
     proposal = proposed["proposal"]
     if ni_research_flow._can_land(ctx, item_id, request, proposal, ni_research_flow._declined_of(

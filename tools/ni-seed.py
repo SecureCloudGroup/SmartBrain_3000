@@ -9,8 +9,12 @@ Subcommands
           research built is a candidate: it prints with its reading and address, and is saved to
           ``<out>/candidates.json``, with ``<out>/verdicts.json`` listing every candidate for the hand check
           (fill in "right" or "wrong"; anything else is left out).
+          A candidate's row must also build the ask again for another new user (a real read, no research), or it
+          is counted "not-replayable".
   export  the candidates marked "right", merged by address (at most ``ni_intake.MAX_ENTRIES`` questions each), as
           the seed file. The file is replaced, so an export always ships exactly what was checked.
+  check   every entry of the seed file builds its own request for a new user, through the real flow and a real read,
+          with no research and no cloud model. Run it before a release ships the seed.
 
 The asks come from ``tools/ni-seed-asks.txt`` (everyday asks across the families the tuning gold shows). The
 held-out set is never used for seeding and this tool never reads it.
@@ -19,6 +23,7 @@ Usage (operator's machine; the gateway at 127.0.0.1:38080 serves both models):
     PYTHONPATH=app python3 tools/ni-seed.py run --pack-dir <dir with library/> --out <dir> [--asks F] [--only TEXT]
         [--model M] [--research-model M]
     PYTHONPATH=app python3 tools/ni-seed.py export --out <dir> [--seed-file F]
+    PYTHONPATH=app python3 tools/ni-seed.py check --pack-dir <dir with library/> --out <dir> [--seed-file F]
 """
 from __future__ import annotations
 
@@ -51,13 +56,12 @@ def load_asks(path: pathlib.Path) -> list[str]:
     return [line for line in lines if line and not line.startswith("#")]
 
 
-def run_one(ask: str, idx, llm, model: str) -> dict:
-    """One ask on a fresh in-memory store, as a new user: the outcome, and for a card research built the seed row
-    its Keep would write (``ni_intake.seed_row``) with the reading the card shows."""
+def _new_user(idx):
+    """A fresh in-memory store, as a new user's, with the real Library pack and keyless search."""
     import duckdb
 
     from smartbrain_3000 import db as dbmod
-    from smartbrain_3000 import ni, ni_flow, ni_intake, ni_standing, search
+    from smartbrain_3000 import ni, ni_flow, search
     from smartbrain_3000.secrets import SecretStore, gen_master_key
     conn = duckdb.connect(":memory:")
     dbmod.run_migrations(conn)
@@ -66,6 +70,36 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     ni_flow.set_library_provider(lambda: idx)
     ni_flow.set_search_provider(lambda: search.SearchService())
     ni_flow.set_secrets_provider(lambda: secrets)
+    return store
+
+
+def serves(rows: list[dict], ask: str, idx, llm, model: str, scratch: pathlib.Path) -> bool:
+    """Does a seed of these ``rows`` build ``ask`` for a new user, through the real flow and a real read, with no
+    research? A row that only loads is not enough: the card must be built from it (#551)."""
+    from smartbrain_3000 import ni_flow, ni_intake
+    path = scratch / "seed-check.json"
+    path.write_text(json.dumps({"version": ni_intake.SEED_VERSION, "made": "check", "rows": rows}))
+    ni_intake._seed_at.cache_clear()
+    before, ni_intake.SEED_FILE = ni_intake.SEED_FILE, path
+    try:
+        store = _new_user(idx)
+        item_id = ni_flow.create_shell_item(store, ask)
+        rec = ni_flow.run_flow(store, item_id, gateway_call=lambda _m, prompt: llm(prompt, 600), ni_route_model=model)
+        item = store.get_item(item_id)
+        built = ((item or {}).get("spec") or {}).get("_built_from") or {}
+        return rec.get("state") == "ready" and built.get("path") == "seed"
+    finally:
+        ni_flow.set_secrets_provider(None)
+        ni_intake.SEED_FILE = before
+        ni_intake._seed_at.cache_clear()
+
+
+def run_one(ask: str, idx, llm, model: str, scratch: pathlib.Path) -> dict:
+    """One ask on a fresh in-memory store, as a new user: the outcome, and for a card research built the seed row
+    its Keep would write (``ni_intake.seed_row``) with the reading the card shows. The row is a candidate only when
+    it builds the ask again for another new user (``serves``)."""
+    from smartbrain_3000 import ni_flow, ni_intake, ni_standing
+    store = _new_user(idx)
     bridge = lambda _m, prompt: llm(prompt, 600)
     out: dict = {"ask": ask, "outcome": "", "path": "", "host": "", "title": "", "url": "", "reading": [], "row": None}
     shipped, ni_intake.SEED_FILE = ni_intake.SEED_FILE, NO_SEED   # research again, never confirm the last export
@@ -85,8 +119,12 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
                    title=str(built.get("title") or ""), url=str((item["spec"].get("source") or {}).get("url") or ""))
         found = store.read_snapshot(item_id, "preview")
         out["reading"] = _e2e()._texts(found["payload"] if found else None)
-        out["row"] = ni_intake.seed_row(store, [item])
-        out["outcome"] = "candidate" if out["row"] is not None else "library" if built.get("path") in (
+        row = ni_intake.seed_row(store, [item])
+        ni_intake.SEED_FILE = shipped
+        if row is not None and not serves([row], ask, idx, llm, model, scratch):
+            row, out["detail"] = None, "its seed row did not build the card again"
+        out["row"] = row
+        out["outcome"] = "candidate" if row is not None else "library" if built.get("path") in (
             "auto", "declared") else "not-replayable"
     except Exception as exc:  # a crash is one ask's outcome, never a stopped run
         out["outcome"], out["detail"] = "crash", f"{type(exc).__name__}: {str(exc)[:160]}"
@@ -124,7 +162,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         with ev._env({"SMARTBRAIN_NI_RESEARCH": "cloud", "SMARTBRAIN_NI_RESEARCH_WEB": "on"}), \
                 ev.research_seam(session, "cloud", local_model=args.model, cloud_model=args.research_model,
                                  real_chat=chat, real_search=ev.live_search):
-            run = run_one(ask, idx, llm, args.model)
+            run = run_one(ask, idx, llm, args.model, args.out)
         stats = session.research_stats()   # cost_usd only when the gateway reports one; the tokens always
         cost = float(stats.get("cost_usd") or 0.0)
         spend += cost
@@ -152,6 +190,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"\nSUMMARY {json.dumps(counts)} research ${spend:.2f} {json.dumps(used)}; check {len(candidates)} in "
           f"{verdicts}")
     return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Every shipped seed entry builds its own request for a new user, one row at a time (no research, no cloud)."""
+    flow_eval = _tool("ni_flow_eval", "ni-flow-eval.py")
+    idx = _e2e()._pack(args.pack_dir)
+    llm = flow_eval._bifrost_llm(args.bifrost, args.model or flow_eval._DEFAULT_MODEL)
+    rows = json.loads(args.seed_file.read_text("utf-8"))["rows"]
+    args.out.mkdir(parents=True, exist_ok=True)
+    failed = 0
+    for row in rows:  # bounded: the shipped seed
+        for entry in row["kept"]["entries"]:  # bounded: ni_intake.MAX_ENTRIES
+            ok = serves([row], entry["request"], idx, llm, args.model or flow_eval._DEFAULT_MODEL, args.out)
+            failed += not ok
+            print(f"[{'serves' if ok else 'FAILS':>6}] {row['provider']['name']:<28} {entry['request'][:60]}",
+                  flush=True)
+    print(f"\nCHECK {len(rows)} rows, {sum(len(r['kept']['entries']) for r in rows)} entries: {failed} fail")
+    return 1 if failed else 0
 
 
 def merge(candidates: list[dict], verdicts: dict) -> list[dict]:
@@ -204,8 +260,14 @@ def main() -> int:
     export = sub.add_parser("export")
     export.add_argument("--out", required=True, type=pathlib.Path)
     export.add_argument("--seed-file", default=SEED_FILE, type=pathlib.Path)
+    check = sub.add_parser("check")
+    check.add_argument("--pack-dir", required=True, type=pathlib.Path)
+    check.add_argument("--out", required=True, type=pathlib.Path)
+    check.add_argument("--seed-file", default=SEED_FILE, type=pathlib.Path)
+    check.add_argument("--model", default="", help="the local model that reads the ask (default: the eval's)")
+    check.add_argument("--bifrost", default="http://127.0.0.1:38080")
     args = ap.parse_args()
-    return cmd_run(args) if args.cmd == "run" else cmd_export(args)
+    return {"run": cmd_run, "export": cmd_export, "check": cmd_check}[args.cmd](args)
 
 
 if __name__ == "__main__":

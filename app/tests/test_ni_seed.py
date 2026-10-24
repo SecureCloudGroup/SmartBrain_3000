@@ -22,11 +22,20 @@ from test_ni_research_loop import (  # noqa: F401
     _flow,
     _v2,  # an autouse fixture: research on, a local route
     _wrap,
+    call,
     good_run,
+    reply,
 )
 from test_ni_research_tools import QUAKES, Net
 
-from smartbrain_3000 import ni, ni_flow, ni_intake, ni_measure, ni_research_flow
+from smartbrain_3000 import (
+    ni,
+    ni_flow,
+    ni_intake,
+    ni_measure,
+    ni_research_flow,
+    ni_routes,
+)
 from smartbrain_3000.netguard import FetchError
 
 
@@ -55,6 +64,37 @@ def test_a_new_users_ask_builds_from_the_seed_with_no_model_and_no_research(lib,
     assert any("a source SmartBrain checked" in n for n in ni_flow._flow_read(store, item_id)["notes"])
     ni_measure.record(store, item, kept=True)
     assert ni_measure.view(store)["by_source"]["library"]["kept"] == 1, "the seed counts with the Library"
+
+
+def test_a_seed_card_from_a_page_table_says_it_reads_a_web_page(lib, monkeypatch, tmp_path) -> None:  # noqa: F811
+    """#551 review F3: a seed card is labelled by what it reads, as a kept card is: a page's table is a web page
+    (ruling 2026-10-22), never a Library row."""
+    from test_ni_page_tables import CLOUD, EQ_PAGE, EQ_URL, table_draft
+    from test_ni_research_web import _web_flow, rows
+    draft = table_draft(paths={"top": "rows[0].place"})
+    draft["source"]["url"] = EQ_URL
+    script = Script(reply(call("library_search", query="earthquakes")), reply(call("web_search", query="quakes table")),
+                    reply(call("fetch_sample", url=EQ_URL)), reply(call("try_recipe", draft_spec=draft)),
+                    reply(call("propose_card", draft_spec=draft)))
+    built, item_id, out, _, _ = _web_flow(monkeypatch, _wrap(lib), script, rows(EQ_URL), {EQ_URL: EQ_PAGE}, **CLOUD)
+    assert out["state"] == "ready", out
+    path = tmp_path / "seed-page.json"
+    path.write_text(json.dumps({"version": ni_intake.SEED_VERSION, "made": "2026-10-24",
+                                "rows": [ni_intake.seed_row(built, [built.get_item(item_id)])]}))
+    monkeypatch.setattr(ni_intake, "SEED_FILE", path)
+    store = _store()
+    Net(monkeypatch, {EQ_URL: EQ_PAGE})
+    again = _ask(store)
+    assert ni_intake.reuse(store, again, _ASK, dict(_INTENT))["state"] == "ready"
+    item = store.get_item(again)
+    assert item["spec"]["_built_from"]["path"] == "seed" and item["spec"]["recipe"]["tier"] == "page_reading"
+    assert ni_routes._awaiting_yes_of(item)["from"] == "page"
+    assert ni_intake.remember(store, item)   # kept, it is the user's own page source, and reads its table the same way
+    Net(monkeypatch, {EQ_URL: EQ_PAGE})
+    mine = _ask(store)
+    assert ni_intake.reuse(store, mine, _ASK, dict(_INTENT))["state"] == "ready"
+    assert store.get_item(mine)["spec"]["_built_from"]["path"] == "kept"
+    assert ni_routes._awaiting_yes_of(store.get_item(mine))["from"] == "page"
 
 
 def test_keeping_a_seed_card_makes_it_your_own_and_your_own_comes_first(lib, seeded, monkeypatch) -> None:  # noqa: F811
@@ -119,6 +159,8 @@ def _damage(row: dict, damage: str) -> None:
         row["provider"]["name"] = "elsewhere.example.org"
     elif damage == "draft-url":   # the entry replays another address than the row reads
         source["url"] = "https://elsewhere.example.org/q.json"
+    elif damage == "pipeline-text":   # propose_card would refuse it after the fetch, so it is never read
+        entry["draft"]["pipeline"] = "rows[0]"
     elif damage == "source-text":
         entry["draft"]["source"] = "https://data.example.org/q.json"
     elif damage == "headers":
@@ -131,8 +173,8 @@ def _damage(row: dict, damage: str) -> None:
         entry["request"] = "r" * (ni_intake.MAX_REQUEST + 1)
 
 
-_ROW_DAMAGE = ["id", "draft", "http", "key", "provider", "draft-url", "source-text", "headers", "secret-query",
-               "title", "request"]
+_ROW_DAMAGE = ["id", "draft", "pipeline-text", "http", "key", "provider", "draft-url", "source-text", "headers",
+               "secret-query", "title", "request"]
 
 
 @pytest.mark.parametrize("damage", ["file", "version", *_ROW_DAMAGE])
@@ -254,10 +296,26 @@ def test_the_seed_asks_are_a_plain_list() -> None:
 
 
 @needs_tool
-def test_a_run_turns_a_card_research_built_into_a_candidate(lib, seeded, monkeypatch) -> None:  # noqa: F811
+def test_a_seed_row_counts_only_when_it_builds_the_ask_again(lib, seeded, monkeypatch, tmp_path) -> None:  # noqa: F811
+    """#551: a row that loads is not enough. ``serves`` runs the real flow for a new user and wants the card built
+    from the seed; ``check`` runs it for every shipped entry, and ``run`` for every candidate."""
+    tool = _tool()
+
+    def llm(prompt: str, _n: int) -> str:
+        return json.dumps({**_INTENT, "wants": ["magnitude"]}) if prompt.startswith("Classify") else (
+            '{"serves": true, "gaps": [], "wrong": []}')
+    Net(monkeypatch, {URL: QUAKES})
+    assert tool.serves([seeded], _ASK, _wrap(lib), llm, "mlx/test-local", tmp_path)
+    Net(monkeypatch, {URL: {"other": [{"x": 1}]}})   # the address answers, but not with what the card reads
+    assert not tool.serves([seeded], _ASK, _wrap(lib), llm, "mlx/test-local", tmp_path)
+    assert ni_intake.seed_rows() == [seeded], "the shipped seed is back in place"
+
+
+def test_a_run_turns_a_card_research_built_into_a_candidate(lib, seeded, monkeypatch, tmp_path) -> None:  # noqa: F811
     """``run_one`` on a fresh store, as a new user: the intent read, Keep looking tapped, research lands the card,
-    and the row its Keep would write is the candidate. A run reads no bundled seed (here one already answers the
-    ask), so a run after an export researches again instead of confirming the last export."""
+    and the row its Keep would write is the candidate once it builds the ask again for another new user. A run reads
+    no bundled seed (here one already answers the ask), so a run after an export researches again instead of
+    confirming the last export."""
     tool = _tool()
     Net(monkeypatch, {URL: QUAKES})
     monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
@@ -269,7 +327,7 @@ def test_a_run_turns_a_card_research_built_into_a_candidate(lib, seeded, monkeyp
     def llm(prompt: str, _n: int) -> str:
         seen.append(prompt[:120])
         return json.dumps({**_INTENT, "wants": ["magnitude"]}) if prompt.startswith("Classify") else '{"serves": true, "gaps": [], "wrong": []}'
-    run = tool.run_one(_ASK, _wrap(lib), llm, "mlx/test-local")
+    run = tool.run_one(_ASK, _wrap(lib), llm, "mlx/test-local", tmp_path)
     ni_research_flow.set_research_chat(None)
     assert run["outcome"] == "candidate", run.get("detail")
     assert run["path"] == "research" and run["url"] == URL and run["row"]["id"].startswith(ni_intake.SEED_PREFIX)
