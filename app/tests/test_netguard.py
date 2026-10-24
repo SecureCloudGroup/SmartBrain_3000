@@ -563,17 +563,124 @@ def test_a_sniffed_read_takes_feeds_and_xml_by_their_own_types(monkeypatch, ctyp
     assert seen == fmt and parsed
 
 
-@pytest.mark.parametrize("ctype", ["application/pdf", "application/zip", "application/octet-stream", "image/png"])
-def test_a_sniffed_read_still_refuses_a_binary_type(monkeypatch, ctype) -> None:
+_PDF = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n1 0 obj"
+_XLSX = b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00"
+_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+_XLS = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00\x00\x00\x00"
+_BLOB = b"\x07\x13SBK\x00\x00\x01\x02\xfe"  # no known magic: a NUL in the head says it is a file
+
+
+@pytest.mark.parametrize(("ctype", "body"), [
+    ("application/pdf", _PDF), ("application/zip", _XLSX), ("application/octet-stream", _PDF),
+    ("application/vnd.ms-excel", _XLS), ("text/plain", _PDF), ("text/csv", _XLSX),
+    ("application/octet-stream", _BLOB), ("image/png", _PNG)])
+def test_a_sniffed_read_refuses_a_binary_body_whatever_its_label(monkeypatch, ctype, body) -> None:
+    """The sniff read admits every application/* and text/* label; the bytes decide, so a PDF labelled text/plain
+    is refused like one labelled application/pdf, and the JSON refusal rides back: not a data file."""
     import httpx
 
     from smartbrain_3000 import ni_fetch
 
     _resolve_to(monkeypatch, "93.184.216.34")
-    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": ctype}, content=b"%PDF-1.7 binary"))
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": ctype}, content=body))
     with pytest.raises(FetchError) as err:
         ni_fetch.sniff_fetch("https://files.test/doc", allow_redirects=False)
-    assert err.value.kind == "not_json"  # the JSON refusal rides back: not a data file
+    assert err.value.kind == "not_json"
+
+
+@pytest.mark.parametrize("ctype", ["application/vnd.ms-excel", "application/octet-stream", "TEXT/CSV",
+                                   "application/x-csv; charset=utf-8"])
+def test_a_sniffed_read_takes_a_csv_whatever_its_label(monkeypatch, ctype) -> None:
+    """Portals label CSV downloads application/vnd.ms-excel or octet-stream, and a header's case is not its meaning."""
+    import httpx
+
+    from smartbrain_3000 import ni_fetch
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": ctype},
+                                                 content=b"county,cases\nFulton,12\nCobb,9\n"))
+    parsed, seen = ni_fetch.sniff_fetch("https://data.test/export", allow_redirects=False)
+    assert seen == "csv" and parsed
+
+
+def test_a_sniffed_read_takes_utf16_text_with_its_nuls(monkeypatch) -> None:
+    import httpx
+
+    from smartbrain_3000 import ni_fetch
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    body = "county,cases\nFulton,12\n".encode("utf-16-le")  # no BOM: the one-parity NUL run says UTF-16
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "application/octet-stream"},
+                                                 content=body))
+    parsed, seen = ni_fetch.sniff_fetch("https://data.test/export16", allow_redirects=False)
+    assert seen == "csv" and parsed
+
+
+@pytest.mark.parametrize("ctype", ["application/rss+xml", "application/cap+xml", "Application/XML"])
+def test_a_sniffed_read_still_refuses_an_entity_declaration(monkeypatch, ctype) -> None:
+    """The newly admitted XML labels reach the XML parsers; a DOCTYPE/ENTITY body is still refused before parsing."""
+    import httpx
+
+    from smartbrain_3000 import ni_fetch
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    bomb = '<?xml version="1.0"?><!DOCTYPE r [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;">]><rss>&b;</rss>'
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": ctype}, text=bomb))
+    with pytest.raises(FetchError) as err:
+        ni_fetch.sniff_fetch("https://feeds.test/bomb.xml", allow_redirects=False)
+    assert err.value.kind == "not_json"
+
+
+def test_a_binary_body_is_abandoned_after_its_first_chunk(monkeypatch) -> None:
+    """A text read refuses a file by its head, not after reading it to the 8 MB cap."""
+    import httpx
+
+    sent = []
+
+    def chunks():
+        for _ in range(64):
+            sent.append(1)
+            yield _PDF + b"\x00" * (64 * 1024)
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "application/octet-stream"},
+                                                 content=chunks()))
+    with pytest.raises(FetchError) as err:
+        netguard.safe_fetch_text("https://files.test/report", "csv")
+    assert err.value.kind == "not_csv"  # a sealed read names its own format
+    assert len(sent) == 1
+
+
+def test_a_fault_on_the_sniffed_read_is_that_fault_not_not_data(monkeypatch) -> None:
+    """The JSON read refuses the label; when the second read then cannot connect, the caller hears the fault, not
+    "not JSON" (a fault reported as "not data" reads as a decline)."""
+    import httpx
+
+    from smartbrain_3000 import ni_fetch
+
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) > 1:
+            raise httpx.ConnectError("reset")
+        return httpx.Response(200, headers={"content-type": "text/csv"}, content=b"a,b\n1,2\n")
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, handler)
+    with pytest.raises(FetchError) as err:
+        ni_fetch.sniff_fetch("https://data.test/flaky.csv", allow_redirects=False)
+    assert err.value.kind is None and str(err.value) == "could not connect: ConnectError"
+
+
+@pytest.mark.parametrize(("head", "ctype", "binary"), [
+    (_PDF, "", True), (_XLSX, "", True), (_PNG, "", True), (b"GIF89a\x01\x00", "", True),
+    (b"\xff\xd8\xff\xe0", "", True), (b"\x1f\x8b\x08\x00", "", True), (_XLS, "", True), (_BLOB, "", True),
+    (b"a,b\n1,2\n", "", False), (b"", "", False), ("a,b\n".encode("utf-16"), "", False),
+    ("ab".encode("utf-16-le"), "text/csv; charset=utf-16le", False), ("a,b\n1,2\n".encode("utf-16-be"), "", False),
+    (b"a,b\n1,\x00\n", "", True)])
+def test_looks_binary_reads_the_bytes(head, ctype, binary) -> None:
+    assert netguard.looks_binary(head, ctype) is binary
 
 
 def test_an_xhtml_page_goes_to_the_page_door(monkeypatch) -> None:

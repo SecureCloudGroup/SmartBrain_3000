@@ -24,6 +24,7 @@ import ipaddress
 import socket
 import threading
 import time
+from collections.abc import Callable
 from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 
 import httpx
@@ -141,14 +142,25 @@ def _is_json_type(content_type: str) -> bool:
     return media.startswith("application/") and media.endswith("+json")
 
 
-# An allowlist entry that opts the list into the +xml suffix rule (``_is_xml_type``); never a prefix of a real type.
-_XML_SUFFIX = "+xml"
+# A text read refuses a binary body by its bytes, whatever its label: the label is the server's word, and the sniff
+# read admits every application/* and text/* type (portals label CSVs application/vnd.ms-excel or octet-stream).
+_BINARY_MAGIC = (b"%PDF-", _ZIP_MAGIC, b"\x89PNG", b"GIF8", b"\xff\xd8\xff", b"\x1f\x8b", b"\xd0\xcf\x11\xe0",
+                 b"Rar!", b"7z\xbc\xaf", b"BZh")
+_BINARY_HEAD = 1024
 
 
-def _is_xml_type(content_type: str) -> bool:
-    """A structured-syntax XML type (RFC 7303: application/cap+xml, kml+xml, gpx+xml…) is XML, as +json is JSON."""
-    media = (content_type or "").split(";", 1)[0].strip().lower()
-    return media.startswith("application/") and media.endswith("+xml")
+def looks_binary(head: bytes, content_type: str = "") -> bool:
+    """A body that is a file, not text: a known file magic (pdf, zip/xlsx, png, gif, jpeg, gzip, xls, rar, 7z, bz2),
+    or a NUL in its first KB that UTF-16 text does not explain (a byte-order mark, a declared UTF-16 charset, or the
+    one-parity NUL run ``decode_body`` reads as UTF-16)."""
+    assert isinstance(head, (bytes, bytearray)), "the body's first bytes"
+    head = bytes(head[:_BINARY_HEAD])
+    if head.startswith(_BINARY_MAGIC):
+        return True
+    if b"\x00" not in head:
+        return False
+    utf16 = head.startswith((b"\xff\xfe", b"\xfe\xff")) or declared_charset(content_type) in _UTF16
+    return not (utf16 or _utf16_order(head))
 
 
 def decode_body(content: bytes, content_type: str = "") -> str:
@@ -341,8 +353,12 @@ def _pin_url(url: str, ip: str) -> str:
 
 
 def _read_capped(response: httpx.Response, max_bytes: int,
-                 deadline_seconds: float | None = None) -> bytes:
+                 deadline_seconds: float | None = None,
+                 head_check: Callable[[bytes], None] | None = None) -> bytes:
     """Read a streamed response up to ``max_bytes``; raise if it exceeds it.
+
+    ``head_check`` (text reads only) sees the first ``_BINARY_HEAD`` bytes as soon as they arrive and may raise, so a
+    binary body is abandoned after one chunk, not read to the cap.
 
     ``deadline_seconds`` (vault fetchers only) is an OVERALL wall-clock bound on the read: the
     per-chunk ``_TIMEOUT`` alone lets a drip host stay alive until the cap, so between chunks we
@@ -362,12 +378,29 @@ def _read_capped(response: httpx.Response, max_bytes: int,
             if total > max_bytes:
                 raise FetchError("response too large")
             chunks.append(chunk)
+            if head_check is not None and total >= _BINARY_HEAD:
+                head_check(b"".join(chunks)[:_BINARY_HEAD])
+                head_check = None
     except httpx.HTTPError as exc:
         # A mid-stream failure (reset, timeout, protocol garbage) must be a clean FetchError like
         # every other refusal — never an exception that escapes into a 500 whose log line carries
         # the full request URL. Class name only: httpx messages can embed the URL itself.
         raise FetchError(f"fetch failed while reading: {exc.__class__.__name__}") from None
-    return b"".join(chunks)
+    body = b"".join(chunks)
+    if head_check is not None:  # a body shorter than the head
+        head_check(body[:_BINARY_HEAD])
+    return body
+
+
+def _binary_refusal(media: str, ctype: str, kind: str) -> Callable[[bytes], None]:
+    """The head check of a text read: a body that ``looks_binary`` is refused with ``kind``, whatever its label."""
+    assert kind, "a refusal kind"
+
+    def check(head: bytes) -> None:
+        if looks_binary(head, ctype):
+            raise FetchError(f"the body is a file, not text ({media or 'unlabelled'})", kind=kind,
+                             content_type=media)
+    return check
 
 
 def _send_pinned(client: httpx.Client, url: str, host: str, ip: str,
@@ -417,33 +450,34 @@ def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                  deadline_seconds: float | None = None, accept_zip_magic: bool = False,
                  method: str = "GET", content: bytes | None = None,
                  extra_headers: dict | None = None,
-                 allow_redirects: bool = True) -> dict:
+                 allow_redirects: bool = True, binary_kind: str | None = None) -> dict:
     """The guarded request, through the thread's politeness object when one is installed."""
     polite = active_politeness()
 
     def go() -> dict:
         return _guarded_get_once(url, allowed_ct, max_bytes, deadline_seconds, accept_zip_magic,
-                                 method, content, extra_headers, allow_redirects)
+                                 method, content, extra_headers, allow_redirects, binary_kind)
 
     if polite is None:
         return go()
     # an Accept header alone is not a credential: only other headers (keys, contact) bar response reuse
     custom = any(str(k).lower() != "accept" for k in (extra_headers or {}))
-    return polite.call(url, method, custom, (allowed_ct, max_bytes), go)  # type: ignore[attr-defined]
+    return polite.call(url, method, custom, (allowed_ct, max_bytes, binary_kind), go)  # type: ignore[attr-defined]
 
 
 def _guarded_get_once(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                       deadline_seconds: float | None = None, accept_zip_magic: bool = False,
                       method: str = "GET", content: bytes | None = None,
                       extra_headers: dict | None = None,
-                      allow_redirects: bool = True) -> dict:
+                      allow_redirects: bool = True, binary_kind: str | None = None) -> dict:
     """Shared SSRF-guarded request; return {final_url, status, content_type, content (bytes)}.
 
     All the defenses (scheme/userinfo/IP allowlist, per-request IP pin with no
     global resolver mutation, bounded redirect re-validation, timeout, size cap,
     content-type allowlist) live here so both ``safe_fetch`` (text) and
     ``safe_fetch_bytes`` (binary) reuse one copy. ``deadline_seconds`` (vault fetchers only)
-    adds an overall wall-clock bound on the body read; page/ingest pass None (unchanged).
+    adds an overall wall-clock bound on the body read; page/ingest pass None (unchanged). ``binary_kind`` (text
+    reads) refuses a body whose first bytes are a file, not text (``looks_binary``), with that kind.
     """
     assert url, "url required"
     assert allowed_ct and max_bytes > 0, "allowed content-types + positive cap required"
@@ -507,12 +541,13 @@ def _guarded_get_once(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                 if _challenge_header(response):  # a 2xx bot check (AWS WAF answers 202)
                     raise FetchError("upstream answered with a bot challenge", kind="challenge")
                 ctype = response.headers.get("content-type", "")
-                ct_ok = ctype.startswith(allowed_ct) or ("application/json" in allowed_ct and _is_json_type(ctype)) \
-                    or (_XML_SUFFIX in allowed_ct and _is_xml_type(ctype))
+                media = _media_type(response)  # media types are case-insensitive (RFC 2045 §5.1)
+                ct_ok = media.startswith(allowed_ct) or ("application/json" in allowed_ct and _is_json_type(media))
                 if not ct_ok and not accept_zip_magic:
                     raise FetchError(f"content-type not allowed: {ctype or 'unknown'}",
-                                     kind="not_json", content_type=_media_type(response))
-                content = _read_capped(response, max_bytes, deadline_seconds)
+                                     kind="not_json", content_type=media)
+                content = _read_capped(response, max_bytes, deadline_seconds,
+                                       _binary_refusal(media, ctype, binary_kind) if binary_kind else None)
                 # accept_zip_magic: the header didn't match, but a real .sbvault is a ZIP — accept it
                 # if the bytes prove it, else it's the host's HTML/error page, so refuse clearly.
                 if not ct_ok and not content.startswith(_ZIP_MAGIC):
@@ -689,10 +724,9 @@ _FEED_CT = ("application/", "text/")
 _XML_CT = ("application/", "text/")
 _TEXT_CT = ("text/",)
 # ``sniff``: an address whose format nobody sealed (a pasted link, a research fetch), read to find out what it is.
-# It admits every type the sniffer classifies: any text type, and the XML / feed / CSV types sites label their data
-# with. ``_XML_SUFFIX`` opts the list into RFC 7303's +xml suffix.
-_SNIFF_CT = ("text/", "application/xml", "application/rss+xml", "application/atom+xml", "application/rdf+xml",
-             "application/csv", _XML_SUFFIX)
+# Like the feed and xml reads it admits every application/* and text/* label, and the bytes decide: a binary body is
+# refused by ``looks_binary`` on every textual read, and the sniffer and parsers refuse what is not their format.
+_SNIFF_CT = ("application/", "text/")
 _FORMAT_CT: dict[str, tuple[str, ...]] = {
     "csv": _CSV_CT, "feed": _FEED_CT, "xml": _XML_CT, "text": _TEXT_CT, "sniff": _SNIFF_CT,
 }
@@ -719,7 +753,7 @@ def safe_fetch_text(url: str, fmt: str, headers: dict | None = None,
     assert isinstance(fmt, str) and fmt in _FORMAT_CT, "fmt must be a supported textual format"
     assert isinstance(url, str) and url, "url required"
     got = _guarded_get(url, _FORMAT_CT[fmt], _MAX_BYTES,
-                       extra_headers=headers, allow_redirects=allow_redirects)
+                       extra_headers=headers, allow_redirects=allow_redirects, binary_kind=_FORMAT_KIND[fmt])
     return {"final_url": got["final_url"], "status": got["status"],
             "content_type": got["content_type"],
             "text": decode_body(got["content"], got["content_type"])}
