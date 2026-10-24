@@ -290,11 +290,20 @@ def _owned(ctx: ResearchCtx) -> list[str]:
             *resolved]
 
 
+# the origins whose publisher no one has vouched for: what the open web handed over. A Library row was reviewed for
+# what it is about, and the Library's own lookup already matches the subjects an ask names; judging it again by the
+# words it served refused 50 right or partial cards for 1 wrong-publisher one (census ni-named1, tuning set,
+# 2026-10-24: a team asked for by id, a league feed, an intent name that was a common noun)
+_NAMED_ORIGINS = frozenset({"search", "composed"})
+
+
 def _named(ctx: ResearchCtx, url: str, info: dict, served: object) -> list[str]:
-    """Class 5 (named): the ask's names must be carried by what the source served or how a trusted channel named it
-    (its address, its Library row or search result title and provider), never by the draft's own words."""
+    """Class 5 (named): the ask's names must be carried by what a source the open web handed over served or how a
+    trusted channel named it (its address, its search result title and provider), never by the draft's own words."""
     assert isinstance(info, dict), "source info"
     assert isinstance(url, str), "an address"
+    if info.get("kind") not in _NAMED_ORIGINS:
+        return []
     phrases = named.phrases(ctx.request, [n for n in ctx.names if isinstance(n, str)], _owned(ctx))
     if not phrases:
         return []

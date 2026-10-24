@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from smartbrain_3000 import ni_research_flow
 from smartbrain_3000.ni_research import tools
 from smartbrain_3000.ni_verify import named
 from tests.test_ni_research_tools import FakeLibrary, Net, _ctx, _draft, _row
@@ -84,10 +85,12 @@ def test_a_huge_served_text_is_read_in_bounded_time() -> None:
 
 
 def _feed_ctx(monkeypatch, url: str, body: dict, title: str):
+    """A feed a web search handed over: the open web's own sources are the ones the named class judges."""
     net = Net(monkeypatch, {url: body})
-    ctx = _ctx(FakeLibrary([_row(url, title=title, provider="")]))
+    found = {"results": [{"title": title, "url": url, "snippet": ""}], "engine": "ddg"}
+    ctx = _ctx(None, allowed_origins=ni_research_flow.ORIGINS_WEB, searcher=lambda query, limit: found)
     ctx.request = "AP top story"
-    assert tools.library_search(ctx, "top story")["ok"]
+    assert tools.web_search(ctx, "top story")["ok"]
     assert tools.fetch_sample(ctx, url)["ok"]
     return ctx, net
 
@@ -117,6 +120,19 @@ def test_research_proposes_the_named_publishers_card(monkeypatch) -> None:
     draft = _draft(url, {"title": "items[0].title"})
     assert tools.try_recipe(ctx, draft)["verdict"] == "pass"
     assert tools.propose_card(ctx, draft)["ok"]
+
+
+def test_a_library_row_is_never_judged_by_the_words_it_served(monkeypatch) -> None:
+    """A Library row was reviewed for what it is about and the Library's lookup matched the ask's subjects already:
+    the census (ni-named1, tuning set) found the class refused 50 right or partial Library cards (a team asked for
+    by id, a league-wide feed, an intent name that was a common noun) for one wrong publisher, which came from search."""
+    url = "https://feeds.bbci.co.uk/news/top.json"
+    Net(monkeypatch, {url: BBC})
+    ctx = _ctx(FakeLibrary([_row(url, title="BBC News - Home", provider="")]))
+    ctx.request = "AP top story"
+    assert tools.library_search(ctx, "top story")["ok"] and tools.fetch_sample(ctx, url)["ok"]
+    got = tools.try_recipe(ctx, _draft(url, {"title": "items[0].title"}))
+    assert not any(r.startswith("subject:") for r in got.get("reasons") or []), got
 
 
 def test_a_refresh_never_judges_the_publisher_again() -> None:

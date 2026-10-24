@@ -778,8 +778,10 @@ decline.
 
 The `subject` check also carries class 5, named (`ni_verify.named`): the ask's names (its proper words as written:
 a mid-sentence capital, an all-caps acronym, a sentence-initial word the intent named; less the place, the things
-compared, window words and numbers) must each be carried by the source, either in what it served (the sample) or
-in how a trusted channel named it (its address, its Library row or search result title, its provider). A name is
+compared, window words and numbers) must each be carried by a source the open web handed over (a search result or
+a composed address; a Library row was reviewed for what it is about, and judging it again refused 50 good cards for
+1 wrong one in the ni-named1 census), either in what it served (the sample) or in how a trusted channel named it
+(its address, its search result title, its provider). A name is
 carried by one of its words, a word of the source's name that begins with it ("nhl" in `nhle.com`), its initials
 ("hn" for Hacker News), or, for an acronym, the words that spell it ("National Weather Service" in the source's
 name, or three or more capitalised words served). The draft's own title and outputs never count. It runs when a
