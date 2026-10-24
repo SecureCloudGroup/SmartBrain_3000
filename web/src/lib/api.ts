@@ -1884,6 +1884,16 @@ export const api = {
       `/api/ni/items/${encodeURIComponent(id)}/flow/retry`, {
         method: "POST",
       }),
+  // Release P2: a declined shell becomes a standing order (keep looking), or stops being one.
+  niFlowKeepLooking: (id: string) =>
+    req<{ id: string; started: boolean }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/keep-looking`, {
+        method: "POST",
+      }),
+  niFlowStopLooking: (id: string) =>
+    req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/flow/stop-looking`, {
+      method: "POST",
+    }),
   // Fill a NON-secret param value (needs_params, 2026-09-14). Desktop-local like the
   // credential PUT; secrets are refused server-side (they belong to niPutCredential).
   niPutParam: (id: string, name: string, value: string) =>

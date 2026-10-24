@@ -109,9 +109,13 @@ def _flow_defs() -> dict[str, dict]:
         "FlowDocsKey": obj({"docs_url": STR}),
         "FlowTap": obj({"render_notice": BOOL, "site_cap": INT}), "FlowBrowser": obj({"phase": STR, "pct": INT}),
         "FlowDecline": obj({"reason": ref("DeclineReason"), "headline": STR, "line": text(200),
-                            "links": arr(ref("DeclineLink"), maxItems=ni_master.DECLINE_LINKS)},
+                            "links": arr(ref("DeclineLink"), maxItems=ni_master.DECLINE_LINKS),
+                            "looking": nullable(ref("FlowLooking"))},
                            desc="A declined card (flow state `declined`): the closed reason code, the headline, one plain "
-                                "line and up to three links. Present only on a declined flow."),
+                                "line, up to three links and its open standing order, if any. Present only on a "
+                                "declined flow."),
+        "FlowLooking": obj({"since": text(40), "next_at": nullable(text(40))},
+                           desc="An open standing order (Keep looking): when it began and when it looks next."),
         "DeclineLink": obj({"title": text(120), "url": text(500), "host": text(120)}),
         "Flow": flow,
     }

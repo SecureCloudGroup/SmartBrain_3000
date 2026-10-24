@@ -119,19 +119,26 @@ def _drive_research_declined_no_source(lib_fixture, monkeypatch):
     return _research_flow(monkeypatch, lib_fixture, Script(text_reply('{"pick": null}')), local=True)
 
 
+def _drive_no_ready_source(lib_fixture, monkeypatch):
+    wrap = _Wrap(lib_fixture, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is only a link
+    return _run(_store(), wrap, monkeypatch, _fetcher([], {}))[1]   # not a standing order: it ends at once
+
+
 def _drive_no_source_research_off(lib_fixture, monkeypatch):
     wrap = _Wrap(lib_fixture, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is only a link
-    return _run(_store(), wrap, monkeypatch, _fetcher([], {}))[1]
+    return _run(_store(), wrap, monkeypatch, _fetcher([], {}), looking=True)[1]
 
 
 def _drive_no_source_rows_exhausted(lib_fixture, monkeypatch):
     wrap = _Wrap(lib_fixture, [_row("usgs-quakes", _QUAKE_URL), _row("open-meteo-forecast", WEATHER_URL)])
-    return _run(_store(), wrap, monkeypatch, _fetcher([], {_QUAKE_URL: {"x": 1}, WEATHER_URL: {"y": 2}}))[1]
+    return _run(_store(), wrap, monkeypatch, _fetcher([], {_QUAKE_URL: {"x": 1}, WEATHER_URL: {"y": 2}}),
+                looking=True)[1]
 
 
 def _drive_compare_unbuildable(lib_fixture, monkeypatch):
     wrap = _Wrap(lib_fixture, [])
-    return _run(_store(), wrap, monkeypatch, _fetcher([], {}), request="compare EUR and Zorblax exchange rates")[1]
+    return _run(_store(), wrap, monkeypatch, _fetcher([], {}), request="compare EUR and Zorblax exchange rates",
+                looking=True)[1]
 
 
 def _drive_compare_refused_at_build(lib_fixture, monkeypatch):
@@ -292,13 +299,18 @@ def test_the_board_field_carries_the_reason_the_line_the_links_and_the_way_back(
     out = _drive_research_declined_budget(lib, monkeypatch)
     store = _store()
     item_id = ni_flow.create_shell_item(store, _ASK)
-    ni_flow._flow_write(store, item_id, {**out, "state": "declined"})
+    ni_flow._flow_write(store, item_id, {**out, "state": "declined", "_looking": None})
     field = ni_flow.board_flow_field(store, item_id)
     assert field["state"] == "declined" and field["reason"] == field["decline"]["line"]
     assert field["decline"]["headline"] == "I couldn't build a reliable card for this"
     assert field["decline"]["reason"] == "research_gave_up" and len(field["decline"]["links"]) <= 3
-    assert field["reopen"] == ["retry", "pick_source"] and "question" not in field and "suggestions" not in field
-    assert field["actions"] == ["retry", "pick_source", "delete"], "a shell reopens by retry or a pasted link"
+    assert field["decline"]["looking"] is None
+    assert field["reopen"] == ["keep_looking", "retry", "pick_source"] and "question" not in field \
+        and "suggestions" not in field
+    assert field["actions"] == ["keep_looking", "retry", "pick_source", "delete"], \
+        "a shell reopens by looking on, retry or a pasted link"
+    looking = ni_master.terminal_surface("declined", out, shell=True)   # the run was a standing order's
+    assert looking["reopen"] == ["stop_looking", "pick_source"] and looking["decline"]["looking"]["since"]
     finished = ni_master.actions_for("declined", out, shell=False, awaiting_yes=False, item_state="live",
                                      has_payload=True)
     assert finished == ["retry", "fix", "refine", "delete"] and set(finished) <= ni_master.ACTION_KINDS
@@ -378,12 +390,12 @@ def test_a_declined_card_is_never_due_and_the_tick_fetches_nothing(lib, monkeypa
 def test_the_manual_run_and_activate_routes_refuse_a_declined_shell(client, lib, monkeypatch) -> None:  # noqa: F811
     store = client.app.state.ni
     item_id = ni_flow.create_shell_item(store, _REQUEST)
-    ni_flow._flow_write(store, item_id, {**_drive_no_source_research_off(lib, monkeypatch), "state": "declined"})
+    ni_flow._flow_write(store, item_id, {**_drive_no_ready_source(lib, monkeypatch), "state": "declined"})
     assert client.post(f"/api/ni/items/{item_id}/run").status_code == 409
     assert client.post(f"/api/ni/items/{item_id}/commission").status_code == 409
     row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == item_id)
-    assert row["flow"]["state"] == "declined" and row["flow"]["decline"]["reason"] == "no_answering_source"
-    assert row["actions"] == ["retry", "pick_source", "delete"] and "run" not in row["actions"]
+    assert row["flow"]["state"] == "declined" and row["flow"]["decline"]["reason"] == "no_ready_source"
+    assert row["actions"] == ["keep_looking", "retry", "pick_source", "delete"] and "run" not in row["actions"]
 
 
 # ---- reopen ----------------------------------------------------------------------------------------------
@@ -391,7 +403,7 @@ def test_the_manual_run_and_activate_routes_refuse_a_declined_shell(client, lib,
 def _declined_shell(client, lib, monkeypatch) -> str:  # noqa: F811
     store = client.app.state.ni
     item_id = ni_flow.create_shell_item(store, _REQUEST)
-    ni_flow._flow_write(store, item_id, {**_drive_no_source_research_off(lib, monkeypatch), "state": "declined"})
+    ni_flow._flow_write(store, item_id, {**_drive_no_ready_source(lib, monkeypatch), "state": "declined"})
     return item_id
 
 

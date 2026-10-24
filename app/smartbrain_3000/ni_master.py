@@ -80,9 +80,10 @@ QUESTION_KINDS: frozenset[str] = frozenset({
 })
 
 # Closed reopen affordances for terminal records. "retry" re-runs the sealed
-# request; "pick_source" re-enters the source pick; "delete" always exists on
-# the card chrome and is listed only when it is the honest primary way out.
-REOPEN_KINDS: frozenset[str] = frozenset({"retry", "pick_source", "delete"})
+# request; "pick_source" re-enters the source pick; "keep_looking" turns a declined
+# shell into a standing order (release P2) and "stop_looking" ends one; "delete"
+# always exists on the card chrome and is listed only when it is the honest primary way out.
+REOPEN_KINDS: frozenset[str] = frozenset({"retry", "pick_source", "keep_looking", "stop_looking", "delete"})
 
 # Closed vocabulary of card actions the backend declares on a v2 board row / flow
 # (a public contract with the web client: unknown kinds must be ignored there).
@@ -90,6 +91,7 @@ ACTION_KINDS: frozenset[str] = frozenset({
     "keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "pause", "resume",
     "edit", "delete", "activate", "activate_sites", "give_access", "answer_date",
     "allow_model", "use_local", "fill_param", "add_credential", "review_fix", "pick_source",
+    "keep_looking", "stop_looking",
 })
 
 # ---- the declined card state (plan G6, P6, 6.1, 6.2: "a decline is acceptable, a wrong card is the failure") ----
@@ -99,6 +101,7 @@ ACTION_KINDS: frozenset[str] = frozenset({
 # card is a row of ``ENDINGS`` below, the only place the rule lives: which flow state it lands in and, for a
 # decline, which code. ``ni_flow._end`` reads this table; nothing else decides.
 DECLINE_REASONS: frozenset[str] = frozenset({
+    "no_ready_source",       # nothing the user has or the Library holds answers it now; the user may ask to keep looking
     "no_answering_source",   # no source we can read declares an answer for this ask (and research found none)
     "research_gave_up",      # the researcher ran and ended without a card: the budget or the steps ran out, or the model stopped, with no card
     "verify_refused",        # a card was built and the verifier refused it twice
@@ -109,6 +112,7 @@ DECLINE_REASONS: frozenset[str] = frozenset({
 DECLINE_LINKS = 3
 DECLINE_HEADLINE = "I couldn't build a reliable card for this"
 DECLINE_LINES: dict[str, str] = {
+    "no_ready_source": "No ready source answers this yet. Paste a link to one, or I can keep looking.",
     "no_answering_source": "No source I can read answers this.",
     "research_gave_up": "I looked for a source and ran out of steps before finding one I could trust.",
     "verify_refused": "I found a source, but the card built from it failed its checks twice, so I won't show it.",
@@ -116,14 +120,23 @@ DECLINE_LINES: dict[str, str] = {
     "source_cant_answer": "That source can't answer this ask.",
     "ask_unsupported": "This kind of ask isn't supported yet.",
 }
-# The user's ways back from a decline: run the same ask again, or re-enter the source pick (paste a link).
-DECLINE_REOPEN: tuple[str, ...] = ("retry", "pick_source")
+# The user's ways back from a decline: keep looking (a standing order, release P2), run the same ask again, or
+# re-enter the source pick (paste a link). A shell already looking offers to stop instead of the first two.
+DECLINE_REOPEN: tuple[str, ...] = ("keep_looking", "retry", "pick_source")
+LOOKING_REOPEN: tuple[str, ...] = ("stop_looking", "pick_source")
+# The endings a standing order can answer: nothing was ready while research could run, or research ran and found
+# no source it could trust. Research that cannot run (off, or no model for it), a pasted source that cannot answer,
+# a compare no source reads and an ask kind that is not built would decline the same way however long it looked.
+# The decline seals the answer (``look``), so the offer and the order read one rule.
+LOOKABLE: frozenset[str] = frozenset({"no_ready_source", "research_declined_budget", "research_declined_no_source",
+                                      "research_declined_checks"})
 
 # One row per ending of the v2 flow that is not a card: (flow state it lands in, decline code or None).
 # A decline is for an ask nothing the user can do on this card will make answerable; an ending where the user
 # can still act (pick a link, add a key, answer a question, retry a fault) keeps its own state.
 ENDINGS: dict[str, tuple[str, str | None]] = {
     # -- declined: nothing the card can ask the user would change the answer --
+    "no_ready_source": ("declined", "no_ready_source"),  # no Library row or kept source fits; research not asked for
     "research_declined_checks": ("declined", "verify_refused"),
     "research_declined_budget": ("declined", "research_gave_up"),
     "research_declined_no_source": ("declined", "no_answering_source"),
@@ -141,6 +154,7 @@ ENDINGS: dict[str, tuple[str, str | None]] = {
     "date_question": ("unsupported", None),              # "when is it?"
     "fault": ("failed", None),                           # fetch / mapping / assembly: retry runs it again
 }
+assert all(ENDINGS.get(e, ("", None))[0] == "declined" for e in LOOKABLE), "a lookable ending declines"
 
 _GATE_ACTIONS: dict[str, tuple[str, ...]] = {
     "awaiting_access": ("give_access",),
@@ -155,7 +169,9 @@ _QUESTION_ACTIONS: dict[str, tuple[str, ...]] = {
 }
 # The action behind each way out a terminal card names: a reopen the card offers always has its action on the
 # board row ("delete" is on every row already). ``pick_source`` is a shell's: a finished card reopens via Fix.
-_REOPEN_ACTIONS: dict[str, tuple[str, ...]] = {"retry": ("retry",), "pick_source": ("pick_source",), "delete": ()}
+_REOPEN_ACTIONS: dict[str, tuple[str, ...]] = {"retry": ("retry",), "pick_source": ("pick_source",),
+                                               "keep_looking": ("keep_looking",), "stop_looking": ("stop_looking",),
+                                               "delete": ()}
 assert set(_REOPEN_ACTIONS) == REOPEN_KINDS, "every reopen kind has its action"
 assert all(a in ACTION_KINDS for ways in (*_REOPEN_ACTIONS.values(), *_QUESTION_ACTIONS.values()) for a in ways), \
     "closed vocabulary"
@@ -375,7 +391,13 @@ def terminal_surface(state: str, record: dict, *, shell: bool) -> dict:
         question = None  # a finished card never re-enters the source pick: Fix re-reads its own source
     if question is not None:
         out["question"] = question
-    reopen = [r for r in move.get("reopen", []) if r in REOPEN_KINDS and (shell or r != "pick_source")]
+    if state == "declined" and shell and isinstance(record.get("_looking"), dict):
+        move = {**move, "reopen": list(LOOKING_REOPEN)}  # a standing order is open: the way out is to stop it
+    elif state == "declined" and not lookable(record):
+        move = {**move, "reopen": [r for r in move["reopen"] if r != "keep_looking"]}
+    # pick_source and the standing order are a shell's: a finished card reopens via Fix (and re-research)
+    reopen = [r for r in move.get("reopen", []) if r in REOPEN_KINDS
+              and (shell or r not in ("pick_source", "keep_looking", "stop_looking"))]
     if not question and not reopen:
         reopen = ["retry"]  # law backstop: never a bare terminal
     if reopen:
@@ -405,22 +427,40 @@ def clean_links(links: object) -> list[dict]:
 
 
 def decline_view(record: dict) -> dict:
-    """``{reason, headline, line, links}`` of a declined record, from its sealed ``_decline_card`` (single writer:
-    the card renders this verbatim). A record without a valid seal still answers honestly with the blind code
-    ``no_answering_source``; the view is total."""
+    """``{reason, headline, line, links, looking}`` of a declined record, from its sealed ``_decline_card`` (single
+    writer: the card renders this verbatim) and its open standing order, if any. A record without a valid seal
+    still answers honestly with the blind code ``no_answering_source``; the view is total."""
     assert isinstance(record, dict), "record required"
     sealed = record.get("_decline_card") if isinstance(record.get("_decline_card"), dict) else {}
     code = sealed.get("reason") if sealed.get("reason") in DECLINE_REASONS else "no_answering_source"
     line = " ".join(str(sealed.get("line") or "").split())[:200] or DECLINE_LINES[code]
-    out = {"reason": code, "headline": DECLINE_HEADLINE, "line": line, "links": clean_links(sealed.get("links"))}
+    out = {"reason": code, "headline": DECLINE_HEADLINE, "line": line, "links": clean_links(sealed.get("links")),
+           "looking": looking_view(record.get("_looking"))}
     assert out["reason"] in DECLINE_REASONS and len(out["links"]) <= DECLINE_LINKS, "a closed decline"
     return out
 
 
+def looking_view(looking: object) -> dict | None:
+    """``{since, next_at}`` of an open standing order (release P2), or None: the card says it is still looking and
+    when it looks next. Only the two timestamps reach the client, each bounded."""
+    if not isinstance(looking, dict) or not isinstance(looking.get("since"), str):
+        return None
+    nxt = looking.get("next_at")
+    return {"since": looking["since"][:40], "next_at": nxt[:40] if isinstance(nxt, str) else None}
+
+
 def seal_decline(ending: str, line: str | None, links: object) -> dict:
-    """The ``_decline_card`` seal for one ``ENDINGS`` row that declines: ``{reason, line, links}``."""
+    """The ``_decline_card`` seal for one ``ENDINGS`` row that declines: ``{reason, line, links, look}``; ``look``
+    says a standing order could answer it (``LOOKABLE``)."""
     assert ending in ENDINGS, "a known ending"
     state, code = ENDINGS[ending]
     assert state == "declined" and code in DECLINE_REASONS, "this ending declines"
     text = " ".join(str(line or "").split())[:200] or DECLINE_LINES[code]
-    return {"reason": code, "line": text, "links": clean_links(links)}
+    return {"reason": code, "line": text, "links": clean_links(links), "look": ending in LOOKABLE}
+
+
+def lookable(record: dict) -> bool:
+    """Can this record become a standing order (release P2)? Only a decline sealed by a ``LOOKABLE`` ending."""
+    assert isinstance(record, dict), "a record"
+    sealed = record.get("_decline_card")
+    return record.get("state") == "declined" and isinstance(sealed, dict) and sealed.get("look") is True

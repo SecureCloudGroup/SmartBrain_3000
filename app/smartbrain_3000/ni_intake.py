@@ -25,7 +25,7 @@ import threading
 from datetime import UTC
 from zoneinfo import ZoneInfo
 
-from . import library_index, ni, ni_flow, ni_recipe, ni_research_flow
+from . import library_index, ni, ni_flow, ni_recipe, ni_research_flow, ni_standing
 from .ni_research import loop, tools
 from .ni_research.ctx import ResearchCtx, normal_url, one_line
 from .ni_verify import named
@@ -94,6 +94,7 @@ def remember(store: ni.NIStore, item: dict) -> bool:
         entries = [e for e in _entries(row) if e["question"] != question]
         row["kept"]["entries"] = [*entries, entry][-MAX_ENTRIES:]
         _write(store, rows)
+    ni_standing.rematch(store)   # P2: every open standing order looks again at this new source, at no model cost
     return True
 
 
