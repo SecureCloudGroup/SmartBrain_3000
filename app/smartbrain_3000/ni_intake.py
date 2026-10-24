@@ -34,7 +34,8 @@ from .ni_verify.text import _WINDOW_WORDS, _answer_tokens, _folded_words
 log = logging.getLogger(__name__)
 
 KEPT_PREFIX = "local-k"     # a kept row's id (a ``local-`` id, so the Library page lists and deletes it as yours)
-KEEP_PATHS = frozenset({"research", "mapping"})   # built outside the Library; the Library's own rows are found anyway
+KEEP_PATHS = frozenset({"research", "mapping", "kept"})   # built outside the Library (the Library's rows are found
+# anyway); a card rebuilt from a kept source refreshes its entry
 MAX_ENTRIES = 5             # questions one kept address answers
 MAX_MISSES = 3              # failed fetches in a row before a kept address is forgotten
 MAX_TRIES = 2               # kept addresses read for one ask
@@ -272,7 +273,8 @@ def _try(store: ni.NIStore, item_id: str, request: str, intent: dict, question: 
             ni_flow._flow_read(store, item_id) or {})) is not None:
         return None
     note = f"built from a source you kept before ({host}); held for your Keep"
-    return ni_research_flow._land(store, item_id, request, ctx, proposal, loop.Outcome("proposed", "kept"), note=note)
+    return ni_research_flow._land(store, item_id, request, ctx, proposal, loop.Outcome("proposed", "kept"), note=note,
+                                  path="kept")
 
 
 def _count(store: ni.NIStore, key: str, entry: dict, *, missed: bool) -> None:

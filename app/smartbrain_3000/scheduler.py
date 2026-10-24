@@ -34,6 +34,7 @@ from . import (
     ingest,
     ni,
     ni_library,
+    ni_measure,
     ni_standing,
     ni_watch,
     search,
@@ -809,6 +810,11 @@ def _auto_update_ni(app) -> None:
                 log.warning("ni carrier posting failed: %s", exc)
             finally:
                 _close_cursor(cursor)
+    try:  # release P4: kept cards seven days old get their survival stamped (no network, no model)
+        if getattr(app.state, "ni", None) is not None:
+            ni_measure.check_due(app.state.ni)
+    except Exception as exc:  # the measure must never kill the schedule tick
+        log.warning("ni measure pass failed: %s", exc)
     if not _breaker_open():  # release P2: one standing order looks again per tick (research under the daily ceiling)
         try:
             if getattr(app.state, "ni", None) is not None:

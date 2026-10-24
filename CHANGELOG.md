@@ -26,6 +26,10 @@ to know when a release changes behavior.
   I gave for** that site, and sends it only when you tap, because different owners can share one site.
   When research finds a source that asks for a key, the card offers **Use my key for** that site. Pages you have
   to sign in to are not supported yet.
+- **How well Neural Interface cards work, counted on your device.** **Settings → Status** now shows, for each way a
+  card was built (the SmartBrain Library, a source you kept, research, a link you pasted), how many you kept and
+  how many you said no to, and how many kept cards were still working a week later. **Export** saves the counts as
+  a file. Only a card's random id and how it was built are recorded, and nothing is sent anywhere.
 
 ### Changed
 

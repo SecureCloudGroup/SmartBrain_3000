@@ -9,7 +9,8 @@
   import PageBrowserStatus from "$lib/components/PageBrowserStatus.svelte";
   import Spinner from "$lib/components/Spinner.svelte";
   import { account } from "$lib/account.svelte";
-  import { api, ApiError, type AppStatus, type NiFinding } from "$lib/api";
+  import { api, ApiError, type AppStatus, type NiFinding, type NiMeasure } from "$lib/api";
+  import { measureRows } from "$lib/ni/measure";
   import { Recorder } from "$lib/audio/recorder";
   import { loadWakeWord, matchWake, saveWakeWord } from "$lib/audio/wakeword";
   import { SPEECH_RATE_KEY, speechRate } from "$lib/audio/speaker";
@@ -19,6 +20,9 @@
   let error = $state("");
   // G1 oversight plane: open watcher findings (Neural Interface health).
   let findings = $state<NiFinding[]>([]);
+  // Release P4: whether Neural Interface cards get kept and still work a week on.
+  let measure = $state<NiMeasure | null>(null);
+  const measured = $derived(measureRows(measure));
   let timer: ReturnType<typeof setInterval> | null = null;
 
   async function load() {
@@ -33,6 +37,22 @@
     } catch {
       findings = []; // desktop-local only; remote views just skip the block
     }
+    try {
+      measure = await api.niMeasure();
+    } catch {
+      measure = null; // desktop-local only, like the findings
+    }
+  }
+
+  // The counts as JSON for the eval (the same body /api/ni/measure returns; nothing is sent anywhere).
+  function exportMeasure() {
+    if (!measure) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(measure, null, 2)], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ni-measure.json";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function resolveFinding(id: string) {
@@ -491,6 +511,19 @@
                 <span>{f.title}</span>
                 <button class="linklike" onclick={() => resolveFinding(f.id)}>Dismiss</button>
               </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+      {#if measured.length}
+        <div class="card">
+          <h2 class="row">
+            <span>Neural Interface cards</span>
+            <button class="linklike" onclick={exportMeasure}>Export</button>
+          </h2>
+          <div class="rows">
+            {#each measured as row (row.source)}
+              <div class="srow"><span>{row.label}</span><strong>{row.line}</strong></div>
             {/each}
           </div>
         </div>

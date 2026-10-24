@@ -768,6 +768,24 @@ export interface NiFinding {
   status: string;
 }
 
+// Release P4: the live measure. Per way a card was built: how many you kept or said no to, and for the kept ones
+// how they stand seven days on ("waiting" until then).
+export type NiMeasureSource = "library" | "own" | "research" | "paste" | "other";
+export interface NiMeasureCounts {
+  kept: number;
+  dismissed: number;
+  waiting: number;
+  live: number;
+  failing: number;
+  paused: number;
+  gone: number;
+}
+export interface NiMeasure {
+  since: string | null;
+  by_source: Record<NiMeasureSource, NiMeasureCounts>;
+  total: NiMeasureCounts;
+}
+
 // How one clause of the ask's query was carried (ni-format §36 "Coverage and notes"):
 // "unbound" = the ask said something the query does not carry, "approximated" = carried
 // coarser (a part of a day read as the day), "rules" = decided by the rules floor.
@@ -1883,6 +1901,7 @@ export const api = {
     }),
   niFindings: () =>
     req<{ findings: NiFinding[] }>("/api/ni/findings"),
+  niMeasure: () => req<NiMeasure>("/api/ni/measure"),
   niResolveFinding: (id: string) =>
     req<{ ok: boolean }>(`/api/ni/findings/${encodeURIComponent(id)}/resolve`, {
       method: "POST",
