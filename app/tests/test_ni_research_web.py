@@ -17,7 +17,7 @@ from test_ni_research_loop import _ASK, Script, _v2, _wrap, call, reply  # noqa:
 from test_ni_research_tools import CSV, QUAKES, FakeLibrary, Net, _ctx, _draft, _row
 
 from smartbrain_3000 import ni, ni_flow, ni_research_flow
-from smartbrain_3000.ni_research import loop, policy, prompt, tools
+from smartbrain_3000.ni_research import loop, policy, tools
 from smartbrain_3000.ni_research.ctx import ResearchCtx
 
 HIT = "https://feeds.example.net/quakes.json"
@@ -39,8 +39,7 @@ def rows(*urls: str) -> list[dict]:
 
 
 def web_ctx(found: list[dict] | None = None, **over) -> ResearchCtx:
-    over = {"allowed_origins": WEB, **over}
-    ctx = _ctx(None, searcher=searcher(found if found is not None else rows(HIT, HIT_Q, PAGE)), **over)
+    ctx = _ctx(None, allowed_origins=WEB, searcher=searcher(found if found is not None else rows(HIT, HIT_Q, PAGE)), **over)
     return ctx
 
 
@@ -54,30 +53,18 @@ def test_a_search_result_is_a_legal_origin_exactly_as_returned_including_its_own
     assert {v["kind"] for v in ctx.urls.values()} == {"search"} and len(ctx.urls) == 3
 
 
-def test_a_composed_address_is_legal_only_over_https_on_a_site_a_search_found() -> None:
-    """T (2026-10-24, tune3): research may work out an address on the same site (registrable domain) as a search
-    result, such as that site's own JSON API, which search never returns as a link. Never another site, never in the
-    clear, never on a Library-only run; recorded as ``composed`` so the card says how it was found."""
+def test_no_composed_address_is_legal_not_even_a_plain_path_on_a_found_host() -> None:
+    """M1 (review #535): a path carries data out as well as a query, so only handed-over addresses count."""
     ctx = web_ctx()
     tools.web_search(ctx, "earthquakes")
-    for composed in ("https://feeds.example.net/other/data.csv", "https://api.feeds.example.net/v2/data.json",
-                     "https://feeds.example.net/api?format=json&limit=500"):
-        assert ctx.origin(composed) == ("composed", ""), composed
-        assert ctx.urls[composed]["kind"] == "composed"
-    for refused in ("http://feeds.example.net/quakes.json",           # a downgrade of a found address
-                    "https://elsewhere.example.com/data.json",         # another site
-                    "https://other.example.net/data.json",             # a sibling of the result's host, not under it
-                    "https://feeds.example.net.evil.test/x.json"):    # a lookalike host
-        origin, why = ctx.origin(refused)
-        assert origin is None and "a site a search returned" in why, refused
-    library_only = _ctx(None, allowed_origins=ni_research_flow.ORIGINS_LIBRARY)
-    library_only.record_search_results(rows(HIT))   # even with a search result on record
-    assert library_only.origin("https://feeds.example.net/other/data.csv")[0] is None
-
-
-def test_a_composed_address_needs_a_search_result_on_its_site_first() -> None:
-    ctx = web_ctx()
-    assert ctx.origin("https://feeds.example.net/quakes.json")[0] is None, "no search has run yet"
+    for composed in ("https://feeds.example.net/other/data.csv",
+                     "https://feeds.example.net/my-secret-question.json",
+                     "https://api.feeds.example.net/v2/data.json",
+                     "http://feeds.example.net/quakes.json",          # a downgrade of a found address
+                     "https://feeds.example.net/other.json?q=my+secret+question",
+                     "https://feeds.example.net/api?format=json&limit=500"):  # not the search result's own query
+        origin, why = ctx.origin(composed)
+        assert origin is None and "exactly" in why, composed
 
 
 def test_a_search_result_over_plain_http_is_never_recorded() -> None:
@@ -100,36 +87,10 @@ def test_a_host_no_result_named_is_refused_and_so_is_a_link_a_page_supplied(monk
 
 
 def test_a_path_tenanted_platform_gives_no_reach_beyond_the_one_result() -> None:
-    ctx = web_ctx(rows("https://raw.githubusercontent.com/alice/data/main/q.json",
-                       "https://s3.us-west-2.amazonaws.com/alice-bucket/q.json"))
+    ctx = web_ctx(rows("https://raw.githubusercontent.com/alice/data/main/q.json"))
     tools.web_search(ctx, "q")
     assert ctx.origin("https://raw.githubusercontent.com/alice/data/main/q.json")[0] == "search"
     assert ctx.origin("https://raw.githubusercontent.com/mallory/x/main/exfil.json")[0] is None
-    assert ctx.origin("https://raw.githubusercontent.com/alice/other/main/more.json")[0] == "composed", "the same owner"
-    assert ctx.origin("https://s3.us-west-2.amazonaws.com/mallory-bucket/x.json")[0] is None
-
-
-def test_a_host_tenant_never_reaches_another_tenant_of_its_platform() -> None:
-    """The site is the result's own host and the hosts under it: ``api.github.com`` from a ``github.com`` result, never
-    ``mallory.example.app`` from ``alice.example.app``, whatever the platform."""
-    ctx = web_ctx(rows("https://github.com/kubernetes/kubernetes/issues", "https://alice.example.app/feed.json"))
-    tools.web_search(ctx, "q")
-    assert ctx.origin("https://api.github.com/repos/kubernetes/kubernetes")[0] == "composed"
-    assert ctx.origin("https://alice.example.app/data.json")[0] == "composed"
-    assert ctx.origin("https://mallory.example.app/collect")[0] is None
-
-
-def test_on_a_shared_hosting_platform_a_composed_address_stays_on_the_results_own_host() -> None:
-    """A name under a shared platform's host is another owner's: a bucket host under ``s3.amazonaws.com``, a blog
-    under ``blogspot.com``. Only the result's own host is reachable there (and on path-tenanted hosts, its owner)."""
-    ctx = web_ctx(rows("https://s3.amazonaws.com/alice-bucket/q.json", "https://www.blogspot.com/about",
-                       "https://alice.github.io/feed.json"))
-    tools.web_search(ctx, "q")
-    for refused in ("https://mallory.s3.amazonaws.com/x.json", "https://mallory.blogspot.com/collect",
-                    "https://blogspot.com/x", "https://mallory.alice.github.io/x"):
-        assert ctx.origin(refused)[0] is None, refused
-    assert ctx.origin("https://s3.amazonaws.com/alice-bucket/more.json")[0] == "composed"
-    assert ctx.origin("https://alice.github.io/data.json")[0] == "composed"
 
 
 def test_the_local_and_library_only_runs_refuse_every_web_origin() -> None:
@@ -214,26 +175,6 @@ def test_a_csv_found_on_the_web_is_verified_endpoint_and_a_plain_text_page_is_pa
     table = "city temp\nKC 71\nSTL 68\n"
     got = _propose(monkeypatch, text_url, table, "text", {"title": "text"}, rows(text_url))
     assert got["ok"] and got["proposal"]["tier"] == "page_reading", got
-
-
-def test_a_composed_address_card_is_an_endpoint_that_says_how_it_was_found(monkeypatch) -> None:
-    api = "https://api.example.net/v1/quakes.json"   # worked out on the site of a search result that was a page
-    got = _propose(monkeypatch, api, QUAKES, None, {"title": "metadata.title"}, rows("https://www.example.net/quakes"))
-    assert got["ok"], got
-    recipe = got["proposal"]["spec"]["recipe"]
-    assert recipe["sources"][0]["kind"] == "endpoint" and got["proposal"]["tier"] == "verified_endpoint"
-    assert recipe["sources"][0]["why"] == "an address worked out on a site a search found"
-
-
-def test_a_run_under_an_exact_address_consent_is_told_so_and_refused_a_composed_address() -> None:
-    ctx = web_ctx(allowed_origins=ni_research_flow.ORIGINS_WEB_EXACT)
-    tools.web_search(ctx, "earthquakes")
-    assert ctx.origin(HIT)[0] == "search"
-    origin, why = ctx.origin("https://feeds.example.net/other/data.csv")
-    assert origin is None and "exactly" in why
-    assert "may not work out addresses" in prompt.ask_block(ctx)
-    assert "may not work out addresses" not in prompt.ask_block(web_ctx())
-    assert "may not work out addresses" not in prompt.ask_block(_ctx(None)), "a Library run has no search to work from"
 
 
 def test_a_library_source_stays_curated_even_with_the_web_on(monkeypatch) -> None:
@@ -347,8 +288,7 @@ def test_the_consent_lists_what_leaves_the_device_for_the_web(lib, monkeypatch) 
     text = ni_flow.board_flow_field(store, item_id)["question"]["prompt"]
     for named in ("exact question", "search results", "titles, snippets and addresses", "up to 8", "today's date",
                   "time zone", "place you named", "research steps", "tool transcript", "search provider",
-                  "IP address", "never email, notes or other cards", "knowledge-base", "always held for your Keep",
-                  "work out an address on a site a search found", "words of your question can reach that site"):
+                  "IP address", "never email, notes or other cards", "knowledge-base", "always held for your Keep"):
         assert named in text, named
 
 
@@ -407,68 +347,6 @@ def test_a_consent_sealed_on_a_card_carries_its_scope_and_an_old_card_has_none()
     assert not ni_flow._model_consent_web_of(new, "i", {"_model_consent": "anthropic/x", "_model_consent_web": False})
 
 
-def test_composed_addresses_are_sealed_only_under_the_wording_that_named_them(lib, monkeypatch) -> None:  # noqa: F811
-    """A consent seals the scope its wording showed (#535): a web consent tapped before the wording named composed
-    addresses keeps exact-address research; only an answer to the new wording reaches a search-found site."""
-    model = "anthropic/claude-sonnet-5-5"
-    monkeypatch.delenv("SMARTBRAIN_NI_RESEARCH_WEB", raising=False)
-    store, item_id, _, _, _ = _web_flow(monkeypatch, _wrap(lib), Script(), rows(HIT), {}, cloud=model, local="mlx/test-local")
-    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **k: True)
-    stamped = ni_flow._flow_read(store, item_id)["_question"]
-    assert stamped["web"] is True and stamped["compose"] is True
-    older = {k: v for k, v in stamped.items() if k != "compose"}   # a question stamped before composed addresses
-    assert ni_flow.answer_model_consent(store, item_id, older, "allow") is True
-    record = ni_flow._flow_read(store, item_id)
-    assert record["_model_consent_web"] is True and record["_model_consent_compose"] is False
-    assert ni_research_flow._web_origins(store, item_id, record) == ni_research_flow.ORIGINS_WEB_EXACT
-    assert ni_flow.answer_model_consent(store, item_id, stamped, "allow") is True
-    record = ni_flow._flow_read(store, item_id)
-    assert ni_research_flow._web_origins(store, item_id, record) == ni_research_flow.ORIGINS_WEB
-    assert ni_flow._fresh_record(record, _ASK, "intent", "retry")["_model_consent_compose"] is True, "Retry keeps it"
-    library = {**stamped, "web": False}   # a Library question never grants composed addresses, whatever it carries
-    assert ni_flow.answer_model_consent(store, item_id, library, "allow") is True
-    assert ni_flow._flow_read(store, item_id)["_model_consent_compose"] is False
-
-
-def test_a_composed_card_lands_held_and_seals_the_scope_it_was_built_under(lib, monkeypatch) -> None:  # noqa: F811
-    from test_ni_research_loop import _INTENT
-    model, page, api = "anthropic/claude-sonnet-5-5", "https://www.example.net/quakes", "https://api.example.net/q.json"
-    monkeypatch.delenv("SMARTBRAIN_NI_RESEARCH_WEB", raising=False)
-    store, item_id, _, net, _ = _web_flow(monkeypatch, _wrap(lib), Script(), rows(page), {api: QUAKES}, cloud=model,
-                                          local="mlx/test-local")
-    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **k: True)
-    assert ni_flow.answer_model_consent(store, item_id, ni_flow._flow_read(store, item_id)["_question"], "allow")
-    draft = _draft(api, {"title": "metadata.title"})
-    seam = Script(reply(call("web_search", query="earthquakes")), reply(call("fetch_sample", url=api)),
-                  reply(call("try_recipe", draft_spec=draft)), reply(call("propose_card", draft_spec=draft)))
-    ni_research_flow.set_research_chat(lambda m, messages, tools_: seam(messages, tools_), cloud=model,
-                                       local="mlx/test-local")
-    out = ni_flow._run_external_flow(store, item_id, _ASK, dict(_INTENT), None,
-                                     lambda p: '{"serves": true, "gaps": [], "wrong": []}',
-                                     lambda u: (_ for _ in ()).throw(AssertionError("the auto-pick fetched")))
-    assert out["state"] == "ready" and [c["url"] for c in net.calls] == [api], out
-    item = store.get_item(item_id)
-    assert ni.awaits_yes(item) and item["spec"]["recipe"]["sources"][0]["kind"] == "endpoint"
-    assert item["spec"]["_model_consent_web"] is True and item["spec"]["_model_consent_compose"] is True
-
-
-def test_a_card_sealed_before_composed_addresses_reads_exact_addresses_only(monkeypatch) -> None:
-    class _Store:
-        def __init__(self, spec):
-            self.spec = spec
-
-        def get_item(self, _):
-            return {"spec": self.spec}
-
-    monkeypatch.setitem(ni_research_flow._SEAM, "consented", False)
-    web = {"_model_consent": "anthropic/x", "_model_consent_web": True}
-    assert ni_research_flow._web_origins(_Store(web), "i", {}) == ni_research_flow.ORIGINS_WEB_EXACT
-    assert ni_research_flow._web_origins(_Store({**web, "_model_consent_compose": True}), "i", {}) == WEB
-    # a composed scope never rides without the web scope it widens
-    assert not ni_flow._model_consent_web_of(_Store({"_model_consent": "anthropic/x", "_model_consent_compose": True}),
-                                             "i", {}, "_model_consent_compose")
-
-
 def test_the_web_scope_is_a_closed_spec_field_stripped_like_the_consent(monkeypatch) -> None:
     from smartbrain_3000 import ni_library, ni_routes
     base = _draft(HIT, {"title": "metadata.title"})
@@ -478,14 +356,7 @@ def test_the_web_scope_is_a_closed_spec_field_stripped_like_the_consent(monkeypa
                 {"_model_consent": "anthropic/x", "_model_consent_web": "yes"}):
         with pytest.raises(ValueError, match="_model_consent_web"):
             ni.validate_spec({**base, **bad})
-    web = {"_model_consent": "anthropic/x", "_model_consent_web": True}
-    ni.validate_spec({**base, **web, "_model_consent_compose": True})
-    for bad in ({"_model_consent": "anthropic/x", "_model_consent_compose": True}, {**web, "_model_consent_compose": False},
-                {**web, "_model_consent_compose": "yes"}):
-        with pytest.raises(ValueError, match="_model_consent_compose"):
-            ni.validate_spec({**base, **bad})
-    for key in ni_flow._CONSENT_SCOPES:
-        assert key in ni_routes._EXPORT_STRIP_KEYS and key in ni_library._TEMPLATE_STRIP_KEYS, key
+    assert "_model_consent_web" in ni_routes._EXPORT_STRIP_KEYS and "_model_consent_web" in ni_library._TEMPLATE_STRIP_KEYS
 
 
 # --- the eval cassette: a web-researched card, recorded and replayed -----------------------------------------------

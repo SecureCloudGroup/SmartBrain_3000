@@ -757,49 +757,31 @@ this card's consent.
   (`library_search`, `web_search`, `fetch_sample`, `try_recipe`, `propose_card`, `propose_compare`). The open web
   (search and public pages) is on unless the kill switch (`SMARTBRAIN_NI_RESEARCH_WEB` or meta
   `ni_research_web` set to `off`) limits it to the Library. Fetches carry no headers, no POST, no redirects,
-  and every address must have been handed over by a search or the Library, or (origin `composed`, 2026-10-24) be
-  an https address the model worked out on the site of a search result: the result's host with a leading `www.`
-  dropped, or a host under it (on a shared-hosting platform, `pagegraph.shared_hosting`, only the result's own host),
-  and on a host that splits owners by path (cloud storage, raw file hosts) the same first path segment. A composed source is recorded as `kind: endpoint`, why "an address worked out on a site a
-  search found". Only a consent sealed under the wording that names composed addresses (`_model_consent_compose`)
-  allows them; an older web consent keeps exact-address research (`ORIGINS_WEB_EXACT`), and the run is told so.
+  and every address must have been handed over by a search or the Library, never composed.
 - `local`: the closed-world mode. Code ranks Library rows and the local model only picks one and fills the
   recipe. Never the web.
 - `ask`: the card shows the consent question (`model_consent`, §29 Consent) and nothing is sent.
 - `off`: no researcher.
 
 A proposal is checked by code (`ni_research.tools._checks`: place, window, threshold, compare, empty,
-`subject` for page readings and for the ask's names, `stable` for an address that fixes a day), may be refused twice, and lands as a held card with `_built_from.path:
+`subject` for page readings, and at build `stable`), may be refused twice, and lands as a held card with `_built_from.path:
 research` and a sealed `recipe = {question, sources, constraints, tier, verification?, provenance?, research?}`
 (`ni_recipe`). `tier` is `curated`, `verified_endpoint` or `page_reading`. Researcher drafts may carry no `llm`
 stage, `$secret`, model or MCP source, or model-chosen interval. The interval is stamped by code from
 `recipe.question.cadence`. A run that could not finish ends `fault` (a failed, retryable card), never a
 decline.
 
-The `subject` check also carries class 5, named (`ni_verify.named`): the ask's names (its proper words as written:
-a mid-sentence capital, an all-caps acronym, a sentence-initial word the intent named; less the place, the things
-compared, window words and numbers) must each be carried by a source the open web handed over (a search result or
-a composed address; a Library row was reviewed for what it is about, and judging it again refused 50 good cards for
-1 wrong one in the ni-named1 census), either in what it served (the sample) or in how a trusted channel named it
-(its address, its search result title, its provider). A name is
-carried by one of its words, a word of the source's name that begins with it ("nhl" in `nhle.com`), its initials
-("hn" for Hacker News), or, for an acronym, the words that spell it ("National Weather Service" in the source's
-name, or three or more capitalised words served). The draft's own title and outputs never count. It runs when a
-draft is tried or proposed; the refresh re-check never runs it (the address is sealed, so its publisher cannot
-change).
-
-The `stable` check refuses a research address whose path or query writes a date or epoch timestamp within a week of
-now (`starttime=<last week>&endtime=<today>`): the card reads that sealed address every day, so it would show that day
-forever. A day further away is one the ask named and stays. Like `subject` it runs at build only.
+The `stable` check (`tools._stable`) refuses a research address whose path or query writes a date or epoch timestamp
+within a week of now (`starttime=<last week>&endtime=<today>`): the card reads that sealed address every day, so it
+would show that day forever. A day further away is one the ask named and stays. It runs at build only; the refresh
+re-check (`checks_for`) never runs it.
 
 ### Consent
 
 - A card whose resolved model is not local and differs from the card's `_model_consent` stops before any model
-  call with an answerable `unsupported` whose question is `model_consent {model, local, prompt, web, compose}`.
-  The wording names what leaves the device (the request and samples from the source), and with the open web on,
-  the search and page items and the addresses research works out on a search-found site. The answer seals the
-  scope the wording showed: `_model_consent_web` and `_model_consent_compose` (each `true` or absent on a spec;
-  compose only beside web), carried, stripped and refused like the consent. `POST /flow/answer {kind: model_consent, value: allow|local}` stamps the consent
+  call with an answerable `unsupported` whose question is `model_consent {model, local, prompt, web}`. The
+  wording names what leaves the device (the request and samples from the source), and with the open web on,
+  the search and page items. `POST /flow/answer {kind: model_consent, value: allow|local}` stamps the consent
   (sealed into the spec so Fix does not re-ask) or builds with the local model. The engine's `llm` stage stays
   local-only.
 - `run_flow` resolves its model live from the `ni` route with `chat` and `agent` fallbacks and prefers a local
@@ -817,7 +799,7 @@ out the card offers is always a button on its row.
 
 - **Retry** (`POST /flow/retry`) re-runs a terminal shell's sealed request from a fresh record
   (`ni_flow._fresh_record`): the card's own answers (`_declined`, `_model_consent`, `_model_consent_web`,
-  `_model_consent_compose`, `_use_local`) and the address the user named themselves (`_pasted`, written only at intake, by a paste or by
+  `_use_local`) and the address the user named themselves (`_pasted`, written only at intake, by a paste or by
   an approved chat call) ride along; nothing a previous build sealed does, so the engine's last address is never
   read as the user's. 409 while a worker still runs, for a finished card, and for a non-terminal flow. No and
   Paste a link start from the same fresh record.

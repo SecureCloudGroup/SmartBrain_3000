@@ -87,14 +87,9 @@ not. Being precise about the line matters more than claiming everything:
   your time zone and the place you named, and the research steps so far. Never your email,
   notes, knowledge-base text or other cards, and no keys. Research may search the web (at
   most 3 searches), so your search words reach your search provider, and the sites it reads
-  see this computer's IP address. It fetches an address a search (over https) or the
-  Library returned, exactly as returned, or an https address it works out on the site of a
-  search result (that result's host or a host under it, such as the site's own data feed
-  or API). It never reaches another site, so neither a page nor the model can send it
-  somewhere else; on that one site, words of your question can reach the site inside the
-  address it works out, and the consent question says so. A consent you gave before the
-  question named worked-out addresses keeps research to exact addresses. An address that
-  fixes today's date is refused, since a kept card would read that day forever.
+  see this computer's IP address. It fetches only addresses a search (over https) or the
+  Library returned, exactly as returned; the model never writes an address of its own, so
+  neither a page nor the model can send it somewhere else or carry your data in a link.
   Sites found on the web are read only where their robots.txt allows it, and a kept web
   card keeps following it. A web page is read for its **data tables only**: research reads
   the cells of a table (the digest it gets holds the table's columns and a few capped sample

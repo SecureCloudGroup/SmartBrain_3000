@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, tzinfo
 from urllib.parse import urlsplit
 
-from .. import ni_polite, ni_recipe, pagegraph
+from .. import ni_polite, ni_recipe
 
 MAX_FETCHES = 8
 MAX_SEARCHES = 3
@@ -23,7 +23,7 @@ MAX_SAMPLES = 8
 _MAX_URLS = 200
 _MAX_QUERIES = 4
 _BAD_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".lan", ".home", ".corp")
-ORIGINS = ("library", "search", "preview", "composed")
+ORIGINS = ("library", "search", "preview")
 PROPOSE_TOOLS = frozenset({"propose_card", "propose_compare"})   # the tools that end a run with a proposal
 MAX_REPLAYS = 3         # repeats of an identical call answered from memory without a turn
 MAX_MEMO = 32           # remembered call results
@@ -53,25 +53,6 @@ def normal_url(url: str) -> str:
     host = (parts.hostname or "").lower()
     port = f":{parts.port}" if parts.port else ""
     return f"{parts.scheme.lower()}://{host}{port}{parts.path}" + (f"?{parts.query}" if parts.query else "")
-
-
-# file hosts whose first path segment is an owner (a bucket, a user) who can serve anything there: one owner's address
-# never reaches another's. A security boundary in the spirit of the public-suffix list, for the shared hosts that split
-# owners by path instead of by name
-_PATH_TENANT_HOSTS = ("s3.amazonaws.com", "storage.googleapis.com", "githubusercontent.com")
-
-
-def _path_tenanted(host: str) -> bool:
-    """Does ``host`` split its owners by path (``s3.amazonaws.com/<bucket>``, regional S3 hosts included)?"""
-    assert isinstance(host, str), "host must be text"
-    regional_s3 = host.startswith("s3.") and host.endswith(".amazonaws.com")
-    return regional_s3 or any(host == h or host.endswith("." + h) for h in _PATH_TENANT_HOSTS)
-
-
-def _owner(path: str) -> str:
-    """The first segment of a path (the owner on a path-tenanted host)."""
-    assert isinstance(path, str), "path must be text"
-    return path.lstrip("/").split("/", 1)[0].lower()
 
 
 def host_refusal(url: str) -> str | None:
@@ -107,7 +88,6 @@ class ResearchCtx:
     zone: tzinfo = UTC
     preview_url: str | None = None
     window: str | None = None   # the ask's forward window token (``now``, ``today``...), for the page-reading gate
-    names: tuple = ()           # the intent's validated names (whole words of the ask), for the named check
     max_turns: int = ni_recipe.MAX_TURNS
     max_fetches: int = MAX_FETCHES
     max_searches: int = MAX_SEARCHES
@@ -220,54 +200,21 @@ class ResearchCtx:
                 self.record(r["url"], "search", title=one_line(r.get("title") or "", 120), query=query)
 
     def origin(self, url: str) -> tuple[str | None, str]:
-        """``(origin, reason)``: how ``url`` may be fetched (``library`` | ``search`` | ``preview`` | ``composed``) or
-        ``(None, why not)``. An address a trusted channel handed over, exactly; or, on a web run, an https address the
-        model worked out on the same site as an address web_search returned (``composed``, T 2026-10-24): never a
-        host of its own choosing."""
+        """``(origin, reason)``: how ``url`` may be fetched (``library`` | ``search`` | ``preview``) or ``(None, why
+        not)``. Only an address a trusted channel handed over, exactly: the model never composes one, so no path,
+        query or host of its own choosing can carry data out."""
         assert isinstance(self.urls, dict), "a url table"
         assert isinstance(url, str), "url must be text"
         bad = host_refusal(url)
         if bad:
             return None, bad
         key = normal_url(url)
-        found = self._origin_of(key) or self._composed(key)
+        found = self._origin_of(key)
         if found is None:
-            return None, ("not a Library row, a search result or the previewed endpoint, nor an https address on a site "
-                          "a search returned" if "composed" in self.allowed_origins else
-                          "not exactly a Library row, a search result or the previewed endpoint")
+            return None, "not exactly a Library row, a search result or the previewed endpoint"
         if found not in self.allowed_origins:
             return None, "this run reads SmartBrain Library sources only"
         return found, ""
-
-    def _composed(self, key: str) -> str | None:
-        """``composed`` when the normalised ``key`` is an https address on the site of an address web_search returned,
-        recorded so its card says how it was found; else None. The site is the result's own host (a leading ``www.``
-        dropped) and the hosts under it, so ``api.github.com`` is reachable from a ``github.com`` result but one tenant
-        of a shared host (``alice.example.app``) never reaches another; on a shared-hosting platform
-        (``pagegraph.shared_hosting``, cloud storage) only the result's own host, and on a host whose paths belong to
-        different owners (cloud storage, raw file hosts) the owner's first path segment must match too. Only on a run that allows it
-        (the web tier), never in the clear, never past the URL table's bound."""
-        assert isinstance(key, str), "key must be text"
-        assert isinstance(self.urls, dict), "a url table"
-        if "composed" not in self.allowed_origins or not key.startswith("https://") or len(self.urls) >= _MAX_URLS:
-            return None
-        want = urlsplit(key)
-        host = (want.hostname or "").lower()
-        for found, entry in list(self.urls.items())[:_MAX_URLS]:  # bounded: the URL table
-            if entry.get("kind") != "search":
-                continue
-            got = urlsplit(found)
-            near = (got.hostname or "").lower()
-            site = near.removeprefix("www.")
-            if not site or not (host in (near, site) or host.endswith("." + site)):
-                continue
-            if host != near and (_path_tenanted(near) or pagegraph.shared_hosting(near)):
-                continue  # on a shared platform a name beside or under the result's host is another owner's
-            if _path_tenanted(host) and _owner(want.path) != _owner(got.path):
-                continue
-            self.urls[key] = {"kind": "composed"}
-            return "composed"
-        return None
 
     def _origin_of(self, key: str) -> str | None:
         """How the normalised ``key`` was found, ignoring which origins this run allows."""

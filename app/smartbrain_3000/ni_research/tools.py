@@ -24,7 +24,6 @@ from .. import (
     pagegraph,
 )
 from ..netguard import FetchError
-from ..ni_verify import named
 from ..ni_verify.classes import shadow_reasons
 from ..ni_verify.rows import SourceInfo, read_result
 from .ctx import (
@@ -56,8 +55,7 @@ _STRUCTURED = frozenset({"json", "csv", "feed", "xml"})
 _TABLE = ni.TABLE_FORMAT   # the sample format of a web page's data table (page reading)
 _MANY_KINDS = frozenset({"latest_items", "ranking"})
 _VERIFY_CLASSES = {"window": "window", "threshold": "threshold", "compare": "compare", "scope": "place"}
-_ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint",
-               "composed": "an address worked out on a site a search found"}
+_ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint"}
 
 
 def _done(ctx: ResearchCtx, tool: str, arg: object, result: dict) -> dict:
@@ -226,7 +224,7 @@ def library_search(ctx: ResearchCtx, query: str) -> dict:
         blocked = bool(row.get("needs_key") or row.get("needs_contact"))
         ctx.record(row["url"], "library", format=row.get("format"), scope=row.get("scope"),
                    title=one_line(row.get("title") or "", 120), blocked=blocked, query=query.strip(),
-                   page=row.get("page"), provider=one_line(row.get("provider") or "", 80))
+                   page=row.get("page"))
         found.append({"title": one_line(row.get("title") or "", 120), "provider": one_line(row.get("provider") or "", 80),
                       "url": row["url"], "format": row.get("format"), "scope": row.get("scope"),
                       "tier": row.get("tier"), "needs_access": blocked})
@@ -281,35 +279,23 @@ def _bounded(node: object, depth: int = 0) -> object:
     return node if isinstance(node, (bool, int, float)) or node is None else clean_text(str(node), 60)
 
 
-def _owned(ctx: ResearchCtx) -> list[str]:
-    """What the place and compare classes own of the ask's names: its places, the things it compares and the places
-    research resolved (``resolver:text`` entries), so the named class never asks for them twice."""
-    assert isinstance(ctx.entities, list), "entities must be a list"
-    resolved = [str(e).split(":", 1)[-1] for e in ctx.entities[:6]]
-    return [*(str(p) for p in ctx.question.get("places") or []), *(str(e) for e in ctx.question.get("entities") or []),
-            *resolved]
-
-
-# the origins whose publisher no one has vouched for: what the open web handed over. A Library row was reviewed for
-# what it is about, and the Library's own lookup already matches the subjects an ask names; judging it again by the
-# words it served refused 50 right or partial cards for 1 wrong-publisher one (census ni-named1, tuning set,
-# 2026-10-24: a team asked for by id, a league feed, an intent name that was a common noun)
-_NAMED_ORIGINS = frozenset({"search", "composed"})
-
-
-def _named(ctx: ResearchCtx, url: str, info: dict, served: object) -> list[str]:
-    """Class 5 (named): the ask's names must be carried by what a source the open web handed over served or how a
-    trusted channel named it (its address, its search result title and provider), never by the draft's own words."""
+def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]:
+    """The ni_verify classes (window, threshold, compare, scope) plus an honest-empty check, as recipe checks."""
     assert isinstance(info, dict), "source info"
-    assert isinstance(url, str), "an address"
-    if info.get("kind") not in _NAMED_ORIGINS:
-        return []
-    phrases = named.phrases(ctx.request, [n for n in ctx.names if isinstance(n, str)], _owned(ctx))
-    if not phrases:
-        return []
-    text = served if isinstance(served, str) else json.dumps(served, default=str, ensure_ascii=False)
-    identity = [url, str(info.get("title") or ""), str(info.get("provider") or ""), str(info.get("page") or "")]
-    return named.check_named(phrases, text, identity)
+    assert isinstance(outputs, dict), "outputs must be a dict"
+    texts = [str(v) for v in outputs.values()] + [ctx.request, str(ctx.question.get("subject") or "")]
+    result = read_result(outputs, texts, ctx.zone)
+    source = SourceInfo(name=pagegraph.registrable_domain(urlsplit(url).hostname or ""), url=url,
+                        scope=info.get("scope"))
+    found = shadow_reasons(ctx.request, result, source, ctx.now, ctx.zone)
+    # S7: the compare check reads the card's own rows, never the ask's words (the ask always names every thing):
+    # each asked thing must appear in a row with a value of its own
+    wanted = list(ctx.question.get("entities") or []) or list(ni_compare.asked(ctx.request))
+    found["compare"] = ni_compare.reasons(wanted, outputs)
+    checks = [{"check": check, "ok": not found.get(cls), "reason": one_line("; ".join(found.get(cls) or []), 120)}
+              for cls, check in _VERIFY_CLASSES.items()]
+    empty = not any(v not in (None, "", [], {}) for v in outputs.values())
+    return [*checks, {"check": "empty", "ok": not empty, "reason": "every output is empty" if empty else ""}]
 
 
 _ADDRESS_DAY_RE = re.compile(r"(?<!\d)(20\d\d)[-/.]?(0[1-9]|1[0-2])[-/.]?(0[1-9]|[12]\d|3[01])(?!\d)")
@@ -339,33 +325,14 @@ def _fixed_moment(url: str, now) -> str | None:
     return None
 
 
-def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict, served: object = None) -> list[dict]:
-    """The ni_verify classes (window, threshold, compare, scope) plus an honest-empty check, as recipe checks, and,
-    with what the source ``served`` (a build, not a refresh: a sealed address keeps its publisher and its words), the
-    named class as the ``subject`` check and the address's own ``stable`` check (it fixes no date near today)."""
-    assert isinstance(info, dict), "source info"
-    assert isinstance(outputs, dict), "outputs must be a dict"
-    texts = [str(v) for v in outputs.values()] + [ctx.request, str(ctx.question.get("subject") or "")]
-    result = read_result(outputs, texts, ctx.zone)
-    source = SourceInfo(name=pagegraph.registrable_domain(urlsplit(url).hostname or ""), url=url,
-                        scope=info.get("scope"))
-    found = shadow_reasons(ctx.request, result, source, ctx.now, ctx.zone)
-    # S7: the compare check reads the card's own rows, never the ask's words (the ask always names every thing):
-    # each asked thing must appear in a row with a value of its own
-    wanted = list(ctx.question.get("entities") or []) or list(ni_compare.asked(ctx.request))
-    found["compare"] = ni_compare.reasons(wanted, outputs)
-    checks = [{"check": check, "ok": not found.get(cls), "reason": one_line("; ".join(found.get(cls) or []), 120)}
-              for cls, check in _VERIFY_CLASSES.items()]
-    empty = not any(v not in (None, "", [], {}) for v in outputs.values())
-    checks.append({"check": "empty", "ok": not empty, "reason": "every output is empty" if empty else ""})
-    if served is not None:
-        missing = _named(ctx, url, info, served)
-        checks.append({"check": "subject", "ok": not missing, "reason": one_line("; ".join(missing), 160)})
-        fixed = _fixed_moment(url, ctx.now)
-        checks.append({"check": "stable", "ok": fixed is None, "reason": "" if fixed is None else one_line(
-            f"the address fixes the date {fixed}, so a kept card would show that day forever: use an address that is "
-            "always current", 160)})
-    return checks
+def _stable(urls: list[str], now) -> dict:
+    """The ``stable`` recipe check for a build: no source address fixes a day near now. Build only; the refresh
+    re-check (``checks_for``) never runs it, as a sealed address cannot change."""
+    assert isinstance(urls, list) and urls, "the build's source addresses"
+    fixed = next((f for f in (_fixed_moment(u, now) for u in urls[:8]) if f), None)
+    return {"check": "stable", "ok": fixed is None, "reason": "" if fixed is None else one_line(
+        f"the address fixes the date {fixed}, so a kept card would show that day forever: use an address that is "
+        "always current", 160)}
 
 
 def checks_for(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]:
@@ -480,7 +447,7 @@ def _run(ctx: ResearchCtx, draft: object) -> dict:
         return error("pipeline_failed", f"{exc.kind}: {exc.detail}" + _miss_hint(exc, spec["pipeline"], given),
                      limit=MAX_SPEC_DETAIL)
     info = ctx.urls.get(key) or {}
-    checks = _checks(ctx, outputs, source["url"], info, served=sample["parsed"])
+    checks = [*_checks(ctx, outputs, source["url"], info), _stable([source["url"]], ctx.now)]
     if sample["format"] == _TABLE:
         checks.append(_page_check(ctx, sample, outputs))
     preview = _bounded(outputs)
@@ -806,7 +773,8 @@ def propose_compare(ctx: ResearchCtx, compare: object) -> dict:
     built, err = _compare_spec(ctx, things, values, fmt, label, unit)
     if built is None:
         return _done(ctx, "propose_compare", "compare", err)
-    checks = _checks(ctx, built["outputs"], things[0]["url"], ctx.urls.get(things[0]["url"]) or {})
+    checks = [*_checks(ctx, built["outputs"], things[0]["url"], ctx.urls.get(things[0]["url"]) or {}),
+              _stable([t["url"] for t in things], ctx.now)]
     if any(not c["ok"] for c in checks):
         reasons = [f"{c['check']}: {c['reason']}" for c in checks if not c["ok"]]
         return _done(ctx, "propose_compare", "compare", {**error("verify_failed", "; ".join(reasons)), "reasons": reasons})

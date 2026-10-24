@@ -36,9 +36,7 @@ _SEARCH: Callable[[str, int], dict] | None = None
 RESEARCH_TIMEOUT_S = 120.0
 RESEARCH_MAX_TOKENS = 4096
 ORIGINS_LIBRARY = frozenset({"library"})
-ORIGINS_WEB = frozenset({"library", "search", "preview", "composed"})
-# a web consent sealed before its wording named composed addresses keeps the exact-address reach it was given under
-ORIGINS_WEB_EXACT = ORIGINS_WEB - {"composed"}
+ORIGINS_WEB = frozenset({"library", "search", "preview"})
 
 
 def set_research_chat(chat: Callable | None, *, cloud: str | None = None, local: str | None = None,
@@ -229,14 +227,6 @@ def plan_for(store: ni.NIStore, item_id: str, record: dict, web: bool | None = N
                          web=policy.web_enabled(store.conn) if web is None else bool(web), consent_web=consent_web)
 
 
-def _web_origins(store: ni.NIStore, item_id: str, record: dict) -> frozenset:
-    """The origins a web run may read: composed addresses only under a consent whose wording named them."""
-    assert isinstance(record, dict), "a record"
-    composed = bool(_SEAM["consented"]) or ni_flow._model_consent_web_of(store, item_id, record,
-                                                                          "_model_consent_compose")
-    return ORIGINS_WEB if composed else ORIGINS_WEB_EXACT
-
-
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict | None:
     """Research before the honest stop. The landed (held) card, the consent question, or (a run that ended without a
     card) the declined card, as the flow record; None when research is off, unavailable, or the card was cancelled
@@ -258,10 +248,8 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
     question = question_from_intent(request, intent)
     # a compare is searched one thing at a time: the intent's one place must not steer every search
     hint = {**ni_flow._library_hint(intent), **({"place": None} if question["entities"] else {})}
-    names = tuple(n for n in intent.get("names") or [] if isinstance(n, str))[:8]   # validated whole words of the ask
-    origins = _web_origins(store, item_id, record) if web else ORIGINS_LIBRARY
-    ctx = ResearchCtx(request=request, question=question, now=now, window=_window_of(request, intent), names=names,
-                      zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=origins,
+    ctx = ResearchCtx(request=request, question=question, now=now, window=_window_of(request, intent),
+                      zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=ORIGINS_WEB if web else ORIGINS_LIBRARY,
                       searcher=_searcher() if web else None, library=_Library(lib, hint, set(record.get("_declined") or [])))
     ni_flow._transition(store, item_id, record.get("state") or "source", error=record.get("error"),
                         note=f"researching ({plan.mode}) for a Library source" if not web
@@ -318,7 +306,7 @@ def _park(store: ni.NIStore, item: dict, ctx: ResearchCtx, proposal: dict, reaso
     if normal_url(url) in _sources_of(spec):
         return False
     new["repair_policy"] = spec.get("repair_policy") or new["repair_policy"]
-    for key in ("_model_consent", *ni_flow._CONSENT_SCOPES, "_born"):  # bounded: what a card keeps across a new source
+    for key in ("_model_consent", "_model_consent_web", "_born"):  # bounded: what the card keeps across a new source
         if spec.get(key) is not None:
             new[key] = spec[key]
     new["_built_from"] = ni_flow._built_from_of(store, item["id"], "research", url,

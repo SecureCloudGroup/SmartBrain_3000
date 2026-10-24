@@ -37,15 +37,6 @@ to know when a release changes behavior.
 
 ### Added
 
-- **Research can read a site's own data address once a search finds the site.** Many public sources (a site's JSON
-  API or feed) never show up in search as a direct link, so research used to give up on them. With your consent, it
-  may now work out an https address on the site of a search result (that result's host, or a host under it such as
-  `api.` beside `www.`) and read it, under the same robots.txt rules, per-site limits and checks as any web source;
-  it never reaches another site, and an address that fixes today's date is refused. Such a card says it came from
-  "an address worked out on a site a search found" and is held for your Keep like every web card. **The consent
-  question now says this, including that words of your question can reach that one site inside the address**; a
-  card whose consent was given before keeps reading only addresses a search or the Library returned exactly, until
-  you allow the new wording.
 - **Research reads data tables on ordinary web pages.** When no data file answers an ask, the researcher can now
   read a web page's `<table>`, by its column names, and build a card from its rows; before, every page it found
   came back as "not data" and the searches were wasted. It reads table cells only, never the prose around them,
@@ -139,12 +130,9 @@ to know when a release changes behavior.
 
 ### Fixed
 
-- **A card researched on the web now comes from the source you named.** Asking for "AP top story" could
-  give you a card built from another outlet's feed. When your ask names a publisher, an agency or a subject,
-  the researcher now only offers a card from a source found on the web if that source is the one named, by its
-  address, its listed name or what it serves, and otherwise keeps looking or says it couldn't find one. SmartBrain
-  Library sources are not judged this way: they were reviewed for what they cover. It also no longer offers a card whose
-  address has today's date written into it, which would have kept showing that day after you kept it.
+- **A researched card no longer keeps showing the day it was built.** A card found by research could have
+  today's date written into its address ("earthquakes from last week to today"), so once you kept it, it kept
+  showing that same week. Research now only offers a card whose address is always current.
 - **A new card no longer gives up on a source because SmartBrain was spacing out its own requests.**
   SmartBrain sends a site at most five requests at once, then one every 30 seconds. A card being built
   treated that self-imposed wait as the source failing, so after a few cards on one site (several weather
