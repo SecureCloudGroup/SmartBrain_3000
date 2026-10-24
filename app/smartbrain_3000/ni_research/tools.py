@@ -56,7 +56,7 @@ _TABLE = ni.TABLE_FORMAT   # the sample format of a web page's data table (page 
 _MANY_KINDS = frozenset({"latest_items", "ranking"})
 _VERIFY_CLASSES = {"window": "window", "threshold": "threshold", "compare": "compare", "scope": "place"}
 _ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint",
-               "kept": "a source you kept before"}
+               "kept": "a source you kept before", "seed": "a source SmartBrain checked"}
 
 
 def _done(ctx: ResearchCtx, tool: str, arg: object, result: dict) -> dict:

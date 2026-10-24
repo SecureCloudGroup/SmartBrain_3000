@@ -139,8 +139,8 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     tier = (item["spec"].get("recipe") or {}).get("tier")
     web = tier not in (None, "curated")  # a researched card from the open web
     research = "page" if tier == "page_reading" else "dataset" if web else "library"   # a page's table is a page
-    block = ({"from": {"page": "page", "auto": "library", "research": research, "kept": research}.get(
-                  built_from.get("path"), "dataset"),
+    froms = {"page": "page", "auto": "library", "seed": "library", "research": research, "kept": research}
+    block = ({"from": froms.get(built_from.get("path"), "dataset"),
               "host": str(built_from.get("host") or ""), "title": str(built_from.get("title") or "")}
              if ni.awaits_yes(item) else None)
     if block is not None and _used_access(item["spec"].get("source")):
@@ -573,8 +573,8 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
                                 presentation_id=body.presentation_id if body.ok else None)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
-    ni_measure.record_best_effort(store, before, kept=body.ok)   # P4: the live measure counts every first verdict
-    if body.ok and held and (before["spec"].get("_built_from") or {}).get("path") in ("auto", "research", "kept"):
+    ni_measure.record_best_effort(store, before, kept=body.ok)   # P4: the live measure counts each verdict the card accepts
+    if body.ok and held and (before["spec"].get("_built_from") or {}).get("path") in ("auto", "research", "kept", "seed"):
         request.app.state.audit.append(  # Keep: the user accepts SmartBrain's own pick; recurring begins
             "user", "ni_keep", "reviewed", "executed", True,
             args_summary=tools.summarize({"item_id": item_id, "host": (before["spec"].get("_built_from") or {}).get("host")}))

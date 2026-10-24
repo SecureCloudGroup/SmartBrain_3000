@@ -67,9 +67,10 @@ include = ["smartbrain_3000*"]
 # browser-component manifests (§35) — without them no engine can be installed or verified;
 # browsers/walls/obscura.sb is the macOS wall's measured Seatbelt profile (hash-pinned).
 # ni_query/pool.jsonl is the query layer's few-shot pool (the 22 measured DEV examples, §36):
-# the flow's query call retrieves its k = 3 examples from it.
+# the flow's query call retrieves its k = 3 examples from it. ni_seed.json is the bundled seed of sources checked by
+# hand (release P5): without it a new user's asks fall through to the Library and research.
 smartbrain_3000 = ["web/**/*", "ni_forms/assets/**/*", "ni_forms/tokens.json",
-                   "browsers/engines/*.json", "browsers/walls/obscura.sb", "ni_query/pool.jsonl"]
+                   "browsers/engines/*.json", "browsers/walls/obscura.sb", "ni_query/pool.jsonl", "ni_seed.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

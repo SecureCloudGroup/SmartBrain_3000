@@ -27,9 +27,10 @@ MAX_CHECKS = 20          # day-7 stamps per scheduler pass
 VERDICTS = ("kept", "dismissed")
 DAY7 = ("live", "failing", "paused", "gone")
 # How the card was built, in the plan's words, from its sealed path: the Library (an auto-pick, a Library row's
-# declared answers), a source the user kept before, research, or a link the user pasted (a page or a mapped dataset).
-SOURCES: dict[str, str] = {"auto": "library", "declared": "library", "kept": "own", "research": "research",
-                           "page": "paste", "mapping": "paste"}
+# declared answers, the bundled seed), a source the user kept before, research, or a link the user pasted (a page or
+# a mapped dataset).
+SOURCES: dict[str, str] = {"auto": "library", "declared": "library", "seed": "library", "kept": "own",
+                           "research": "research", "page": "paste", "mapping": "paste"}
 SOURCE_ORDER = ("library", "own", "research", "paste", "other")
 _LOCK = threading.Lock()
 

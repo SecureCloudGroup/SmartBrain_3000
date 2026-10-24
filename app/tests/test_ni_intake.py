@@ -263,11 +263,11 @@ def test_one_kept_source_that_faults_never_hides_the_next(lib, monkeypatch) -> N
     ni_intake._write(store, [*library_index.LocalSources(store).list(), row])
     real, tried = ni_intake._try, []
 
-    def _try(store_, item_id, request, intent, question, row_, entry_, n):
+    def _try(store_, item_id, request, intent, question, row_, entry_, n, seed=False):
         tried.append(row_["access"]["url_template"])
         if n == 1:
             raise KeyError("draft")
-        return real(store_, item_id, request, intent, question, row_, entry_, n)
+        return real(store_, item_id, request, intent, question, row_, entry_, n, seed=seed)
 
     monkeypatch.setattr(ni_intake, "_try", _try)
     Net(monkeypatch, {URL: QUAKES})

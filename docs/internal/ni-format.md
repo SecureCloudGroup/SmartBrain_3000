@@ -874,6 +874,19 @@ and does not happen while `ni_research_web` is off. A fault in intake, or a row 
 is skipped and the ask goes on to the Library. A fetch error counts a miss (3 in a row forget the entry), and No on a
 held card drops the entries at its address that match its question (`ni_intake.forget`).
 
+**The bundled seed (release P5).** `app/smartbrain_3000/ni_seed.json` (`{version: 1, made, rows}`, package data)
+holds rows in the same kept shape (id `seed-<hash>`, `origin.by: seed`) that SmartBrain built on its own runs and a
+person checked by hand before they shipped. `tools/ni-seed.py run` runs the seed asks (`tools/ni-seed-asks.txt`, never
+the held-out set) through the real flow on the operator's machine and lists every card research built with its
+reading; `export` writes only the ones marked right, one row per address (`ni_intake.seed_row`). `reuse` reads the
+seed after the user's own rows, skipping an address the user holds or declined, by the same match and the same
+checks, with the `seed` origin (`why: a source SmartBrain checked`, audited `ni_seed_pick`); the card lands held for
+Keep with `_built_from.path: seed`, which the live measure counts with the Library. Keep writes it into the user's
+own sources like any kept card. No on it, or 3 failed reads in a row, turns that entry off for this user only: the
+sealed reserved slot `seed` holds `{off: [<address>#<question hash>], misses}`. The file is read once per process
+and never written at runtime; a row, entry or file this version cannot read, or a draft the researcher's tools would
+not replay, is skipped.
+
 ## 31. The user's own key and contact email
 
 A Library source whose parameter fills `from: vault_key` yields its address without the key plus `needs_key
@@ -994,10 +1007,10 @@ a path other than a Library source's declared answers is held until the user kee
 - **Seal.** `_finalize` seals `_built_from: {path, host, title}` (closed, `ni._validate_built_from`). `path` is
   `declared` (a Library source's declared answers), `auto` (the same build picked by the auto-pick), `page`
   (an `http_page` card), `mapping` (a pasted or harvested JSON link, a Fix, a remap), `research` (a
-  researcher's recipe) or `kept` (a source the user kept before, §30). `host` is the fetched host; `title` is the page's own title, else the picked row's.
+  researcher's recipe) or `kept` (a source the user kept before, §30) or `seed` (a bundled seed source, §30). `host` is the fetched host; `title` is the page's own title, else the picked row's.
   Export strips it and packs refuse it.
 - **Held.** `ni.awaits_yes(item)`: state `commissioning`, `_built_from.path` in the open set (`page`, `mapping`,
-  `auto`, `research`, `kept`) and no `_c2_ok`. A held card lands `commissioning` like any other and differs only in
+  `auto`, `research`, `kept`, `seed`) and no `_c2_ok`. A held card lands `commissioning` like any other and differs only in
   that the due query skips it (no cadence fetch before Keep), and the board shows the reading the flow found
   (`preview`, or a manual run's ok `latest`) with `awaiting_yes {from: library|page|dataset, host, title,
   used_key?}`. Nothing sets `_c2_ok` except `POST /validate ok=true`; the scheduler, runs, repairs, export,
@@ -1488,7 +1501,7 @@ locally and replaces the gold list as the release measure (the held-out set stay
   rows seven days old, from the card as it stands: `live`, `paused`, `gone` (deleted) or `failing` (any other
   state). A row is stamped once.
 - **View.** `GET /api/ni/measure` (desktop only) returns `{since, by_source, total, rows}`. `by_source` groups by how
-  the card was built: `library` (`declared`, `auto`), `own` (`kept`), `research`, `paste` (`page`, `mapping`) and
+  the card was built: `library` (`declared`, `auto`, `seed`), `own` (`kept`), `research`, `paste` (`page`, `mapping`) and
   `other`; each count is `{kept, dismissed, waiting, live, failing, paused, gone}`, where `waiting` is a kept card
   not yet seven days old. **Settings → Status** shows one line per source, and its **Export** saves this JSON for the eval.
 - **Local only.** Nothing in the measure is sent anywhere, and the Library outbox never reads it.
