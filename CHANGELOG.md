@@ -27,7 +27,9 @@ to know when a release changes behavior.
   source answers this yet") with a paste box and a **Keep looking** button, instead of starting research by
   itself. Keep looking researches now (with the model consent the card asks for), then again after 1, 2 and 4 days
   and weekly, under the same daily research limit as background re-research, and at once with no model whenever
-  you keep a new source. It stops after 14 days, when a source is found, or when you tap **Stop looking**.
+  you keep a new source. It stops after 14 days, when a source is found, or when you tap **Stop looking**. A
+  look that cannot start because two other cards are building waits for the next free slot. With research
+  switched off, the card says no source answers and does not offer Keep looking.
 - **Every new Neural Interface card now builds with the new flow, and the old build flow is gone.** A new card
   tries the best SmartBrain Library source by itself, falling through to the next when a source fails its
   checks, shows the real card as a preview, and does not read the source again or refresh it until you tap

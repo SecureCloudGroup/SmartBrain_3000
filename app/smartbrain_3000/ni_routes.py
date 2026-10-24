@@ -1452,6 +1452,8 @@ def keep_looking(request: Request, item_id: str) -> dict:
     card's model consent), then on a backoff and whenever you keep a new source, for up to 14 days."""
     _require_desktop_local(request)
     store, record = _offered(request, item_id, "keep_looking")
+    if not ni_standing.lookable(record):  # the card changed since its actions were read
+        raise HTTPException(status_code=409, detail="this card does not offer that now")
     started = ni_standing.start(store, item_id, record)
     request.app.state.audit.append(
         "user", "ni_keep_looking", "reviewed", "executed", True,

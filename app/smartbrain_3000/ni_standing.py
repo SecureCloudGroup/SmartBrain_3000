@@ -8,6 +8,10 @@ comes (1, 2, 4, then every 7 days, each research run under the shared daily ceil
 and a source the user keeps (``ni_intake.remember``) makes every open order due at once as a free run: kept and
 Library sources only, no model. A run that finds a source lands the card held for Keep, as any research card. An
 order that finds nothing for ``LOOK_DAYS`` closes, and the card keeps its decline and links.
+
+A run starts only with a free worker slot, and nothing is written or charged before that is known: an order whose
+run cannot start now stays open, unchanged, and the next pass tries again. An order that can never run (its start
+time is unreadable, its request is gone, research is off) closes rather than staying open without the user.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from . import ni, ni_flow, ni_master, ni_refresh
+from . import ni, ni_flow, ni_master, ni_refresh, ni_research_flow
 
 log = logging.getLogger(__name__)
 
@@ -52,9 +56,7 @@ def _after(runs: int, now: datetime) -> str:
 
 def lookable(record: dict) -> bool:
     """Can this declined record become a standing order? Only a decline that looking longer could answer."""
-    assert isinstance(record, dict), "a record"
-    return (record.get("state") == "declined"
-            and ni_master.decline_view(record)["reason"] in ni_master.LOOKABLE)
+    return ni_master.lookable(record)
 
 
 def _reseed(store: ni.NIStore, item_id: str, record: dict, looking: dict, note: str) -> dict | None:
@@ -65,15 +67,31 @@ def _reseed(store: ni.NIStore, item_id: str, record: dict, looking: dict, note: 
     if not request:
         return None
     state = "source" if isinstance(record.get("intent"), dict) else "intent"
-    fresh = ni_flow._fresh_record({**record, "_looking": looking}, request, state, note, keep_named=True)
+    fresh = {**ni_flow._fresh_record(record, request, state, note, keep_named=True), "_looking": looking}
     ni_flow._flow_write(store, item_id, fresh, revive=True)
     return fresh
 
 
+def _put_back(store: ni.NIStore, item_id: str, record: dict, looking: dict | None) -> None:
+    """The declined record as it was, with ``looking`` as its order: a run that could not start changes nothing
+    else (the refused start had sealed ``failed(busy)`` over the reseeded record)."""
+    assert record.get("state") == "declined", "a declined record"
+    ni_flow._flow_write(store, item_id, {**record, "_looking": looking}, revive=True)
+
+
 def _rerun(store: ni.NIStore, item_id: str, record: dict, looking: dict, note: str) -> bool:
-    """Run the card's sealed request again, in the background, with ``looking`` as its order."""
+    """Run the card's sealed request again, in the background, with ``looking`` as its order. Only with a free
+    worker slot; a start refused anyway (the slot went between the check and the start) puts the declined record
+    back as it was, so the order stays open and the next pass runs it."""
+    if not ni_flow.has_slot(item_id):
+        return False
     fresh = _reseed(store, item_id, record, looking, note)
-    return fresh is not None and ni_flow.start_flow_worker(store, item_id, source_url=fresh.get("source_url"))
+    if fresh is None:
+        return False
+    if ni_flow.start_flow_worker(store, item_id, source_url=fresh.get("source_url")):
+        return True
+    _put_back(store, item_id, record, record.get("_looking"))
+    return False
 
 
 def seal(store: ni.NIStore, item_id: str, record: dict) -> dict | None:
@@ -88,9 +106,17 @@ def seal(store: ni.NIStore, item_id: str, record: dict) -> dict | None:
 
 
 def start(store: ni.NIStore, item_id: str, record: dict) -> bool:
-    """Keep looking: seal the order and look now, in the background. Returns whether the build started."""
-    fresh = seal(store, item_id, record)
-    return fresh is not None and ni_flow.start_flow_worker(store, item_id, source_url=fresh.get("source_url"))
+    """Keep looking: seal the order and look now, in the background. Returns whether the look started. With no
+    worker slot free the order is sealed on the declined card as a first run due now (``runs`` 0, the user's own
+    tap, so not charged to the daily ceiling), and the scheduler's next pass runs it."""
+    assert lookable(record), "a decline looking could answer"
+    if ni_flow.has_slot(item_id):
+        fresh = seal(store, item_id, record)
+        if fresh is not None and ni_flow.start_flow_worker(store, item_id, source_url=fresh.get("source_url")):
+            return True
+    now = _iso(_now())
+    _put_back(store, item_id, record, {"since": now, "runs": 0, "next_at": now})
+    return False
 
 
 def _declined(store: ni.NIStore, item_id: str, record: dict, looking: dict | None, note: str | None = None) -> None:
@@ -131,30 +157,40 @@ def rematch(store: ni.NIStore) -> int:
 
 
 def run_due(store: ni.NIStore) -> str | None:
-    """One scheduler pass: close the orders past ``LOOK_DAYS`` and run the first one due (a free re-match first).
-    Returns the id of the card started, or None. A research run waits for the shared daily ceiling."""
+    """One scheduler pass: close the orders past ``LOOK_DAYS`` (or that can never run) and run the first one due (a
+    free re-match first). Returns the id of the card started, or None. A scheduled research run waits for a free
+    worker slot and the shared daily ceiling, and is charged only once both are there."""
     assert store is not None, "store required"
     now = _now()
     for item, record in _open(store):  # bounded: MAX_OPEN
         looking = record["_looking"]
-        since = _when(looking.get("since")) or now
-        if now - since > timedelta(days=LOOK_DAYS):
+        since = _when(looking.get("since"))
+        if since is None or now - since > timedelta(days=LOOK_DAYS):   # an unreadable start closes: none runs forever
             _declined(store, item["id"], record, None, f"stopped looking after {LOOK_DAYS} days without finding a source")
+            continue
+        if not str(record.get("request") or ""):
+            _declined(store, item["id"], record, None, "stopped looking: this card lost its request")
             continue
         if ni_flow.is_working(item["id"]):
             continue
+        if not ni_flow.has_slot(item["id"]):
+            return None   # every worker slot is busy: nothing is written or charged, and the next pass tries again
         if looking.get("free_at") and isinstance(record.get("intent"), dict):   # free: no model reads the ask again
             order = {k: v for k, v in looking.items() if k != "free_at"} | {"free": True}
-            if _rerun(store, item["id"], record, order, "a new source of yours: looking again (no model)"):
-                return item["id"]
-            continue
+            started = _rerun(store, item["id"], record, order, "a new source of yours: looking again (no model)")
+            return item["id"] if started else None
         due = _when(looking.get("next_at"))
         if due is None or due > now:
             continue
-        if not ni_refresh.take_budget(store.conn, now):
+        if not ni_research_flow.can_research(store, item["id"], record):
+            _declined(store, item["id"], record, None, "stopped looking: research is off")
+            continue
+        count = looking.get("runs")
+        runs = count if isinstance(count, int) and count >= 0 else 1   # an unreadable count is a scheduled run
+        asks = ni_research_flow.plan_for(store, item["id"], record).mode == "ask"   # stops at the consent question
+        if runs >= 1 and not asks and not ni_refresh.take_budget(store.conn, now):
             return None   # the day's research is spent: every later order waits too
-        runs = int(looking.get("runs") or 0) + 1
-        order = {"since": looking["since"], "runs": runs, "next_at": _after(runs, now)}   # stamped before the run
-        if _rerun(store, item["id"], record, order, f"still looking: run {runs}"):
-            return item["id"]
+        order = {"since": looking["since"], "runs": runs + 1, "next_at": _after(runs + 1, now)}
+        started = _rerun(store, item["id"], record, order, f"still looking: run {runs + 1}")
+        return item["id"] if started else None
     return None

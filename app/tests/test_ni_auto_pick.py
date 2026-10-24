@@ -26,7 +26,7 @@ from test_ni_answers import (  # noqa: F401  (lib is a fixture)
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ni as nimod
-from smartbrain_3000 import ni_flow, ni_routes, tools
+from smartbrain_3000 import ni_flow, ni_research_flow, ni_routes, tools
 from smartbrain_3000.secrets import gen_master_key
 
 _QUAKE_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson"
@@ -89,10 +89,13 @@ def _model(prompt: str) -> str:
 _LOOKING = {"since": "2026-10-24T00:00:00+00:00", "runs": 1, "next_at": None}   # the user tapped Keep looking
 
 
-def _run(store, wrap, monkeypatch, fetch, *, search=None, request: str = _REQUEST, looking: bool = False
-         ) -> tuple[str, dict]:
+def _run(store, wrap, monkeypatch, fetch, *, search=None, request: str = _REQUEST, looking: bool = False,
+         research: bool = True) -> tuple[str, dict]:
     """The v2 external flow over ``wrap``'s rows. ``looking``: the card is a standing order (Keep looking), so a
-    stop with no buildable row goes on to research (off in tests) instead of ending ``no_ready_source`` at once."""
+    stop with no buildable row goes on to research (off in tests) instead of ending ``no_ready_source`` at once.
+    ``research``: a run could research (so a stop with nothing ready offers Keep looking); False reads the tier."""
+    if research:
+        monkeypatch.setattr(ni_research_flow, "can_research", lambda *_a: True)
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: wrap)
     monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", (lambda: search) if search else None)
     item_id = ni_flow.create_shell_item(store, request)
@@ -162,6 +165,16 @@ def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) 
     assert "progress" not in field and "cancel" not in field["actions"] and "delete" in field["actions"]
     assert field["state"] == "declined" and field["decline"]["headline"] == "I couldn't build a reliable card for this"
     assert len(field["decline"]["links"]) <= 3 and field["reopen"] == ["keep_looking", "retry", "pick_source"]
+
+
+def test_with_research_off_nothing_ready_never_offers_keep_looking(lib, monkeypatch) -> None:  # noqa: F811
+    store, fetched = _store(), []
+    wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL)])
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), research=False)  # no tier can research
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"
+    assert out["_decline_card"]["look"] is False  # looking longer could not change this answer
+    field = ni_flow.board_flow_field(store, item_id)
+    assert "keep_looking" not in field["actions"] and "keep_looking" not in field["reopen"]
 
 
 def test_a_keyless_row_is_tried_before_a_row_that_needs_a_key(lib, monkeypatch) -> None:  # noqa: F811

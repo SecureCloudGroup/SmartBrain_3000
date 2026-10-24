@@ -196,3 +196,82 @@ def test_keeping_a_card_marks_the_open_orders(lib, monkeypatch) -> None:  # noqa
                                  consented=True)
     assert out["state"] == "ready" and ni_intake.remember(store, store.get_item(first))
     assert marked == [store] and URL
+
+
+# --- a run that cannot start, and an order that can never run (review of #548) ----------------------------------------
+
+def _slots_full(monkeypatch) -> None:
+    monkeypatch.setattr(ni_flow, "_INFLIGHT", {"other-a", "other-b"})   # two builds hold both worker slots
+
+
+def test_with_every_slot_busy_a_due_order_waits_unchanged_and_nothing_is_charged(lib, monkeypatch) -> None:  # noqa: F811
+    store, item_id = _open_order(monkeypatch, lib, since=NOW.isoformat(), runs=1,
+                                 next_at=(NOW - timedelta(minutes=1)).isoformat())
+    before = ni_flow._flow_read(store, item_id)
+    monkeypatch.setattr(ni, "_clock", lambda: NOW)
+    monkeypatch.setattr(ni_refresh, "take_budget", lambda conn, now: (_ for _ in ()).throw(AssertionError("charged")))
+    _slots_full(monkeypatch)
+    assert ni_standing.run_due(store) is None
+    assert ni_flow._flow_read(store, item_id) == before, "the order is open, as it was: the next pass runs it"
+    monkeypatch.setattr(ni_flow, "_INFLIGHT", set())
+    started = _started(monkeypatch)
+    monkeypatch.setattr(ni_refresh, "take_budget", lambda conn, now: True)
+    assert ni_standing.run_due(store) == item_id and started == [item_id]
+
+
+def test_a_start_refused_after_the_check_puts_the_declined_card_back(lib, monkeypatch) -> None:  # noqa: F811
+    store, item_id = _open_order(monkeypatch, lib, since=NOW.isoformat(), runs=1,
+                                 next_at=(NOW - timedelta(minutes=1)).isoformat())
+    before = ni_flow._flow_read(store, item_id)
+    monkeypatch.setattr(ni, "_clock", lambda: NOW)
+    monkeypatch.setattr(ni_refresh, "take_budget", lambda conn, now: True)
+
+    def refused(store_, item_id_, **_kw) -> bool:   # the slot went between the check and the start
+        ni_flow._fail(store_, item_id_, "busy", "another flow worker is already handling this item; retry later")
+        return False
+    monkeypatch.setattr(ni_flow, "start_flow_worker", refused)
+    assert ni_standing.run_due(store) is None
+    after = ni_flow._flow_read(store, item_id)
+    assert after["state"] == "declined" and after["_looking"] == before["_looking"]
+    assert after["_decline_card"] == before["_decline_card"], "the decline and its links stay"
+
+
+def test_keep_looking_with_every_slot_busy_seals_a_first_look_the_next_pass_runs(client, lib, monkeypatch) -> None:  # noqa: F811
+    store, item_id, _out, _ = _declined(monkeypatch, lib, store=client.app.state.ni)
+    monkeypatch.setattr(ni, "_clock", lambda: NOW)
+    _slots_full(monkeypatch)
+    assert client.post(f"/api/ni/items/{item_id}/flow/keep-looking").json() == {"id": item_id, "started": False}
+    record = ni_flow._flow_read(store, item_id)
+    stamp = NOW.isoformat(timespec="seconds")
+    assert record["state"] == "declined" and record["_looking"] == {"since": stamp, "runs": 0, "next_at": stamp}
+    assert ni_flow.board_flow_field(store, item_id)["actions"] == ["stop_looking", "pick_source", "delete"]
+    monkeypatch.setattr(ni_flow, "_INFLIGHT", set())
+    started = _started(monkeypatch)
+    monkeypatch.setattr(ni_refresh, "take_budget", lambda conn, now: (_ for _ in ()).throw(AssertionError("charged")))
+    assert ni_standing.run_due(store) == item_id and started == [item_id], "the user's own tap is not charged"
+    looking = ni_flow._flow_read(store, item_id)["_looking"]
+    assert looking["runs"] == 1 and looking["since"] == stamp
+
+
+def test_an_order_that_can_never_run_closes(lib, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setattr(ni, "_clock", lambda: NOW)
+    monkeypatch.setattr(ni_refresh, "take_budget", lambda conn, now: (_ for _ in ()).throw(AssertionError("charged")))
+    started = _started(monkeypatch)
+    due = {"runs": 1, "next_at": (NOW - timedelta(minutes=1)).isoformat()}
+    unreadable = _open_order(monkeypatch, lib, since="last tuesday", **due)
+    lost = _open_order(monkeypatch, lib, since=NOW.isoformat(), **due)
+    ni_flow._flow_write(lost[0], lost[1], {**ni_flow._flow_read(*lost), "request": ""})
+    for store, item_id in (unreadable, lost):
+        assert ni_standing.run_due(store) is None and started == []
+        record = ni_flow._flow_read(store, item_id)
+        assert record["state"] == "declined" and record["_looking"] is None
+    store, item_id = _open_order(monkeypatch, lib, since=NOW.isoformat(), **due)
+    monkeypatch.setattr(ni_research_flow, "can_research", lambda *_a: False)   # research was switched off since
+    assert ni_standing.run_due(store) is None and started == []
+    assert ni_flow._flow_read(store, item_id)["_looking"] is None
+
+
+def test_free_marks_one_run_never_the_next_start(lib, monkeypatch) -> None:  # noqa: F811
+    store, item_id = _open_order(monkeypatch, lib, since=NOW.isoformat(), free=True)
+    fresh = ni_flow._fresh_record(ni_flow._flow_read(store, item_id), _ASK, "source", "no: looking again")
+    assert "free" not in fresh["_looking"] and fresh["_looking"]["since"] == NOW.isoformat()

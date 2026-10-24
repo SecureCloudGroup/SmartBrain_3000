@@ -230,13 +230,21 @@ def plan_for(store: ni.NIStore, item_id: str, record: dict, web: bool | None = N
                          web=policy.web_enabled(store.conn) if web is None else bool(web), consent_web=consent_web)
 
 
+def can_research(store: ni.NIStore, item_id: str, record: dict) -> bool:
+    """Could a run of this card research now: the Library is there and the tier is not off (an ``ask`` plan asks
+    for model consent first, which is the user's to give)?"""
+    assert store is not None and item_id, "args required"
+    return ni_flow._resolve_library() is not None and plan_for(store, item_id, record).mode != "off"
+
+
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links: list | None = None) -> dict | None:
     """Research before the honest stop, when the user asked for it. A card that is not a standing order (``_looking``,
     release P2: the user tapped Keep looking) ends at once as the ``no_ready_source`` decline with ``links``, which
-    offers Keep looking, so an ask answers in seconds. Otherwise the landed (held) card, the consent question, or (a
-    run that ended without a card) the declined card, as the flow record; None when research is off, unavailable, or
-    the card was cancelled (the caller then ends the ask itself). A run that could not finish (a fault) is the failed
-    card, retryable, never a declined one."""
+    offers Keep looking, so an ask answers in seconds; it does so only when a run could research (``can_research``),
+    so the offer is one the card can keep. Otherwise the landed (held) card, the consent question, or (a run that
+    ended without a card) the declined card, as the flow record; None when research is off, unavailable, or the card
+    was cancelled (the caller then ends the ask itself). A run that could not finish (a fault) is the failed card,
+    retryable, never a declined one."""
     assert isinstance(intent, dict) and request, "intent and request required"
     assert store is not None and item_id, "args required"
     record = ni_flow._flow_read(store, item_id) or {}
@@ -244,6 +252,8 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links:
         return None
     looking = record.get("_looking")
     if not isinstance(looking, dict):
+        if not can_research(store, item_id, record):
+            return None
         return ni_flow._end(store, item_id, "no_ready_source", "", links=links)
     lib = ni_flow._resolve_library()
     if lib is None or looking.get("free"):   # free: a $0 re-match after a new kept source, no model this run

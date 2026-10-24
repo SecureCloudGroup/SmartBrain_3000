@@ -6836,6 +6836,14 @@ def is_working(item_id: str) -> bool:
         return item_id in _INFLIGHT
 
 
+def has_slot(item_id: str) -> bool:
+    """True when a worker for ``item_id`` could start now: none holds it and the process-wide cap has room. A
+    background caller asks this before it rewrites a record, so a refused start never seals ``failed(busy)``."""
+    assert isinstance(item_id, str) and item_id, "id required"
+    with _INFLIGHT_LOCK:
+        return item_id not in _INFLIGHT and len(_INFLIGHT) < _MAX_CONCURRENT
+
+
 def board_flow_field(store: ni.NIStore, item_id: str, *, read_only: bool = False) -> dict | None:
     """Return the ``{state, error?}`` compact flow view for the board row.
 
@@ -7119,6 +7127,8 @@ def _fresh_record(record: dict, request: str, state: str, note: str, *, keep_nam
     for key in _CARD_ANSWERS:  # bounded: five keys
         if record.get(key) is not None:
             fresh[key] = record[key]
+    if isinstance(fresh.get("_looking"), dict):  # "free" marks one run (a $0 re-match), never the next start
+        fresh["_looking"] = {k: v for k, v in fresh["_looking"].items() if k != "free"}
     if named:
         fresh["_pasted"] = named
     return fresh
