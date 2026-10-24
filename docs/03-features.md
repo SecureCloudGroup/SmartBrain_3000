@@ -408,8 +408,13 @@ How a card comes to life:
    line on why and up to three links to pages that may help. Those links open in
    a new tab; SmartBrain shows nothing it read off them. Pasting your own link
    always works. Whatever is built is frozen: nothing can quietly change it
-   later without asking you again. Browse the Library, or add your own sources,
-   from the **Library** link on the Neural page.
+   later without asking you again. When you **Keep** a card that research built
+   or that you made from a pasted link, its source joins your own sources, and
+   the next ask for the same thing builds from it in seconds, with no model and
+   no research (still shown as a preview for your Keep). A source you say No to
+   is not offered for that question again, and one that stops answering is
+   forgotten. Browse the Library, or add your own sources, from the **Library**
+   link on the Neural page.
 2. **Built from real data.** The engine samples the source and builds the
    pipeline and layout against what actually came back — the preview you see is
    real data, not an invention. If something looks off, say so on the card

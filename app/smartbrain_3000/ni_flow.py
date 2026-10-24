@@ -4023,14 +4023,26 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     """v2: no pick pause. Seal the Library rows keyless-first, then try them in turn (``_auto_continue``).
 
     Consent posture: the only fetch before the user's Keep is of an installed Library row that declares
-    its answers, through the same netguard path as a tap; a row needing a key or contact email goes last
-    and asks for it on the card. Nothing recurs until Keep (the card is held, ``_built_from.path`` auto).
+    its answers, or of a source the user kept before for this question (``ni_intake.reuse``: robots.txt, the
+    per-site budget, off with the open web), each through the same netguard path as a tap and audited with its
+    host; a row needing a key or contact email goes last and asks for it on the card. Nothing recurs until Keep
+    (the card is held, ``_built_from.path`` auto).
     No buildable row: research, then the declined card (``_end``; the Library's link pages ride it; ruling 2026-10-05)."""
     assert store is not None and item_id, "store + id required"
     from . import ni_compare_flow  # local: it builds on this module's helpers
     compared = ni_compare_flow.try_compare(store, item_id, request, intent, do_fetch)  # S7: an ask that compares things
     if compared is not None:
         return compared
+    # P1: a source the user kept for this question goes first (local import: intake builds on the research glue,
+    # which imports this module). Intake is a convenience: a fault in it goes on to the Library, never fails the ask.
+    from . import ni_intake
+    try:
+        kept = ni_intake.reuse(store, item_id, request, intent)
+    except Exception as exc:  # a store fault, a row an older version wrote
+        log.warning("ni_flow: reusing a kept source faulted: %s", type(exc).__name__)
+        kept = None
+    if kept is not None:
+        return kept
     rows = _without_declined(store, item_id, _library_candidates(request, intent, limit=_AUTO_ROWS))
     buildable = _buildable(rows)
     if not buildable:
@@ -4123,15 +4135,17 @@ def set_audit_sink(provider: Callable[[], object] | None) -> None:
     _AUDIT_PROVIDER = provider
 
 
-def _audit_auto_pick(item_id: str, host: str, mark: dict) -> bool:
-    """Record one v2 auto-picked Library fetch (``ni_auto_pick``, with the host). Best effort: a locked or
-    unwired log never stops the build. True when a row was written."""
+def _audit_auto_pick(item_id: str, host: str, mark: dict, tool: str = "ni_auto_pick") -> bool:
+    """Record one fetch the user did not tap for on this card: a v2 auto-picked Library row (``ni_auto_pick``) or
+    a source they kept before (``ni_kept_pick``), with the host. Best effort: a locked or unwired log never stops
+    the build. True when a row was written."""
     assert item_id and isinstance(mark, dict), "item id + mark required"
+    assert tool in ("ni_auto_pick", "ni_kept_pick"), "a known fetch"
     try:
         log_ = _AUDIT_PROVIDER() if _AUDIT_PROVIDER is not None else None
         if log_ is None:
             return False
-        log_.append("assistant", "ni_auto_pick", "reviewed", "auto", True,
+        log_.append("assistant", tool, "reviewed", "auto", True,
                     args_summary=json.dumps({"item_id": item_id, "host": host[:120], "try": mark.get("n")}))
         return True
     except Exception as exc:  # the audit row is a record, never a gate
