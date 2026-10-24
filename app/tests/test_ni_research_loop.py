@@ -242,7 +242,7 @@ def test_the_real_cloud_path_records_usage_with_cache_tokens(monkeypatch) -> Non
     assert data["usage"]["prompt_tokens"] == 900 and sent["model"] == "anthropic/claude-sonnet-5-5"
     row = store.conn.execute("SELECT model, prompt_tokens, completion_tokens FROM usage_log").fetchall()
     assert row == [("anthropic/claude-sonnet-5-5", 900, 7)]
-    assert any(a[0].startswith("usage recorded purpose=%s") and a[1] == "ni_research" and a[-1] == 800 for a in seen)
+    assert any(a[0].startswith("usage recorded purpose=%s") and a[1] == "ni.research" and a[-1] == 800 for a in seen)
 
 
 # --- model tiers and consent ----------------------------------------------------------------------------------

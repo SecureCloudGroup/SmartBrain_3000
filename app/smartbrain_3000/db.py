@@ -466,6 +466,12 @@ _MIGRATIONS: tuple[tuple[int, str | Callable[[], str]], ...] = (
         42,
         "ALTER TABLE ni_items ADD COLUMN IF NOT EXISTS next_clock TIMESTAMP;",
     ),
+    # 43 — the caller's purpose label on each usage row (e.g. "ni.build", "ni.refresh"), so the cost view can
+    # show which model each Neural Interface step ran on. Plaintext code-authored labels; NULL for older rows.
+    (
+        43,
+        "ALTER TABLE usage_log ADD COLUMN IF NOT EXISTS purpose TEXT;",
+    ),
 )
 
 

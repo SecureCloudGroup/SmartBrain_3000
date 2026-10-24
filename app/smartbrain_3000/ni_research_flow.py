@@ -22,7 +22,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from . import gateway, ni, ni_compare, ni_flow, ni_recipe, ni_refresh
+from . import gateway, ni, ni_compare, ni_flow, ni_models, ni_recipe, ni_refresh
 from .ni_research import loop, policy, tools
 from .ni_research.ctx import ResearchCtx, normal_url, one_line
 
@@ -192,9 +192,9 @@ def _chat_for(store: ni.NIStore, model: str, local: bool) -> Callable[[list, lis
         return lambda messages, tools_: _CHAT(model, messages, tools_)
     if local:
         return lambda messages, tools_: gateway.chat_recorded(
-            store.conn, "ni_research", messages, model, timeout=ni_flow._FLOW_MODEL_TIMEOUT_S, temperature=0.0)
+            store.conn, ni_models.PURPOSES["research"], messages, model, timeout=ni_flow._FLOW_MODEL_TIMEOUT_S, temperature=0.0)
     return lambda messages, tools_: gateway.chat_with_tools_recorded(
-        store.conn, "ni_research", messages, model, tools_, timeout=RESEARCH_TIMEOUT_S, max_tokens=RESEARCH_MAX_TOKENS)
+        store.conn, ni_models.PURPOSES["research"], messages, model, tools_, timeout=RESEARCH_TIMEOUT_S, max_tokens=RESEARCH_MAX_TOKENS)
 
 
 def _audit(item_id: str, plan: policy.Plan) -> bool:

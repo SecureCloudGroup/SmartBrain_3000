@@ -46,6 +46,7 @@ from . import (
     ni_brief,
     ni_compare,
     ni_master,
+    ni_models,
     ni_polite,
     ni_query,
     page_verify,
@@ -3660,6 +3661,7 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
             [{"role": "user", "content": prompt}], model,
             timeout=_FLOW_MODEL_TIMEOUT_S, temperature=temp,
         )
+        ni_models.record(store.conn, "build", model, data)
         return _gateway_mod.completion_text(data)
 
     sealed_fmt = str(record.get("_format") or "").strip().lower() or None
@@ -3700,7 +3702,8 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
     do_fetch = fetcher if fetcher is not None else default_fetcher
     resolved_model = ni_route_model if ni_route_model else _resolve_flow_model(store)
     if not resolved_model:
-        return _fail(store, item_id, "intent", "no chat/ni/agent model route configured")
+        return _fail(store, item_id, "intent", "no model routed for building cards (Settings > Models: "
+                                               "Neural Interface steps, or the ni / chat / agent routes)")
     if not ni_route_model and not _gateway_mod.is_local(resolved_model):
         # Ruling 2 (2026-09-24): building reads the user's words and samples of the
         # source, so a model off this computer needs THIS card's consent.
@@ -3720,7 +3723,9 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
         assert isinstance(messages, list) and messages, "messages required"
         assert isinstance(resolved_model, str) and resolved_model, "a resolved model"
         temp = None if _claudecli_mod.is_claudecode(resolved_model) else 0.0
-        data = _gateway_mod.chat(list(messages), resolved_model, timeout=_FLOW_MODEL_TIMEOUT_S, temperature=temp)
+        data = _gateway_mod.chat(_cache_system(list(messages)), resolved_model, timeout=_FLOW_MODEL_TIMEOUT_S,
+                                 temperature=temp)
+        ni_models.record(store.conn, "build", resolved_model, data)
         return _gateway_mod.completion_text(data)
 
     # a caller's own prompt seam (``gateway_call``) has no messages transport: the query layer then flattens
@@ -3753,15 +3758,22 @@ def _countdown_ask(request: str) -> bool:
     return bool(_COUNTDOWN_RE.search(request or ""))
 
 
+def _cache_system(messages: list) -> list:
+    """The query layer's turn with its system prompt (the rules: the same for every ask on a source) marked as the
+    prompt-cache prefix. The gateway turns the mark into ``cache_control`` on Anthropic routes and joins it back
+    into the same plain string everywhere else, so non-Anthropic bytes are unchanged."""
+    assert isinstance(messages, list), "messages required"
+    if not messages or messages[0].get("role") != "system" or not isinstance(messages[0].get("content"), str):
+        return messages
+    head = {**messages[0], "content": [{"type": "text", "text": messages[0]["content"], "cache": True}]}
+    return [head, *messages[1:]]
+
+
 def _local_flow_model(store: ni.NIStore) -> str | None:
     """The first LOCAL model on the ni / chat / agent routes, or None."""
     assert store is not None, "store required"
     routes = _gateway_mod.load_routes(store.conn) if hasattr(_gateway_mod, "load_routes") else {}
-    for capability in ("ni", "chat", "agent"):  # bounded to 3
-        model = _gateway_mod.resolve_model(capability, routes)
-        if model and _gateway_mod.is_local(model):
-            return model
-    return None
+    return ni_models.local_model(store.conn, routes, _gateway_mod)
 
 
 def _model_consent_of(store: ni.NIStore, item_id: str, record: dict) -> str | None:
@@ -3844,27 +3856,28 @@ def warn_retired_flow_flag() -> None:
 
 
 def _resolve_flow_model(store: ni.NIStore) -> str | None:
-    """C1 (audit 2026-09-13): live model resolution mirroring ``ni._fetch_model``.
+    """The model a build runs on: the ``build`` step's choice (``ni_models``). ``cloud`` / ``local``: that side's
+    model, None when none is routed (the build stops and says so). ``auto``: the cloud model when one is routed, else
+    the older route order (C1, audit 2026-09-13), so an install without an Anthropic route keeps building as before:
 
-    Preference order:
-      1. ``gateway.resolve_model("ni", routes)`` — the item-level route.
-      2. Fall back to the ``chat`` capability, then ``agent``.
-      3. §29 local-preferred: if the ``ni``-resolved model is CLOUD but a local
-         model is configured on ``chat`` / ``agent``, prefer the local one.
-         Flow model calls are frequent + cheap (two bounded turns per card);
-         a local-first posture keeps the operator's data on-box when a local
-         provider is present. Cloud stays fine when it's all the user has.
+      1. an EXPLICIT ``ni`` route — the operator's word, even when it is a cloud model (P0, 2026-09-16);
+      2. else a LOCAL ``chat`` / ``agent`` model (§29 local-preferred);
+      3. else whatever ``chat`` / ``agent`` is.
+
+    A cloud answer still needs the card's consent (``run_flow``).
     """
     assert store is not None, "store required"
     routes: dict = {}
     if hasattr(_gateway_mod, "load_routes"):
         routes = _gateway_mod.load_routes(store.conn)
+    choice = ni_models.choose(store.conn, "build", routes, _gateway_mod)
+    if choice.setting != "auto":  # a forced side is honoured exactly: nothing routed there stops the build
+        return choice.model
+    if choice.cloud:
+        return choice.cloud
     ni_model = _gateway_mod.resolve_model("ni", routes)
     chat_model = _gateway_mod.resolve_model("chat", routes)
     agent_model = _gateway_mod.resolve_model("agent", routes)
-    # P0 (2026-09-16): an EXPLICIT ni route is the operator's word — honor it
-    # even when it is a cloud model (the local-preference below applies only
-    # to the fallback path, where no explicit choice exists).
     if ni_model:
         return ni_model
     for candidate in (chat_model, agent_model):  # bounded to 2 (P10 #2)

@@ -4956,8 +4956,12 @@ class _RoutedGateway:
         return data["text"]
 
 
-def _model_fetch(gw: _RoutedGateway, *, spec_extra: dict | None = None, use_local: bool = False) -> None:
+def _model_fetch(gw: _RoutedGateway, *, spec_extra: dict | None = None, use_local: bool = False,
+                 steps: dict | None = None) -> None:
     store, _conn, _key = _store()
+    if steps:
+        from smartbrain_3000 import ni_models
+        ni_models.save(store.conn, steps)
     spec = {**_fetching_scene_spec(), **(spec_extra or {})}
     iid = store.add_item(spec, _fetching_preview())
     if use_local:
@@ -4977,10 +4981,34 @@ def test_fetch_model_cloud_chat_with_local_agent_refreshes_locally() -> None:
     assert gw.used == ["ollama/small"]
 
 
-def test_fetch_model_consented_cloud_card_stays_on_cloud() -> None:
+def test_fetch_model_consented_cloud_card_refreshes_locally_by_default() -> None:
+    """Refresh is repeated work: on ``auto`` it runs on the local model even when the card allowed a cloud one."""
     gw = _RoutedGateway({"ni": "openai/gpt", "agent": "ollama/small"})
     _model_fetch(gw, spec_extra={"_model_consent": "openai/gpt"})
-    assert gw.used == ["openai/gpt"]
+    assert gw.used == ["ollama/small"]
+
+
+def test_fetch_model_consented_cloud_card_stays_on_cloud_when_refresh_is_cloud() -> None:
+    gw = _RoutedGateway({"ni": "anthropic/claude", "agent": "ollama/small"})
+    _model_fetch(gw, spec_extra={"_model_consent": "anthropic/claude"}, steps={"refresh": "cloud"})
+    assert gw.used == ["anthropic/claude"]
+
+
+def test_fetch_model_refresh_cloud_uses_the_step_cloud_model_not_the_ni_route() -> None:
+    """refresh=cloud runs on the cloud model Settings names, never the ni route; none routed stops the refresh."""
+    gw = _RoutedGateway({"ni": "openai/gpt", "chat": "anthropic/claude", "agent": "ollama/small"})
+    _model_fetch(gw, spec_extra={"_model_consent": "anthropic/claude"}, steps={"refresh": "cloud"})
+    assert gw.used == ["anthropic/claude"]
+    gw = _RoutedGateway({"ni": "openai/gpt", "agent": "ollama/small"})
+    with pytest.raises(nimod.NIError) as err:
+        _model_fetch(gw, spec_extra={"_model_consent": "openai/gpt"}, steps={"refresh": "cloud"})
+    assert err.value.kind == "model_unrouted" and gw.used == []
+
+
+def test_fetch_model_refresh_cloud_without_consent_still_falls_back_to_local() -> None:
+    gw = _RoutedGateway({"ni": "anthropic/claude", "agent": "ollama/small"})
+    _model_fetch(gw, steps={"refresh": "cloud"})
+    assert gw.used == ["ollama/small"]
 
 
 def test_fetch_model_cloud_without_consent_or_local_raises() -> None:
