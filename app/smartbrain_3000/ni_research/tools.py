@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import copy
 import json
-from urllib.parse import urlsplit
+import re
+from datetime import date, timedelta
+from urllib.parse import unquote, urlsplit
 
 from .. import (
     ni,
@@ -300,10 +302,37 @@ def _named(ctx: ResearchCtx, url: str, info: dict, served: object) -> list[str]:
     return named.check_named(phrases, text, identity)
 
 
+_ADDRESS_DAY_RE = re.compile(r"(?<!\d)(20\d\d)[-/.]?(0[1-9]|1[0-2])[-/.]?(0[1-9]|[12]\d|3[01])(?!\d)")
+_ADDRESS_EPOCH_RE = re.compile(r"(?<!\d)(1[6-9]\d{8})(\d{3})?(?!\d)")
+_FIXED_NEAR = timedelta(days=7)   # a moment this close to now in an address is "today" written down, not an asked day
+
+
+def _fixed_moment(url: str, now) -> str | None:
+    """The date or timestamp within a week of ``now`` that ``url`` writes into its path or query, else None. A card
+    reads the same sealed address every day, so an address that fixes "today" (or "the past week", from-to) shows that
+    day forever; a day far from now is a day the ask named and may stay."""
+    assert isinstance(url, str), "an address"
+    assert now.tzinfo is not None, "now must be aware"
+    parts = urlsplit(url)
+    text = unquote(f"{parts.path}?{parts.query}")[:2000]
+    today = now.date()
+    for m in _ADDRESS_DAY_RE.finditer(text):  # bounded by the capped address
+        try:
+            day = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            continue
+        if abs(day - today) <= _FIXED_NEAR:
+            return m.group(0)
+    for m in _ADDRESS_EPOCH_RE.finditer(text):  # epoch seconds (or milliseconds)
+        if abs(int(m.group(1)) - now.timestamp()) <= _FIXED_NEAR.total_seconds():
+            return m.group(0)
+    return None
+
+
 def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict, served: object = None) -> list[dict]:
     """The ni_verify classes (window, threshold, compare, scope) plus an honest-empty check, as recipe checks, and,
-    with what the source ``served`` (a build, not a refresh: an address does not change its publisher), the named
-    class as the ``subject`` check."""
+    with what the source ``served`` (a build, not a refresh: a sealed address keeps its publisher and its words), the
+    named class as the ``subject`` check and the address's own ``stable`` check (it fixes no date near today)."""
     assert isinstance(info, dict), "source info"
     assert isinstance(outputs, dict), "outputs must be a dict"
     texts = [str(v) for v in outputs.values()] + [ctx.request, str(ctx.question.get("subject") or "")]
@@ -322,6 +351,10 @@ def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict, served: objec
     if served is not None:
         missing = _named(ctx, url, info, served)
         checks.append({"check": "subject", "ok": not missing, "reason": one_line("; ".join(missing), 160)})
+        fixed = _fixed_moment(url, ctx.now)
+        checks.append({"check": "stable", "ok": fixed is None, "reason": "" if fixed is None else one_line(
+            f"the address fixes the date {fixed}, so a kept card would show that day forever: use an address that is "
+            "always current", 160)})
     return checks
 
 

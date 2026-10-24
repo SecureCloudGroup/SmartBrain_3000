@@ -764,7 +764,7 @@ this card's consent.
 - `off`: no researcher.
 
 A proposal is checked by code (`ni_research.tools._checks`: place, window, threshold, compare, empty,
-`subject` for page readings and for the ask's names), may be refused twice, and lands as a held card with `_built_from.path:
+`subject` for page readings and for the ask's names, `stable` for an address that fixes a day), may be refused twice, and lands as a held card with `_built_from.path:
 research` and a sealed `recipe = {question, sources, constraints, tier, verification?, provenance?, research?}`
 (`ni_recipe`). `tier` is `curated`, `verified_endpoint` or `page_reading`. Researcher drafts may carry no `llm`
 stage, `$secret`, model or MCP source, or model-chosen interval. The interval is stamped by code from
@@ -780,6 +780,10 @@ carried by one of its words, a word of the source's name that begins with it ("n
 name, or three or more capitalised words served). The draft's own title and outputs never count. It runs when a
 draft is tried or proposed; the refresh re-check never runs it (the address is sealed, so its publisher cannot
 change).
+
+The `stable` check refuses a research address whose path or query writes a date or epoch timestamp within a week of
+now (`starttime=<last week>&endtime=<today>`): the card reads that sealed address every day, so it would show that day
+forever. A day further away is one the ask named and stays. Like `subject` it runs at build only.
 
 ### Consent
 
