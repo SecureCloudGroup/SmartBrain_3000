@@ -6,7 +6,9 @@ control. Here's the model in plain terms, including the real world limits.
 ## What protects your data
 
 - **Local-first.** Everything runs on your machine — the app, the model gateway, and your
-  database — with no account server and no telemetry. The only SmartBrain-operated service
+  database — with no account server and no telemetry. (**Settings → Status** counts how each
+  Neural Interface card was built, kept and still working, on this computer only: a random card
+  id and how it was built, nothing sent.) The only SmartBrain-operated service
   is the optional, content-blind signaling node for remote phone access — off by default
   (see below).
 - **Verified at install.** The desktop app assembles SmartBrain from a pinned Python
@@ -79,9 +81,10 @@ not. Being precise about the line matters more than claiming everything:
   and local self-repair run on a local model or not at all.) **Building** a card
   reads your request and samples of its source, so if that routing points off this
   computer, the new card asks you first: build with that model (this card only; a
-  later Fix or refine doesn't ask again) or with your local model. When no
-  ready-made Library source answers, SmartBrain can **research** one, and the same question
-  then says what leaves this computer if you allow a cloud model: your exact question, the
+  later Fix or refine doesn't ask again) or with your local model. When no source you kept
+  and no ready-made Library source answers, the card offers **Keep looking**; only when you tap
+  it does SmartBrain **research** one, and the same question then says what leaves this
+  computer if you allow a cloud model: your exact question, the
   titles and details of Library sources, the web search results it gets back (titles,
   snippets and addresses), digests of up to 8 pages or data files it reads, today's date,
   your time zone and the place you named, and the research steps so far. Never your email,
@@ -140,7 +143,8 @@ not. Being precise about the line matters more than claiming everything:
   Unsubscribing stops the checking.
 - **Neural Interface cards (only the sources you approved).** Each card fetches its
   own source — the exact address you saw frozen on the approval card — at the cadence
-  you set, through the same network guard as feeds. Nothing else is contacted: a
+  you set (at most every 15 minutes for someone else's site), through the same network
+  guard as feeds. Nothing else is contacted: a
   card watching a page fetches that page; a card watching an image fetches that
   image; cards built on your schedules, your knowledge, or other cards fetch nothing
   at all. A card with a credential sends it only to the host it was entered for,
@@ -185,15 +189,21 @@ not. Being precise about the line matters more than claiming everything:
   before its first fetch. The key is sealed on your machine, bound to that
   provider's host, and sent only to that host over HTTPS; a redirect elsewhere is
   refused. The email is sealed too and is sent only to sources with that rule, in
-  the request's User-Agent header.
-- **Card creation reads one Library source before you Keep.** While a new card is
-  built, SmartBrain fetches the Library source it picked (the same network guard as
-  any fetch, an address filled from your own words, and your key only if you typed
-  one) and shows the result as a preview. It reads nothing more and does not
-  refresh the card until you tap **Keep**. When no Library source answers and you
-  have not allowed a model for research, nothing is searched or fetched: the card
-  says so and lists links. What research sends, if you allow it, is described under
-  "Cloud model calls" above.
+  the request's User-Agent header. A link you paste can need your key too (tick **It
+  needs my key**, or the link asks when it answers "unauthorized"), and so can a source
+  research finds: the card asks whether the key goes in the address or a header, then for
+  the key. It is sealed, sent only to that one address over HTTPS and never to a model. A
+  second card on the same site offers **Use the key I gave for** that site and sends it
+  only when you tap, because different owners can share one site.
+- **Card creation reads one source before you Keep.** While a new card is built,
+  SmartBrain fetches the source it picked, in this order: one you kept before, one
+  SmartBrain checked and ships with the app, or a Library source. It uses the same
+  network guard as any fetch, an address filled from your own words, and your key only
+  if you typed one, and shows the result as a preview. It reads nothing more and does
+  not refresh the card until you tap **Keep**. When none of them answers, nothing is
+  searched or fetched: the card says *No ready source answers this yet* and offers a
+  paste box and **Keep looking**. What research sends, if you tap Keep looking and allow
+  it, is described under "Cloud model calls" above.
 - **The card template library (only if you connect one).** A connected library is
   checked at the URL you pinned about once a day (plus your manual "Check now").
   The check downloads the signed template pack; nothing about you or your cards is

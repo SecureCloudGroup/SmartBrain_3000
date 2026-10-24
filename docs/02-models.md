@@ -171,6 +171,7 @@ from your providers.
 | **Agent tasks (schedules)** | Scheduled runs and background turns. These call tools, so pick a model that reliably tool-calls. | **Same as Chat** |
 | **Embedding (semantic search)** | Turning your documents and queries into vectors for meaning search. Only embedding models are offered. | `ollama/nomic-embed-text:v1.5` |
 | **Document summaries** | The background summary tree that makes "summarize this" instant on large documents. | Same as Chat |
+| **Neural Interface** | The model Neural Interface cards use when they need one. Each step's own choice, under **Neural Interface steps** below, can override it. | Each step picks from your Chat and Agent routes, as below. |
 
 Chat is the root: the two slots that say *Same as Chat* really do follow it, so setting Chat
 alone is a complete configuration.

@@ -4,12 +4,13 @@ Everything here runs locally and is encrypted at rest. Here's what each area doe
 
 ## Where things live
 
-The sidebar holds nine areas — this is the whole app. On a phone the four you reach for
-most sit in the bottom bar (Chat, Knowledge, Info, Activity) and the rest are under **More**:
+The sidebar holds ten areas — this is the whole app. On a phone the four you reach for
+most sit in the bottom bar (Chat, Neural, Knowledge, Info) and the rest are under **More**:
 
 | Area | What it's for |
 | --- | --- |
 | **Chat** | Talk to the assistant. It can use tools; anything consequential waits for you. |
+| **Neural** | Cards that watch things for you: ask in plain words and SmartBrain builds a live card. See [Neural Interface](#neural-interface). |
 | **Knowledge** | Your documents and notes, plus the vaults that group them. |
 | **Planner** | Tasks, with due dates, priorities and recurrence. |
 | **Schedules** | Prompts that run on a timer. |
@@ -377,10 +378,10 @@ approval. Deleting a task is irreversible, so it asks every time.
 
 ## Neural Interface
 
-![Neural Interface — ask in plain words, say yes to the SmartBrain Library source it found, check the card it designs from the real data, and it goes live on your board; when no source answers, the card says so and offers links instead of guessing](assets/gifs/12-neural-interface.gif)
+![Neural Interface — ask in plain words, and the card builds itself from a source it found and shows the real data as a preview; tap Keep and it goes live on your board; when no source answers, the card says so and offers Keep looking instead of guessing](assets/gifs/12-neural-interface.gif)
 
 A dashboard of things you asked to watch. Type what you want into the box at
-the top of the **Neural** page — *"show me AAPL every 5 minutes"*, *"tide
+the top of the **Neural** page — *"show me AAPL every 15 minutes"*, *"tide
 times for Wallace Creek"* — and a deterministic build engine turns your words
 into a card: where the data comes from, how it's processed, and how it's laid
 out. The card appears immediately and builds in front of you; every later step
@@ -434,6 +435,20 @@ How a card comes to life:
    checked*. Keep makes it one of yours; No turns it off for you. Browse the
    Library, or add your own sources, from the **Library** link on the Neural
    page.
+
+   Two kinds of ask build a different card. **Compare** two to four things
+   (*"compare Nvidia and AMD stock prices"*, *"weather in Denver vs Salt Lake
+   City"*) and the card shows each one side by side with its own number, named
+   in your words; if it cannot read all of them it says *can't compare these
+   yet* rather than showing one. Ask for *"the latest news on X"* or *"a brief
+   on Y"* and you get a **brief card**: the source's own headlines (title, link,
+   time and where each came from), never written by a model. On a kept brief
+   you can turn on **Summary from your local model**, a short summary your own
+   model writes after each refresh, always labelled as such; a cloud model is
+   never used for it. Research can also build from a data table on an ordinary
+   web page: it reads the table's cells only, never the text around it, and the
+   card is marked as a page reading and finds its table again by its column
+   names.
 2. **Built from real data.** The engine samples the source and builds the
    pipeline and layout against what actually came back — the preview you see is
    real data, not an invention. If something looks off, say so on the card
@@ -455,8 +470,9 @@ Cards render from a fixed set of safe building blocks (text, numbers, bars,
 chips, lists) — fetched content is displayed as plain text, never as links,
 markup, or instructions. Sources are fetched with the same network guard as
 feeds; a locked vault stops everything. Cards refresh about every N minutes,
-never in real time — 1 minute is the floor, or 5 minutes for a card with a
-language-model step in its pipeline (below).
+never in real time. A card that reads someone else's site refreshes at most every
+15 minutes, whatever it was set to; a card on your own network can go down to 1
+minute, or 5 minutes with a language-model step in its pipeline (below).
 
 **Charts.** The engine can keep a rolling history per card — a few numeric
 series, a few hundred points each — and the card can draw it: a sparkline, a
@@ -485,7 +501,11 @@ card: a **number the model reports must literally appear in the page's text**
 card whose content passed through a model — this step, or a card whose source
 *is* a model instruction — wears an **Interpreted** chip, so you can always
 tell a model's reading from pure arithmetic. Cards with a language-model step
-refresh at most every 5 minutes.
+refresh at most every 5 minutes. A card whose source is a model instruction refreshes on
+the model **Settings → Model routing → Neural Interface steps** chooses for *Refreshing a
+model-answered card* (your local model by default). It calls a cloud model only if that card
+recorded your consent for that exact model. An older card of this kind without that consent
+stops and says it *needs your OK to use a model off this computer*: rebuild it to choose.
 
 **Self-repair.** When a card fails because the data's shape changed, a local
 model can propose new data mappings — it is structurally unable to touch the
@@ -677,9 +697,9 @@ all of them, including engines with no filter of their own (Tavily). There is
 no setting to turn this off.
 
 Searches happen when the assistant uses the web tools in a turn, and when a
-Neural Interface card you're creating finds no SmartBrain Library source that answers
-it and searches your own words for pages that may help (offered as links); see
-[Privacy & security](07-privacy-security.md) for exactly what leaves your machine.
+Neural Interface card researches a source after you tap **Keep looking** (up to 3
+searches, with the model consent the card asks for). Creating a card searches nothing by
+itself. See [Privacy & security](07-privacy-security.md) for exactly what leaves your machine.
 
 ## Self-improvement
 
@@ -715,7 +735,11 @@ with its calls, prompt and completion tokens, and estimated cost, plus a total. 
 comes from each provider's live figures. **Local models (Ollama, MLX) are free** and say
 `free` in the cost column.
 
-Usage appears here after you chat with a model. None of it leaves your machine — it's
+Below it, **Neural Interface by step** shows each Neural Interface step (building a card,
+researching a source, refreshing a model-answered card, brief summaries) with the model it
+ran on, its calls, tokens and cost.
+
+Usage appears here after you use a model. None of it leaves your machine — it's
 computed locally from your own token counts, and the only network call is a local fetch of
 the price list from the on-device gateway.
 
@@ -802,7 +826,9 @@ and [Voice](02-models.md#voice-dictation-and-spoken-replies).
 
 Which model serves each job — chat, the agent (schedules and background tasks; **Same as
 Chat** by default), embeddings for search — and **Model context length** per routed model.
-Details: [Which model does what](02-models.md#which-model-does-what-model-routing).
+**Neural Interface steps** picks Automatic, Cloud or Local for each step of a card's life.
+Details: [Which model does what](02-models.md#which-model-does-what-model-routing) and
+[Neural Interface steps](02-models.md#neural-interface-steps).
 
 ### Web search
 
