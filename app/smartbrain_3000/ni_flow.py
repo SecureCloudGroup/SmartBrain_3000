@@ -4027,7 +4027,8 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     per-site budget, off with the open web), each through the same netguard path as a tap and audited with its
     host; a row needing a key or contact email goes last and asks for it on the card. Nothing recurs until Keep
     (the card is held, ``_built_from.path`` auto).
-    No buildable row: research, then the declined card (``_end``; the Library's link pages ride it; ruling 2026-10-05)."""
+    No buildable row: the ``no_ready_source`` decline at once, which offers Keep looking; on a standing order
+    (``_looking``, release P2) research, then the declined card (``_end``; the Library's link pages ride it)."""
     assert store is not None and item_id, "store + id required"
     from . import ni_compare_flow  # local: it builds on this module's helpers
     compared = ni_compare_flow.try_compare(store, item_id, request, intent, do_fetch)  # S7: an ask that compares things
@@ -4047,7 +4048,9 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     buildable = _buildable(rows)
     if not buildable:
         from . import ni_research_flow  # local: the researcher imports this module
-        found = ni_research_flow.fallback(store, item_id, request, intent)
+        found = ni_research_flow.fallback(store, item_id, request, intent,
+                                          links=[{"title": r.get("title"), "url": r.get("page")} for r in rows
+                                                 if r.get("answers") is False])
         if found is not None:
             return found
         # research is off, unconsented or has no model route (a run that declined came back above as the declined
@@ -7100,7 +7103,7 @@ def start_remap(store: ni.NIStore, item_id: str, request: str, url: str) -> bool
 # What a fresh start from the sealed request keeps: the card's own answers (the addresses the user said No to, the
 # model consent and its scope, the local-model choice). Never a seal a previous build wrote: a Library pick, its clock
 # template, a tried row, the engine's own last address. Retry, No and Paste a link all start here (S10 review B1/M2).
-_CARD_ANSWERS = ("_declined", "_model_consent", "_model_consent_web", "_use_local")
+_CARD_ANSWERS = ("_declined", "_model_consent", "_model_consent_web", "_use_local", "_looking")
 
 
 def _fresh_record(record: dict, request: str, state: str, note: str, *, keep_named: bool = False,
@@ -7113,7 +7116,7 @@ def _fresh_record(record: dict, request: str, state: str, note: str, *, keep_nam
     named = record.get("_pasted") if keep_named and isinstance(record.get("_pasted"), str) else None
     intent = record.get("intent") if state != "intent" and isinstance(record.get("intent"), dict) else None
     fresh = _make_record(request, state, source_url=named, intent=intent, error=error, notes=[note[:_MAX_NOTE]])
-    for key in _CARD_ANSWERS:  # bounded: four keys
+    for key in _CARD_ANSWERS:  # bounded: five keys
         if record.get(key) is not None:
             fresh[key] = record[key]
     if named:

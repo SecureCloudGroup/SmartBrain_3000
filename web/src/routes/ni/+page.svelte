@@ -383,6 +383,29 @@
     }
   }
 
+  // Release P2: Keep looking turns a declined shell into a standing order; Stop looking closes it.
+  async function lookFlow(item: NiBoardItem, keep: boolean): Promise<void> {
+    console.assert(typeof item.id === "string", "lookFlow: id is string");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      if (keep) {
+        const out = await api.niFlowKeepLooking(item.id);
+        toast(out.started === false
+          ? "I'll keep looking — the first look starts as soon as a build slot frees up."
+          : "Looking for a source now. I'll keep looking for up to two weeks.");
+      } else {
+        await api.niFlowStopLooking(item.id);
+        toast("Stopped looking for a source.");
+      }
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "Couldn’t change the card." };
+    } finally {
+      busyId = null;
+    }
+  }
+
   async function retryFlow(item: NiBoardItem): Promise<void> {
     console.assert(typeof item.id === "string", "retryFlow: id is string");
     busyId = item.id;
@@ -1362,10 +1385,14 @@
                   canRefine={hasAction(item, "refine")}
                   canRetry={hasAction(item, "retry")}
                   canPick={hasAction(item, "pick_source")}
+                  canKeepLooking={hasAction(item, "keep_looking")}
+                  canStopLooking={hasAction(item, "stop_looking")}
                   onFix={() => fixItem(item)}
                   onRefine={() => openRefine(item)}
                   onRetry={() => retryFlow(item)}
                   onPick={() => reopenPick(item)}
+                  onKeepLooking={() => lookFlow(item, true)}
+                  onStopLooking={() => lookFlow(item, false)}
                 />
               {:else if item.flow.state === "failed" || item.flow.state === "unsupported"}
                 <!-- G1 single-writer law: the card renders the MASTER's reason

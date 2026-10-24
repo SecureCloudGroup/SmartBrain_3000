@@ -501,7 +501,7 @@ def drive_url(ask: str, source_url: str | None, call: Callable[[str, str], str])
     import duckdb
 
     from smartbrain_3000 import db as dbmod
-    from smartbrain_3000 import ni, ni_flow
+    from smartbrain_3000 import ni, ni_flow, ni_standing
     from smartbrain_3000.secrets import gen_master_key
     assert ask, "ask required"
     conn = duckdb.connect(":memory:")
@@ -513,6 +513,10 @@ def drive_url(ask: str, source_url: str | None, call: Callable[[str, str], str])
         item_id = ni_flow.create_shell_item(store, ask)
         rec = ni_flow.run_flow(store, item_id, gateway_call=call, ni_route_model="mlx/eval-local",
                                source_url=source_url)
+        if ni_standing.lookable(rec) and not rec.get("_looking"):  # the card offers Keep looking: tap it, as a person
+            ni_standing.seal(store, item_id, rec)
+            rec = ni_flow.run_flow(store, item_id, gateway_call=call, ni_route_model="mlx/eval-local",
+                                   source_url=source_url)
         state = str(rec.get("state") or "")
         out["notes"] = [str(n) for n in rec.get("notes") or []]
         out["detail"] = str(rec.get("error") or "")[:160]
@@ -597,7 +601,7 @@ def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) 
     import duckdb
 
     from smartbrain_3000 import db as dbmod
-    from smartbrain_3000 import ni, ni_flow
+    from smartbrain_3000 import ni, ni_flow, ni_standing
     from smartbrain_3000.secrets import gen_master_key
     assert ask and rows, "ask + library rows required"
     conn = duckdb.connect(":memory:")
@@ -609,6 +613,9 @@ def drive_research(ask: str, rows: list[dict], call: Callable[[str, str], str]) 
     try:
         item_id = ni_flow.create_shell_item(store, ask)
         rec = ni_flow.run_flow(store, item_id, gateway_call=call, ni_route_model=LOCAL_STAND_IN)
+        if ni_standing.lookable(rec) and not rec.get("_looking"):  # the card offers Keep looking: tap it, as a person
+            ni_standing.seal(store, item_id, rec)
+            rec = ni_flow.run_flow(store, item_id, gateway_call=call, ni_route_model=LOCAL_STAND_IN)
         state = str(rec.get("state") or "")
         out["notes"] = [str(n) for n in rec.get("notes") or []]
         out["detail"] = str(rec.get("error") or "")[:160]

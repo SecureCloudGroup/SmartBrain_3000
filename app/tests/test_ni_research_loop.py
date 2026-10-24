@@ -288,8 +288,13 @@ def _v2(monkeypatch):
                         lambda url, **kw: (_ for _ in ()).throw(AssertionError("no page fetch")))
 
 
-def _flow(monkeypatch, library, store=None, intent=None, ask=_ASK, seam=None, **seam_kw):
-    """Run the v2 external flow where the Library has only a source that declares no answers (nothing buildable)."""
+LOOKING = {"since": "2026-10-24T00:00:00+00:00", "runs": 1, "next_at": None}   # the user tapped Keep looking
+
+
+def _flow(monkeypatch, library, store=None, intent=None, ask=_ASK, seam=None, looking=True, **seam_kw):
+    """Run the v2 external flow where the Library has only a source that declares no answers (nothing buildable).
+    ``looking``: the card is a standing order (Keep looking, release P2), so research runs; without it the ask ends
+    at once as the ``no_ready_source`` decline."""
     store = store or _store()
     net = Net(monkeypatch, {URL: QUAKES})
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: library)
@@ -298,7 +303,7 @@ def _flow(monkeypatch, library, store=None, intent=None, ask=_ASK, seam=None, **
         ni_research_flow.set_research_chat(lambda model, messages, tools: seam(messages, tools) if tools else seam(messages, None),
                                            **seam_kw)
     item_id = ni_flow.create_shell_item(store, ask)
-    ni_flow._flow_write(store, item_id, ni_flow._make_record(ask, "intent"))
+    ni_flow._flow_write(store, item_id, {**ni_flow._make_record(ask, "intent"), **({"_looking": LOOKING} if looking else {})})
     out = ni_flow._run_external_flow(store, item_id, ask, {**_INTENT, **(intent or {})}, None,
                                      lambda p: '{"serves": true, "gaps": [], "wrong": []}',
                                      lambda u: (_ for _ in ()).throw(AssertionError("the auto-pick fetched")))
@@ -383,7 +388,7 @@ def test_local_closed_world_never_calls_the_cloud_and_never_uses_tools(lib, monk
     net = Net(monkeypatch, {URL: QUAKES})
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: _wrap(lib))
     item_id = ni_flow.create_shell_item(store, _ASK)
-    ni_flow._flow_write(store, item_id, ni_flow._make_record(_ASK, "intent"))
+    ni_flow._flow_write(store, item_id, {**ni_flow._make_record(_ASK, "intent"), "_looking": LOOKING})
     out = ni_flow._run_external_flow(store, item_id, _ASK, _INTENT, None, lambda p: "{}", lambda u: {})
     assert out["state"] == "ready" and [c["url"] for c in net.calls] == [URL]
     assert models == [("mlx/test-local", None)] * 2, "a pick and a fill, on the local model, with no tool offer"

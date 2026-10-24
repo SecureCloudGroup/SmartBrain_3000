@@ -9,8 +9,8 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 ActionKind = Literal[
     "activate", "activate_sites", "add_credential", "allow_model", "answer_date", "cancel", "delete",
-    "dismiss", "edit", "fill_param", "fix", "give_access", "keep", "pause", "pick_source", "refine", "resume",
-    "retry", "review_fix", "run", "use_local"
+    "dismiss", "edit", "fill_param", "fix", "give_access", "keep", "keep_looking", "pause", "pick_source",
+    "refine", "resume", "retry", "review_fix", "run", "stop_looking", "use_local"
 ]
 
 Author = Literal[
@@ -49,8 +49,8 @@ class DeclineLink(TypedDict):
     host: str
 
 DeclineReason = Literal[
-    "ask_unsupported", "compare_unbuildable", "no_answering_source", "research_gave_up", "source_cant_answer",
-    "verify_refused"
+    "ask_unsupported", "compare_unbuildable", "no_answering_source", "no_ready_source", "research_gave_up",
+    "source_cant_answer", "verify_refused"
 ]
 
 Dir = Literal[
@@ -76,12 +76,6 @@ class FlowBrowser(TypedDict):
     phase: str
     pct: int
 
-class FlowDecline(TypedDict):
-    reason: DeclineReason
-    headline: str
-    line: str
-    links: list[DeclineLink]
-
 class FlowDocsKey(TypedDict):
     docs_url: str
 
@@ -90,6 +84,17 @@ class FlowAccess(TypedDict):
     provider: str
     key: FlowDocsKey | None
     contact: bool
+
+class FlowLooking(TypedDict):
+    since: str
+    next_at: str | None
+
+class FlowDecline(TypedDict):
+    reason: DeclineReason
+    headline: str
+    line: str
+    links: list[DeclineLink]
+    looking: FlowLooking | None
 
 FlowQuestionKind = Literal[
     "add_key", "fill_params", "give_access", "model_consent", "pick_source", "supply_date", "validate"
@@ -177,7 +182,7 @@ RecipeWindow = TypedDict("RecipeWindow", {
 })
 
 ReopenKind = Literal[
-    "delete", "pick_source", "retry"
+    "delete", "keep_looking", "pick_source", "retry", "stop_looking"
 ]
 
 class RowDraft(TypedDict):

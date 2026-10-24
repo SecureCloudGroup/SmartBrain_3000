@@ -2,11 +2,13 @@
   // DeclinedCard — the honest end of an ask the system cannot answer reliably (plan G6: "a decline is
   // acceptable, a wrong card is the failure"). It says so plainly, gives the backend's one-line reason and up to
   // three links (read-only, opened in a new tab; nothing here builds or fetches), and offers the way back: run it
-  // again, paste a link to the data (a shell), or on a finished card Fix / Refine. The page owns the requests; this
-  // component owns what it shows and nothing else needs to be kept for it.
+  // again, paste a link to the data (a shell), keep looking for a source (a standing order) or stop, or on a
+  // finished card Fix / Refine. The page owns the requests; this component owns what it shows and nothing else
+  // needs to be kept for it.
   import Icon from "$lib/components/Icon.svelte";
   import type { FlowDecline } from "$lib/ni/types.gen";
   import { DECLINED_HEADLINE, declinedLinks } from "$lib/ni/flow";
+  import { relTime } from "$lib/ni/time";
 
   let {
     decline,
@@ -16,10 +18,14 @@
     canRefine = false,
     canRetry = false,
     canPick = false,
+    canKeepLooking = false,
+    canStopLooking = false,
     onFix,
     onRefine,
     onRetry,
     onPick,
+    onKeepLooking = () => {},
+    onStopLooking = () => {},
   }: {
     decline: FlowDecline;
     busy?: boolean;
@@ -29,10 +35,14 @@
     canRefine?: boolean;
     canRetry?: boolean;
     canPick?: boolean;
+    canKeepLooking?: boolean;
+    canStopLooking?: boolean;
     onFix: () => void;
     onRefine: () => void;
     onRetry: () => void;
     onPick: () => void;
+    onKeepLooking?: () => void;
+    onStopLooking?: () => void;
   } = $props();
 
   const links = $derived(declinedLinks(decline));
@@ -42,6 +52,10 @@
 <div class="dc" data-reason={decline.reason}>
   <p class="dc-head">{headline}</p>
   <p class="muted dc-line">{decline.line}</p>
+  {#if decline.looking}
+    <p class="dc-looking">Still looking (started {relTime(decline.looking.since)}). When I find a source, the card
+      shows here for your Keep.</p>
+  {/if}
   {#if links.length > 0}
     <p class="muted dc-note">Pages that may help — SmartBrain can't keep a live card from these:</p>
     <ul class="dc-links">
@@ -54,8 +68,11 @@
       {/each}
     </ul>
   {/if}
-  {#if canFix || canRefine || canRetry || canPick}
+  {#if canFix || canRefine || canRetry || canPick || canKeepLooking || canStopLooking}
     <div class="dc-actions">
+      {#if canKeepLooking}
+        <button class="secondary" disabled={busy} onclick={onKeepLooking}>Keep looking</button>
+      {/if}
       {#if canFix}
         <button class="secondary" disabled={busy} onclick={onFix}>Fix</button>
       {/if}
@@ -67,6 +84,9 @@
       {/if}
       {#if canPick}
         <button class="ghost" disabled={busy} onclick={onPick}>Paste a link</button>
+      {/if}
+      {#if canStopLooking}
+        <button class="ghost" disabled={busy} onclick={onStopLooking}>Stop looking</button>
       {/if}
     </div>
   {/if}
@@ -86,7 +106,8 @@
     font-weight: 600;
   }
   .dc-line,
-  .dc-note {
+  .dc-note,
+  .dc-looking {
     margin: 0;
   }
   .dc-note,

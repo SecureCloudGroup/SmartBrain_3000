@@ -35,6 +35,7 @@ from . import (
     ni_library,
     ni_master,
     ni_mcp,
+    ni_standing,
     ni_watch,
     tools,
     vault_format,
@@ -1426,6 +1427,51 @@ def reopen_flow_pick(request: Request, item_id: str) -> dict:
         result_summary=tools.summarize({"state": "source"}),
     )
     return {"ok": True, "state": "source"}
+
+
+def _offered(request: Request, item_id: str, action: str) -> tuple[ni.NIStore, dict]:
+    """The store and flow record of a shell whose card offers ``action`` now (404 unknown, 409 otherwise)."""
+    store = _store(request)
+    item = store.get_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    if not item["spec"].get("_shell"):
+        raise HTTPException(status_code=409, detail="a finished card keeps itself working with Fix, not a standing order")
+    flow = ni_flow.board_flow_field(store, item_id, read_only=True)
+    if not flow or action not in (flow.get("actions") or []):
+        state = str((flow or {}).get("state") or "")
+        raise HTTPException(status_code=409, detail=f"this card does not offer that now (flow state {state or 'none'!r})")
+    if ni_flow.is_working(item_id):
+        raise HTTPException(status_code=409, detail="still stopping the last build — try again in a moment")
+    return store, ni_flow._flow_read(store, item_id) or {}
+
+
+@router.post("/api/ni/items/{item_id}/flow/keep-looking")
+def keep_looking(request: Request, item_id: str) -> dict:
+    """Release P2: a declined shell becomes a standing order. It looks again now (research allowed, after the
+    card's model consent), then on a backoff and whenever you keep a new source, for up to 14 days."""
+    _require_desktop_local(request)
+    store, record = _offered(request, item_id, "keep_looking")
+    started = ni_standing.start(store, item_id, record)
+    request.app.state.audit.append(
+        "user", "ni_keep_looking", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+        result_summary=tools.summarize({"started": bool(started)}),
+    )
+    return {"id": item_id, "started": bool(started)}
+
+
+@router.post("/api/ni/items/{item_id}/flow/stop-looking")
+def stop_looking(request: Request, item_id: str) -> dict:
+    """Release P2: close the card's standing order; it keeps its decline and links."""
+    _require_desktop_local(request)
+    store, _record = _offered(request, item_id, "stop_looking")
+    ni_standing.stop(store, item_id)
+    request.app.state.audit.append(
+        "user", "ni_stop_looking", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id}),
+    )
+    return {"ok": True}
 
 
 @router.get("/api/ni/findings")

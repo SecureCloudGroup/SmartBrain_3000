@@ -408,7 +408,7 @@ def test_a_compound_ask_through_run_flow_reaches_the_honest_stop(lib, monkeypatc
     intent_json = json.dumps({"kind": "external_data", "subject": "temperature", "cadence_minutes": 15,
                               "wants": ["temperature"], "place": None})
     out = ni_flow.run_flow(store, item_id, gateway_call=lambda _m, _p: intent_json, ni_route_model="m")
-    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"
 
 
 def test_a_place_list_intent_reaches_the_same_stop_not_a_stage_failure(lib, monkeypatch) -> None:
@@ -422,4 +422,4 @@ def test_a_place_list_intent_reaches_the_same_stop_not_a_stage_failure(lib, monk
     intent_json = json.dumps({"kind": "external_data", "subject": "temperature", "cadence_minutes": 15,
                               "wants": ["temperature"], "place": ["Phoenix", "Miami"]})
     out = ni_flow.run_flow(store, item_id, gateway_call=lambda _m, _p: intent_json, ni_route_model="m")
-    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"

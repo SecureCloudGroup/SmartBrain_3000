@@ -85,7 +85,7 @@ def _spy_move_on(monkeypatch) -> list[str]:
 def test_a_picked_row_that_answers_with_a_page_moves_on_saying_so(monkeypatch, fmt, url) -> None:
     whys = _spy_move_on(monkeypatch)
     _store_, _item, out, _seen = _run_flow_default_fetch(monkeypatch, fmt, url, _PAGES[0])
-    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"  # nothing was built
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"  # nothing was built
     assert whys == ["returned a web page, not its data"]  # a fetch failure, not "has nothing for this right now"
 
 
@@ -105,7 +105,7 @@ def test_a_picked_json_row_that_answers_with_a_page_moves_on_saying_so(monkeypat
     item_id = ni_flow.create_shell_item(store, "synthetic tally")
     ni_flow._flow_write(store, item_id, ni_flow._make_record("synthetic tally", "intent"))
     out = ni_flow.run_flow(store, item_id, gateway_call=lambda m, p: _syn_model(p), ni_route_model="mlx/test-local")
-    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"
     assert whys == ["returned a web page, not its data"]
 
 

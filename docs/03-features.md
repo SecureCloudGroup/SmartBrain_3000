@@ -402,10 +402,14 @@ How a card comes to life:
    provider (or, for the SEC and BLS, your contact email) is tried last and the
    card asks you for it before anything is fetched. Only a Library source that
    describes its answers (which of its values answer which questions) builds a
-   card. When no Library source answers, a cloud model you allow can research
-   one (see the privacy page for what that sends); if nothing answers, the card
-   says so — *"I couldn't build a reliable card for this"* — with one plain
-   line on why and up to three links to pages that may help. Those links open in
+   card. When nothing ready answers, the card says so at once — *"No ready
+   source answers this yet"* — and offers **Keep looking**. Keep looking lets a
+   cloud model you allow research a source (see the privacy page for what that
+   sends): now, then again over the next two weeks, less often each time, and
+   at once (with no model) whenever you keep a new source. The card says it is
+   still looking until it finds one or you tap **Stop looking**. If nothing
+   answers, the card says so — *"I couldn't build a reliable card for this"* —
+   with one plain line on why and up to three links to pages that may help. Those links open in
    a new tab; SmartBrain shows nothing it read off them. Pasting your own link
    always works. Whatever is built is frozen: nothing can quietly change it
    later without asking you again. When you **Keep** a card that research built

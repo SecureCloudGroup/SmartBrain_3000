@@ -34,6 +34,7 @@ from . import (
     ingest,
     ni,
     ni_library,
+    ni_standing,
     ni_watch,
     search,
     selfreview,
@@ -808,6 +809,12 @@ def _auto_update_ni(app) -> None:
                 log.warning("ni carrier posting failed: %s", exc)
             finally:
                 _close_cursor(cursor)
+    if not _breaker_open():  # release P2: one standing order looks again per tick (research under the daily ceiling)
+        try:
+            if getattr(app.state, "ni", None) is not None:
+                ni_standing.run_due(app.state.ni)
+        except Exception as exc:  # a standing order must never kill the schedule tick
+            log.warning("ni standing orders pass failed: %s", exc)
     # §23: hand the marked candidates to the L2 worker (single-flight; if a
     # worker is already running, this drop and next tick re-marks). The tick
     # itself NEVER calls the frontier model — a claudecode turn takes minutes.

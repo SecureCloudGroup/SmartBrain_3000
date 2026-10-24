@@ -41,7 +41,7 @@ sys.path.insert(0, str(REPO / "app"))
 import duckdb  # noqa: E402
 
 from smartbrain_3000 import db as dbmod  # noqa: E402
-from smartbrain_3000 import library_index, ni, ni_flow, ni_master, search  # noqa: E402
+from smartbrain_3000 import library_index, ni, ni_flow, ni_master, ni_standing, search  # noqa: E402
 from smartbrain_3000.scheduler import ScheduleStore  # noqa: E402
 from smartbrain_3000.secrets import SecretStore, gen_master_key  # noqa: E402
 
@@ -166,6 +166,9 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     try:
         item_id = ni_flow.create_shell_item(store, ask)
         rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model)
+        if ni_standing.lookable(rec) and not rec.get("_looking"):  # the card offers Keep looking: tap it, as a person
+            ni_standing.seal(store, item_id, rec)
+            rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model)
         v2 = True  # one flow since S10 (#542): it auto-picks inside run_flow, nothing to tap
         if v2 and rec.get("state") in ("source", "awaiting_access", "declined"):
             return _v2_stop(store, item_id, rec, out)
