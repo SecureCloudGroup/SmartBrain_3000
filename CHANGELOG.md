@@ -130,6 +130,12 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **A new card no longer gives up on a source because SmartBrain was spacing out its own requests.**
+  SmartBrain sends a site at most five requests at once, then one every 30 seconds. A card being built
+  treated that self-imposed wait as the source failing, so after a few cards on one site (several weather
+  cards in a row, say) the next one skipped its best source and searched elsewhere or said no. A card
+  being built now waits for its turn, up to a minute; refreshes still wait for the next round as before,
+  and a site that asks SmartBrain to slow down is still left alone for as long as it asks.
 - **A pasted link or a research fetch reads a data file by what it contains, not by its label.** Feeds served
   as `application/rss+xml` or `application/atom+xml`, XML served as `application/xml` or `application/cap+xml`,
   and CSVs served as `application/vnd.ms-excel` or `application/octet-stream` were refused as "not JSON" before

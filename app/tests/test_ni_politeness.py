@@ -118,6 +118,109 @@ def test_cards_over_budget_stay_due_and_are_never_failed(wire) -> None:
     assert wire.count("bucket-host.example") == ni_polite.HOST_BURST + 3, "the refill serves them"
 
 
+# --- a card build waits out SmartBrain's own spacing -----------------------------------------------
+
+def _sleeps(wire, monkeypatch) -> list:
+    slept: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        wire.now[0] += seconds
+
+    monkeypatch.setattr(ni_polite, "_sleep", sleep)
+    return slept
+
+
+def test_a_build_waits_for_the_bucket_where_a_refresh_defers(wire, monkeypatch) -> None:
+    """tune2 (2026-10-24): six weather asks lost their Library source to SmartBrain's own budget. A build someone is
+    waiting on waits for the refill; a refresh still defers (the card stays due)."""
+    slept = _sleeps(wire, monkeypatch)
+    for n in range(ni_polite.HOST_BURST):
+        _fetch(f"https://bucket-host.example/v1/{n}")
+    with pytest.raises(netguard.FetchError) as busy:
+        _fetch("https://bucket-host.example/v1/refresh")
+    assert busy.value.kind == "host_busy" and not slept
+    with ni_polite.waiting():
+        assert _fetch("https://bucket-host.example/v1/build") == {"text": "hello"}
+    assert len(slept) == 1 and slept[0] <= ni_polite.HOST_REFILL_S
+    assert not getattr(ni_polite.SHARED._local, "wait", None), "the allowance ends with the build"
+
+
+def test_a_build_waits_at_most_its_allowance(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    with ni_polite.waiting(ni_polite.HOST_REFILL_S):
+        for n in range(ni_polite.HOST_BURST + 1):  # the burst, then one refill's wait
+            _fetch(f"https://bucket-host.example/v2/{n}")
+        with pytest.raises(netguard.FetchError) as busy:
+            _fetch("https://bucket-host.example/v2/more")
+    assert busy.value.kind == "host_busy"
+    assert sum(slept) <= ni_polite.HOST_REFILL_S
+
+
+def test_a_build_never_waits_out_a_pause_the_host_asked_for(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    url = "https://slow-host.example/api"
+    wire.answers[url] = netguard.FetchError("upstream returned HTTP 429", status=429, retry_after="20")
+    with ni_polite.waiting():
+        with pytest.raises(netguard.FetchError):
+            _fetch(url)
+        with pytest.raises(netguard.FetchError) as second:
+            _fetch("https://slow-host.example/other")
+    assert second.value.kind == "host_busy" and not slept, "the host's word, not SmartBrain's spacing"
+
+
+def test_run_flow_builds_inside_the_wait(monkeypatch) -> None:
+    from smartbrain_3000 import ni_flow
+
+    seen: list[float] = []
+    monkeypatch.setattr(ni_flow, "_run_flow", lambda *a: seen.append(ni_polite.SHARED._local.wait) or {})
+    ni_flow.run_flow(object(), "item-1")
+    assert seen == [ni_polite.BUILD_WAIT_S]
+    assert not getattr(ni_polite.SHARED._local, "wait", None)
+
+
+def test_a_nested_wait_never_grants_more_and_is_charged_to_the_outer(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    with ni_polite.waiting(40.0):
+        with ni_polite.waiting(ni_polite.BUILD_WAIT_S):
+            assert ni_polite.SHARED._local.wait == 40.0, "never more than the allowance left"
+            for n in range(ni_polite.HOST_BURST + 1):
+                _fetch(f"https://bucket-host.example/v3/{n}")
+        assert ni_polite.SHARED._local.wait == 40.0 - sum(slept), "the inner wait is charged to the outer"
+    assert not getattr(ni_polite.SHARED._local, "wait", None)
+
+
+def test_research_time_stops_while_a_build_waits_for_a_host(wire, monkeypatch) -> None:
+    """PR #544 review S1: the wait must not spend the researcher's 120 s clock (a run that would have found a second
+    source must not end on its time budget because SmartBrain was spacing its own requests)."""
+    from smartbrain_3000.ni_research.ctx import ResearchCtx
+
+    slept = _sleeps(wire, monkeypatch)
+    with ni_polite.waiting():   # a build: research starts inside its wait, as run_flow runs it
+        ctx = ResearchCtx(request="weather", question={})
+        for n in range(ni_polite.HOST_BURST + 1):
+            _fetch(f"https://bucket-host.example/v4/{n}")
+        assert slept and ctx.elapsed() == 0.0
+        wire.now[0] += 5.0
+        assert ctx.elapsed() == 5.0, "work time still counts"
+
+
+def test_a_builds_wait_never_leaks_into_later_clock_readings(wire, monkeypatch) -> None:
+    """PR #544 re-check B1: the time slept is counted per build, never as a running total, so a later research run on
+    the same thread (another build, a test after the politeness tests) never reads a clock thrown off by it."""
+    from smartbrain_3000.ni_research.ctx import ResearchCtx
+
+    slept = _sleeps(wire, monkeypatch)
+    for build in range(3):
+        with ni_polite.waiting():
+            for n in range(ni_polite.HOST_BURST + 1):
+                _fetch(f"https://bucket-host-{build}.example/v5/{n}")
+    assert slept and ni_polite.work_clock() == wire.now[0], "no build's wait is still subtracted after it ends"
+    ctx = ResearchCtx(request="weather", question={})
+    wire.now[0] += 2.0
+    assert ctx.elapsed() == 2.0
+
+
 # --- Retry-After ---------------------------------------------------------------------------
 
 def test_retry_after_seconds_pauses_the_host_then_releases_it(wire) -> None:
