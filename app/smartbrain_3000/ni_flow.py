@@ -3856,9 +3856,9 @@ def warn_retired_flow_flag() -> None:
 
 
 def _resolve_flow_model(store: ni.NIStore) -> str | None:
-    """The model a build runs on: the ``build`` step's choice (``ni_models``). ``local``: the local model (None when
-    none is routed). Otherwise the cloud model when one is routed, else the older route order (C1, audit 2026-09-13),
-    so an install without an Anthropic route keeps building as before:
+    """The model a build runs on: the ``build`` step's choice (``ni_models``). ``cloud`` / ``local``: that side's
+    model, None when none is routed (the build stops and says so). ``auto``: the cloud model when one is routed, else
+    the older route order (C1, audit 2026-09-13), so an install without an Anthropic route keeps building as before:
 
       1. an EXPLICIT ``ni`` route — the operator's word, even when it is a cloud model (P0, 2026-09-16);
       2. else a LOCAL ``chat`` / ``agent`` model (§29 local-preferred);
@@ -3871,8 +3871,8 @@ def _resolve_flow_model(store: ni.NIStore) -> str | None:
     if hasattr(_gateway_mod, "load_routes"):
         routes = _gateway_mod.load_routes(store.conn)
     choice = ni_models.choose(store.conn, "build", routes, _gateway_mod)
-    if choice.setting == "local":
-        return choice.local
+    if choice.setting != "auto":  # a forced side is honoured exactly: nothing routed there stops the build
+        return choice.model
     if choice.cloud:
         return choice.cloud
     ni_model = _gateway_mod.resolve_model("ni", routes)

@@ -202,7 +202,7 @@ def _ni_steps(conn, pricing: dict, since: str | None, until: str | None) -> list
         cost = 0.0 if not price else r["prompt_tokens"] * price["prompt"] + r["completion_tokens"] * price["completion"]
         out.append({"step": step, "label": ni_models.LABELS[step], "model": r["model"],
                     "local": gateway.is_local(r["model"]), "calls": r["calls"], "prompt_tokens": r["prompt_tokens"],
-                    "completion_tokens": r["completion_tokens"], "cost": cost})
+                    "completion_tokens": r["completion_tokens"], "cost": cost, "plan_value": r["recorded_cost"]})
     return out
 
 

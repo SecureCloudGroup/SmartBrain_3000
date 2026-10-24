@@ -97,7 +97,10 @@ def save(conn, changes: dict) -> dict[str, str]:
             raise ValueError(f"{step}: setting must be one of {', '.join(SETTINGS)}")
         if step in LOCAL_ONLY and value == "cloud":
             raise ValueError(f"{step} runs on this computer only")
-        merged[step] = value
+        if value == "auto":
+            merged.pop(step, None)  # auto is "unset": an older switch (research's ``ni_research``) keeps its say
+        else:
+            merged[step] = value
     db.meta_set(conn, _META_KEY, json.dumps({s: merged[s] for s in STEPS if s in merged}, sort_keys=True))
     return settings(conn)
 
@@ -151,11 +154,16 @@ def choose(conn, step: str, routes: dict | None = None, gw=gateway) -> Choice:
 def describe(conn) -> list[dict]:
     """Every step for the Settings view: its label, setting, the options it allows and the model it runs on now."""
     assert conn is not None, "conn required"
+    from .ni_research import policy  # local: policy imports this module
+
     routes = gateway.load_routes(conn)
+    research_off = policy.setting(conn) == "off"   # env SMARTBRAIN_NI_RESEARCH or meta ni_research
     out = []
     for step in STEPS:  # bounded to 4
         c = choose(conn, step, routes)
-        out.append({"step": step, "label": LABELS[step], "setting": c.setting, "where": c.where, "model": c.model,
+        off = step == "research" and research_off
+        out.append({"step": step, "label": LABELS[step], "setting": c.setting, "where": None if off else c.where,
+                    "model": None if off else c.model, "off": off,
                     "options": [s for s in SETTINGS if not (step in LOCAL_ONLY and s == "cloud")]})
     return out
 

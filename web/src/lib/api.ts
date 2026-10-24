@@ -170,8 +170,9 @@ export interface NiStepModel {
   label: string;
   setting: NiStepSetting;
   options: NiStepSetting[]; // summary is local-only: no "cloud"
-  where: "cloud" | "local" | null; // null = nothing routed for this setting
+  where: "cloud" | "local" | null; // null = nothing routed for this setting, or the step is off
   model: string | null;
+  off: boolean; // research turned off by its older switch (env SMARTBRAIN_NI_RESEARCH or the ni_research setting)
 }
 
 export interface NiStepUsageRow {
@@ -183,6 +184,7 @@ export interface NiStepUsageRow {
   prompt_tokens: number;
   completion_tokens: number;
   cost: number; // part of total_cost, never added to it
+  plan_value: number | null; // as UsageRow.plan_value (Claude Code calls)
 }
 
 export interface ChatMessage {

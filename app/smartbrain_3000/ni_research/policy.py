@@ -42,7 +42,7 @@ def setting(conn) -> str:
     raw = os.environ.get(_ENV_SETTING)
     if raw is None or not raw.strip():
         step = ni_models.stored(conn).get("research")
-        raw = step if step else db.meta_get(conn, "ni_research")
+        raw = step if step and step != "auto" else db.meta_get(conn, "ni_research")
     value = str(raw or "").strip().lower()
     return value if value in SETTINGS else "auto"
 

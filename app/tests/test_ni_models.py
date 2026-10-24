@@ -99,6 +99,33 @@ def test_build_model_follows_the_step(tmp_path, monkeypatch) -> None:
     assert ni_flow._resolve_flow_model(store) == "mlx/qwen-local"
 
 
+def test_build_forced_side_is_honoured_exactly(tmp_path, monkeypatch) -> None:
+    """build=cloud with no Anthropic route stops (None), never the older order's openai or local pick; auto keeps it."""
+    conn = _conn(tmp_path)
+    store = type("S", (), {"conn": conn})()
+    monkeypatch.setattr(gateway, "load_routes", lambda c: {"ni": "openai/gpt-4o", "chat": "mlx/qwen-local"})
+    assert ni_flow._resolve_flow_model(store) == "openai/gpt-4o"   # auto, no Anthropic route: P0 order
+    ni_models.save(conn, {"build": "cloud"})
+    assert ni_flow._resolve_flow_model(store) is None
+    monkeypatch.setattr(gateway, "load_routes", lambda c: {"chat": "anthropic/claude-sonnet"})
+    ni_models.save(conn, {"build": "local"})
+    assert ni_flow._resolve_flow_model(store) is None
+
+
+def test_saving_auto_leaves_research_off_switch_alone(tmp_path, monkeypatch) -> None:
+    """The page sends every step on Save: auto entries are unset, so an older ``ni_research=off`` stays off."""
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(gateway, "load_routes", lambda c: dict(_BOTH))
+    db.meta_set(conn, "ni_research", "off")
+    ni_models.save(conn, {s: "auto" for s in ni_models.STEPS} | {"build": "local"})
+    assert policy.setting(conn) == "off"
+    assert "research" not in ni_models.stored(conn)
+    research = next(r for r in ni_models.describe(conn) if r["step"] == "research")
+    assert research["off"] is True and research["model"] is None
+    ni_models.save(conn, {"research": "cloud"})   # an explicit choice turns it back on
+    assert policy.setting(conn) == "cloud"
+
+
 def test_cache_system_marks_only_the_system_prompt() -> None:
     msgs = [{"role": "system", "content": "RULES"}, {"role": "user", "content": "ask"}]
     out = ni_flow._cache_system(msgs)

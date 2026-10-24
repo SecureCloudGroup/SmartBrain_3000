@@ -198,7 +198,8 @@
         {/each}
       </select>
       <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">
-        {#if s.model}Runs on {s.model} ({s.where}).{:else}No {s.setting === "auto" ? "" : `${s.setting} `}model is
+        {#if s.off}Research is turned off right now. Choosing Cloud or Local here turns it back on, unless the
+          SMARTBRAIN_NI_RESEARCH environment switch is off.{:else if s.model}Runs on {s.model} ({s.where}).{:else}No {s.setting === "auto" ? "" : `${s.setting} `}model is
           routed for this step yet.{/if}
       </p>
     {/each}
