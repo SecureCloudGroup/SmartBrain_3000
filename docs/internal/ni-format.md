@@ -759,8 +759,8 @@ this card's consent.
   `ni_research_web` set to `off`) limits it to the Library. Fetches carry no headers, no POST, no redirects,
   and every address must have been handed over by a search or the Library, or (origin `composed`, 2026-10-24) be
   an https address the model worked out on the site of a search result: the result's host with a leading `www.`
-  dropped, or a host under it, and on a host that splits owners by path (cloud storage, raw file hosts) the same
-  first path segment. A composed source is recorded as `kind: endpoint`, why "an address worked out on a site a
+  dropped, or a host under it (on a shared-hosting platform, `pagegraph.shared_hosting`, only the result's own host),
+  and on a host that splits owners by path (cloud storage, raw file hosts) the same first path segment. A composed source is recorded as `kind: endpoint`, why "an address worked out on a site a
   search found". Only a consent sealed under the wording that names composed addresses (`_model_consent_compose`)
   allows them; an older web consent keeps exact-address research (`ORIGINS_WEB_EXACT`), and the run is told so.
 - `local`: the closed-world mode. Code ranks Library rows and the local model only picks one and fills the

@@ -431,6 +431,13 @@ _FIRST_PARTY_GENERIC: frozenset[str] = frozenset({
 })
 
 
+def shared_hosting(host: str) -> bool:
+    """Is ``host`` on a shared-hosting platform (``alice.github.io``, or ``github.io`` itself), where a name under a
+    host is a different owner's?"""
+    h = str(host or "").lower().strip().rstrip(".")
+    return any(h == s or h.endswith("." + s) for s in _SHARED_HOSTING_SUFFIXES)
+
+
 def registrable_domain(host: str) -> str:
     """eTLD+1 of a host ("health.aws.amazon.com" → "amazon.com",
     "www.bbc.co.uk" → "bbc.co.uk")."""

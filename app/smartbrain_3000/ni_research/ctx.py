@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, tzinfo
 from urllib.parse import urlsplit
 
-from .. import ni_polite, ni_recipe
+from .. import ni_polite, ni_recipe, pagegraph
 
 MAX_FETCHES = 8
 MAX_SEARCHES = 3
@@ -243,8 +243,9 @@ class ResearchCtx:
         """``composed`` when the normalised ``key`` is an https address on the site of an address web_search returned,
         recorded so its card says how it was found; else None. The site is the result's own host (a leading ``www.``
         dropped) and the hosts under it, so ``api.github.com`` is reachable from a ``github.com`` result but one tenant
-        of a shared host (``alice.example.app``) never reaches another; on a host whose paths belong to different owners
-        (cloud storage, raw file hosts) the owner's first path segment must match too. Only on a run that allows it
+        of a shared host (``alice.example.app``) never reaches another; on a shared-hosting platform
+        (``pagegraph.shared_hosting``, cloud storage) only the result's own host, and on a host whose paths belong to
+        different owners (cloud storage, raw file hosts) the owner's first path segment must match too. Only on a run that allows it
         (the web tier), never in the clear, never past the URL table's bound."""
         assert isinstance(key, str), "key must be text"
         assert isinstance(self.urls, dict), "a url table"
@@ -260,6 +261,8 @@ class ResearchCtx:
             site = near.removeprefix("www.")
             if not site or not (host in (near, site) or host.endswith("." + site)):
                 continue
+            if host != near and (_path_tenanted(near) or pagegraph.shared_hosting(near)):
+                continue  # on a shared platform a name beside or under the result's host is another owner's
             if _path_tenanted(host) and _owner(want.path) != _owner(got.path):
                 continue
             self.urls[key] = {"kind": "composed"}

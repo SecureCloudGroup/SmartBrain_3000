@@ -119,6 +119,19 @@ def test_a_host_tenant_never_reaches_another_tenant_of_its_platform() -> None:
     assert ctx.origin("https://mallory.example.app/collect")[0] is None
 
 
+def test_on_a_shared_hosting_platform_a_composed_address_stays_on_the_results_own_host() -> None:
+    """A name under a shared platform's host is another owner's: a bucket host under ``s3.amazonaws.com``, a blog
+    under ``blogspot.com``. Only the result's own host is reachable there (and on path-tenanted hosts, its owner)."""
+    ctx = web_ctx(rows("https://s3.amazonaws.com/alice-bucket/q.json", "https://www.blogspot.com/about",
+                       "https://alice.github.io/feed.json"))
+    tools.web_search(ctx, "q")
+    for refused in ("https://mallory.s3.amazonaws.com/x.json", "https://mallory.blogspot.com/collect",
+                    "https://blogspot.com/x", "https://mallory.alice.github.io/x"):
+        assert ctx.origin(refused)[0] is None, refused
+    assert ctx.origin("https://s3.amazonaws.com/alice-bucket/more.json")[0] == "composed"
+    assert ctx.origin("https://alice.github.io/data.json")[0] == "composed"
+
+
 def test_the_local_and_library_only_runs_refuse_every_web_origin() -> None:
     ctx = _ctx(None, allowed_origins=ni_research_flow.ORIGINS_LIBRARY, searcher=searcher(rows(HIT)))
     got = tools.web_search(ctx, "earthquakes")
