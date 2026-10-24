@@ -4,6 +4,7 @@ matches, the reuse landing held through every check, a dead source forgotten, a 
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 from test_ni_answers import lib  # noqa: F401  (a fixture)
@@ -111,6 +112,22 @@ def test_every_name_the_new_ask_carries_must_be_known_to_the_kept_source(request
     assert ni_intake.matches(question, ask, _entry(question, request=request_then, title="")) is fits
 
 
+_COINS = "CoinGecko: bitcoin, ethereum, solana prices"
+
+
+@pytest.mark.parametrize(("kept_for", "title", "ask", "subject", "names", "fits"), [
+    # a title lists what the page has, not what the source was kept for (review of #547: a wrong card)
+    ("bitcoin price", _COINS, "ethereum price", "ethereum price", ["ethereum"], False),
+    ("bitcoin price", _COINS, "bitcoin price", "bitcoin price", ["bitcoin"], True),
+    # ... but it is how the source is known by name
+    ("earthquakes", "USGS earthquakes, past hour", "latest USGS earthquakes", "earthquakes", ["USGS"], True),
+    ("earthquakes", "", "latest USGS earthquakes", "earthquakes", ["USGS"], False),
+])
+def test_the_subject_must_be_what_the_source_was_kept_for(kept_for, title, ask, subject, names, fits) -> None:
+    entry = _entry({**QUESTION, "subject": kept_for}, request=kept_for, title=title)
+    assert ni_intake.matches({**QUESTION, "subject": subject}, ask, entry, names) is fits
+
+
 @pytest.mark.parametrize(("kept", "asked", "fits"), [
     (["Raleigh, NC"], ["Raleigh"], True),     # one names the other's words
     (["Portland, OR"], ["Portland, ME"], False),
@@ -206,3 +223,75 @@ def test_forget_drops_a_row_with_nothing_left() -> None:
     ni_intake._write(store, [row])
     item = {"id": "x", "spec": {"goal": _ASK, "source": {"url": URL}, "recipe": {"question": QUESTION}}}
     assert ni_intake.forget(store, item) == 1 and _kept(store) == []
+
+
+# --- intake is a convenience: it never fails an ask, and it keeps to the user's own switches --------------------
+
+def _ask(store) -> str:
+    item_id = ni_flow.create_shell_item(store, f"{_ASK} ({len(store.list_items())})")   # a card name is unique
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(_ASK, "intent"))
+    return item_id
+
+
+def test_a_fault_in_intake_goes_on_to_the_library_and_research(lib, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.setattr(ni_intake, "reuse", lambda *a: (_ for _ in ()).throw(KeyError("title")))
+    _store_, item_id, out, _ = _flow(monkeypatch, _wrap(lib), seam=Script(*good_run()), cloud="anthropic/x",
+                                     consented=True)
+    assert out["state"] == "ready", "research built it: the ask did not fail"
+
+
+def test_a_row_an_older_version_wrote_is_skipped_and_a_good_one_still_serves(lib, monkeypatch) -> None:  # noqa: F811
+    store, first, _ = _researched(monkeypatch, lib)
+    assert ni_intake.remember(store, store.get_item(first))
+    rows = library_index.LocalSources(store).list()
+    bad = {k: v for k, v in rows[0]["kept"]["entries"][0].items() if k != "title"}
+    rows[0]["kept"]["entries"].append({**bad, "at": "2099-01-01"})   # the newest, and unreadable
+    rows.append({"id": "local-kbroken", "kept": {"key": "https://x.example/"}})
+    store.write_reserved_snapshot(   # the slot as an older version might have written it
+        library_index.LOCAL_RESERVED_ID, library_index.LOCAL_SLOT, {"sources": rows})
+    Net(monkeypatch, {URL: QUAKES})
+    assert ni_intake.reuse(store, _ask(store), _ASK, dict(_INTENT))["state"] == "ready"
+
+
+def test_one_kept_source_that_faults_never_hides_the_next(lib, monkeypatch) -> None:  # noqa: F811
+    store, first, _ = _researched(monkeypatch, lib)
+    assert ni_intake.remember(store, store.get_item(first))
+    other = "https://other.example.org/quakes.json"
+    entry = {**_kept(store)[0]["kept"]["entries"][0], "at": "2099-01-01"}   # the newest: tried first
+    row = ni_intake._new_row(ni_research_flow.normal_url(other), other, entry)
+    row["kept"]["entries"] = [entry]
+    ni_intake._write(store, [*library_index.LocalSources(store).list(), row])
+    real, tried = ni_intake._try, []
+
+    def _try(store_, item_id, request, intent, question, row_, entry_, n):
+        tried.append(row_["access"]["url_template"])
+        if n == 1:
+            raise KeyError("draft")
+        return real(store_, item_id, request, intent, question, row_, entry_, n)
+
+    monkeypatch.setattr(ni_intake, "_try", _try)
+    Net(monkeypatch, {URL: QUAKES})
+    assert ni_intake.reuse(store, _ask(store), _ASK, dict(_INTENT))["state"] == "ready" and tried == [other, URL]
+
+
+def test_the_open_web_off_keeps_the_ask_to_the_library(lib, monkeypatch) -> None:  # noqa: F811
+    store, first, _ = _researched(monkeypatch, lib)
+    assert ni_intake.remember(store, store.get_item(first))
+    net = Net(monkeypatch, {URL: QUAKES})
+    monkeypatch.setenv("SMARTBRAIN_NI_RESEARCH_WEB", "off")
+    assert ni_intake.reuse(store, _ask(store), _ASK, dict(_INTENT)) is None and net.calls == []
+
+
+def test_a_kept_source_read_is_audited_with_its_host(lib, monkeypatch) -> None:  # noqa: F811
+    from test_ni_auto_pick import _AuditSpy
+    store, first, _ = _researched(monkeypatch, lib)
+    assert ni_intake.remember(store, store.get_item(first))
+    Net(monkeypatch, {URL: QUAKES})
+    spy = _AuditSpy()
+    ni_flow.set_audit_sink(lambda: spy)
+    try:
+        assert ni_intake.reuse(store, _ask(store), _ASK, dict(_INTENT))["state"] == "ready"
+    finally:
+        ni_flow.set_audit_sink(None)
+    assert [r[0][1] for r in spy.rows] == ["ni_kept_pick"]
+    assert json.loads(spy.rows[0][1]["args_summary"])["host"] == _kept(store)[0]["provider"]["name"]

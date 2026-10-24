@@ -865,12 +865,14 @@ writes a card whose `_built_from.path` is `research` or `mapping` into the user'
 misses}]}` (at most 5 entries; at the source cap the oldest kept row goes, never a typed one). Only a replayable
 `http_json` draft over https with no compare entities is kept (`ni_recipe.check_researcher_draft`). Before the
 Library auto-pick, `ni_intake.reuse` tries at most 2 entries whose question `matches` the new one: the same kind,
-the same place words, every new subject word among the entry's subject, request and title, and every name the new
-ask carries (`ni_verify.named`) known to the entry's request, subject, title or address. The kept draft runs through
-the researcher's `fetch_sample` and `propose_card` with only the `kept` origin allowed, so every check runs against
-the new ask, and the card lands held for Keep (`why: a source you kept before`). No model is called. A fetch error
-counts a miss (3 in a row forget the entry), and No on a held card drops the entries at its address that match its
-question (`ni_intake.forget`).
+the same place words, every new subject word among the entry's subject and request (a title lists what the page has,
+not what it was kept for, so it counts only for names), and every name the new ask carries (`ni_verify.named`) known
+to the entry's request, subject, title or address. The kept draft runs through the researcher's `fetch_sample` and
+`propose_card` with only the `kept` origin allowed, so every check runs against the new ask, and the card lands held
+for Keep (`why: a source you kept before`). No model is called. The read is audited (`ni_kept_pick`, with the host)
+and does not happen while `ni_research_web` is off. A fault in intake, or a row or entry this version cannot read,
+is skipped and the ask goes on to the Library. A fetch error counts a miss (3 in a row forget the entry), and No on a
+held card drops the entries at its address that match its question (`ni_intake.forget`).
 
 ## 31. The user's own key and contact email
 

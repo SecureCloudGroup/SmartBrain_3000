@@ -7,10 +7,11 @@ with what it answered: the question, the user's words, the draft that built it a
 
 ``reuse`` runs before the Library auto-pick. A kept source whose question matches the new ask (the same kind and
 place, the new subject's words all among the words it was kept for, and every name the new ask carries known to it:
-``ni_verify.named``) is read once and the kept draft runs through the researcher's own tools: the fetch obeys
-robots.txt and the per-site budget, and every check runs against the NEW ask (place, window, threshold, compare, a
-fixed date). Only a draft that passes lands, held for Keep like
-every card from outside the Library. No model is called. A source that fails to fetch three times in a row is
+``ni_verify.named``; a source's title counts only for names) is read once and the kept draft runs through the
+researcher's own tools: the fetch obeys robots.txt and the per-site budget, is audited (``ni_kept_pick``) and does
+not happen while the open web is off (``ni_research_web``), and every check runs against the NEW ask (place,
+window, threshold, compare, a fixed date). Only a draft that passes lands, held for Keep like every card from
+outside the Library. No model is called, and a fault in intake goes on to the Library: it never fails the ask. A source that fails to fetch three times in a row is
 forgotten, and so is a source the user says No to for the question it was offered for (``forget``). Compare cards
 are not kept (P1).
 """
@@ -86,11 +87,11 @@ def remember(store: ni.NIStore, item: dict) -> bool:
         sources = library_index.LocalSources(store)
         rows = sources.list()
         key = normal_url(url)
-        row = next((r for r in rows if (r.get("kept") or {}).get("key") == key), None)
+        row = next((r for r in rows if _row_ok(r) and r["kept"]["key"] == key), None)
         if row is None:
             row = _new_row(key, url, entry)
             rows = _room_for_one(rows) + [row]
-        entries = [e for e in row["kept"]["entries"] if e["question"] != question]
+        entries = [e for e in _entries(row) if e["question"] != question]
         row["kept"]["entries"] = [*entries, entry][-MAX_ENTRIES:]
         _write(store, rows)
     return True
@@ -111,10 +112,10 @@ def forget(store: ni.NIStore, item: dict) -> int:
         rows = library_index.LocalSources(store).list()
         gone = 0
         for r in rows:  # bounded: the user's own sources
-            if (r.get("kept") or {}).get("key") != key:
+            if not _row_ok(r) or r["kept"]["key"] != key:
                 continue
-            left = [e for e in r["kept"]["entries"] if not matches(question, request, e)]
-            gone += len(r["kept"]["entries"]) - len(left)
+            left = [e for e in _entries(r) if not matches(question, request, e)]
+            gone += len(r["kept"].get("entries") or []) - len(left)
             r["kept"]["entries"] = left
         if gone:
             _write(store, rows)
@@ -146,14 +147,14 @@ def _room_for_one(rows: list[dict]) -> list[dict]:
     kept = [r for r in rows if r.get("kept")]
     if not kept:
         raise ValueError("your own sources are full")
-    oldest = min(kept, key=lambda r: max(e["at"] for e in r["kept"]["entries"]) if r["kept"]["entries"] else "")
+    oldest = min(kept, key=lambda r: max((e["at"] for e in _entries(r)), default=""))
     return [r for r in rows if r is not oldest]
 
 
 def _write(store: ni.NIStore, rows: list[dict]) -> None:
     """Store the sources slot (rows with no kept entry left are dropped)."""
     assert isinstance(rows, list), "rows"
-    keep = [r for r in rows if not r.get("kept") or r["kept"]["entries"]]
+    keep = [r for r in rows if not r.get("kept") or _entries(r)]
     store.write_reserved_snapshot(library_index.LOCAL_RESERVED_ID, library_index.LOCAL_SLOT, {"sources": keep})
 
 
@@ -165,13 +166,25 @@ def _place_words(question: dict) -> set[str]:
     return set().union(*(_folded_words(str(p)) for p in (question.get("places") or [])[:4]))
 
 
+def _asked(new: dict, request: str, names: list[str] | tuple = ()) -> list[str]:
+    """The names this ask carries (``names``: the intent's), read once per ask."""
+    assert isinstance(new, dict) and isinstance(request, str), "the ask"
+    return named.phrases(request, list(names)[:8], [str(p) for p in (new.get("places") or [])[:4]])
+
+
 def matches(new: dict, request: str, kept: dict, names: list[str] | tuple = ()) -> bool:
     """Does a kept entry answer this question? The same kind; the same place (one names the other's words, or
     neither names one); every word of the new subject (fillers, window words and the place left out) among the
-    words the entry was kept for: its subject, the user's words then and its source's title; and every name the new
-    ask carries (``names``: the intent's) known to the entry by those words or its address ("AP top story" is not
-    answered by a source kept for "BBC headlines"). The checks then decide on the fresh sample."""
-    assert isinstance(new, dict) and isinstance(kept, dict), "questions"
+    words the user kept it for (its subject and the user's words then: a source's title lists what the page has,
+    not what it was kept for); and every name the new ask carries (``names``: the intent's) known to the entry by
+    those words, its source's title or its address ("AP top story" is not answered by a source kept for "BBC
+    headlines"). The checks then decide on the fresh sample."""
+    return _fits(new, request, kept, _asked(new, request, names))
+
+
+def _fits(new: dict, request: str, kept: dict, asked: list[str]) -> bool:
+    """``matches`` with the ask's names already read."""
+    assert isinstance(new, dict) and _entry_ok(kept), "questions"
     old = kept["question"]
     if new.get("entities") or old.get("entities") or new.get("kind") != old.get("kind"):
         return False
@@ -179,45 +192,72 @@ def matches(new: dict, request: str, kept: dict, names: list[str] | tuple = ()) 
     if not (here <= there or there <= here) or bool(here) != bool(there):
         return False
     want = _answer_tokens(str(new.get("subject") or request)) - _WINDOW_WORDS - here
-    have = _answer_tokens(" ".join([str(old.get("subject") or ""), kept["request"], kept["title"]]))
+    have = _answer_tokens(" ".join([str(old.get("subject") or ""), kept["request"]]))
     if not want or not want <= have:
         return False
     known = [kept["request"], str(old.get("subject") or ""), kept["title"],
              str((kept["draft"].get("source") or {}).get("url") or "")]
-    asked = named.phrases(request, list(names)[:8], [str(p) for p in (new.get("places") or [])[:4]])
     return not named.check_named(asked, "", known)
 
 
 def reuse(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict | None:
     """Build this ask from a kept source when one fits and passes every check: the landed (held) card's flow record,
-    or None (nothing kept fits; the flow goes on to the Library and research)."""
+    or None (nothing kept fits, or the open web is off; the flow goes on to the Library and research). A kept source
+    that faults is skipped (the next one may serve; intake is a convenience, never a gate)."""
     assert store is not None and item_id, "args required"
     assert isinstance(request, str) and isinstance(intent, dict), "the ask"
     record = ni_flow._flow_read(store, item_id) or {}
     question = ni_research_flow.question_from_intent(request, intent)
-    if record.get("_cancel") or question["entities"]:
-        return None
+    if record.get("_cancel") or question["entities"] or not ni_flow._research_web(store):
+        return None   # a kept address is a site on the open web: ``ni_research_web = off`` keeps to the Library
     declined = ni_research_flow._declined_of(record)
-    names = [n for n in intent.get("names") or [] if isinstance(n, str)]
-    fits = [(r, e) for r in library_index.LocalSources(store).list() if r.get("kept")
-            for e in r["kept"]["entries"] if matches(question, request, e, names) and r["kept"]["key"] not in declined]
+    asked = _asked(question, request, [n for n in intent.get("names") or [] if isinstance(n, str)])
+    fits = [(r, e) for r in library_index.LocalSources(store).list() if _row_ok(r) and r["kept"]["key"] not in declined
+            for e in _entries(r) if _fits(question, request, e, asked)]
     fits.sort(key=lambda pair: pair[1]["at"], reverse=True)   # the most recently kept first
-    for row, entry in fits[:MAX_TRIES]:  # bounded: a couple of reads per ask
-        landed = _try(store, item_id, request, intent, question, row, entry)
+    for n, (row, entry) in enumerate(fits[:MAX_TRIES], 1):  # bounded: a couple of reads per ask
+        try:
+            landed = _try(store, item_id, request, intent, question, row, entry, n)
+        except Exception as exc:  # one kept source's fault never hides the next one, the Library or research
+            log.warning("ni_intake: a kept source faulted: %s", type(exc).__name__)
+            continue
         if landed is not None:
             return landed
     return None
 
 
-def _try(store: ni.NIStore, item_id: str, request: str, intent: dict, question: dict, row: dict, entry: dict
-         ) -> dict | None:
-    """One kept source for this ask: read it, replay its draft through the researcher's tools, land it or None."""
+def _row_ok(row: object) -> bool:
+    """A kept row this version can read: a row is user data that outlives upgrades, so a malformed one is skipped."""
+    return (isinstance(row, dict) and isinstance(row.get("kept"), dict) and isinstance(row["kept"].get("key"), str)
+            and isinstance(row.get("access"), dict) and isinstance(row["access"].get("url_template"), str)
+            and isinstance(row.get("provider"), dict))
+
+
+def _entry_ok(entry: object) -> bool:
+    """A kept entry this version can read (the shape ``remember`` writes)."""
+    return (isinstance(entry, dict) and isinstance(entry.get("question"), dict)
+            and all(isinstance(entry.get(k), str) for k in ("request", "title", "at"))
+            and isinstance(entry.get("draft"), dict))
+
+
+def _entries(row: dict) -> list[dict]:
+    """A kept row's readable entries (none when it is not a kept row)."""
+    entries = row["kept"].get("entries") if isinstance(row.get("kept"), dict) else None
+    return [e for e in entries[:MAX_ENTRIES] if _entry_ok(e)] if isinstance(entries, list) else []
+
+
+def _try(store: ni.NIStore, item_id: str, request: str, intent: dict, question: dict, row: dict, entry: dict,
+         n: int) -> dict | None:
+    """One kept source for this ask (the ``n``-th tried): read it, replay its draft through the researcher's tools,
+    land it or None. The read is one the user did not tap for on this card, so it is audited like the auto-pick's."""
     url = row["access"]["url_template"]
+    host = str(row["provider"].get("name") or "")[:120]
     ctx = ResearchCtx(request=request, question=question, now=ni._clock().astimezone(UTC),
                       window=ni_research_flow._window_of(request, intent), zone=ZoneInfo(ni.user_timezone_name()),
                       allowed_origins=frozenset({"kept"}), library=None, searcher=None)
     fmt = (entry["draft"].get("source") or {}).get("format")
     ctx.record(url, "kept", title=entry["title"], **({"format": fmt} if isinstance(fmt, str) else {}))
+    ni_flow._audit_auto_pick(item_id, host, {"n": n}, tool="ni_kept_pick")
     got = tools.fetch_sample(ctx, url)
     _count(store, row["kept"]["key"], entry, missed=not got["ok"] and got.get("error") in _FETCH_MISSES)
     if not got["ok"]:
@@ -230,7 +270,7 @@ def _try(store: ni.NIStore, item_id: str, request: str, intent: dict, question: 
     if ni_research_flow._can_land(ctx, item_id, request, proposal, ni_research_flow._declined_of(
             ni_flow._flow_read(store, item_id) or {})) is not None:
         return None
-    note = f"built from a source you kept before ({row['provider']['name']}); held for your Keep"
+    note = f"built from a source you kept before ({host}); held for your Keep"
     return ni_research_flow._land(store, item_id, request, ctx, proposal, loop.Outcome("proposed", "kept"), note=note)
 
 
@@ -243,10 +283,11 @@ def _count(store: ni.NIStore, key: str, entry: dict, *, missed: bool) -> None:
     with _LOCK:
         rows = library_index.LocalSources(store).list()
         for r in rows:  # bounded: the user's own sources
-            if (r.get("kept") or {}).get("key") != key:
+            if not _row_ok(r) or r["kept"]["key"] != key:
                 continue
-            for e in r["kept"]["entries"]:  # bounded: MAX_ENTRIES
+            entries = _entries(r)
+            for e in entries:  # bounded: MAX_ENTRIES
                 if e["question"] == entry["question"]:
                     e["misses"] = int(e.get("misses") or 0) + 1 if missed else 0
-            r["kept"]["entries"] = [e for e in r["kept"]["entries"] if e["misses"] < MAX_MISSES]
+            r["kept"]["entries"] = [e for e in entries if int(e.get("misses") or 0) < MAX_MISSES]
         _write(store, rows)
