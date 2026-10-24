@@ -695,8 +695,9 @@ finishes its current fetch and seals nothing.
    a research fetch) is read as JSON first, then once more as `netguard`'s `sniff` read, which admits any
    `application/*` or `text/*` label (case-insensitive) and is parsed by what the first bytes say. Every textual
    read refuses a binary body by its bytes (`looks_binary`: a pdf/zip/png/gif/jpeg/gzip/xls/rar/7z/bz2 magic, or
-   control bytes making up 10% or more of the first KB that UTF-16 does not explain; a stray NUL in a text export
-   is still text), after one chunk. HTML goes to the page door. A fault on
+   control bytes making up 10% or more of the first KB, or high bytes making up 30% or more that are not UTF-8
+   when no legacy charset is declared; UTF-16 is text, and a stray NUL in a text export is still text), after one
+   chunk. HTML goes to the page door. A fault on
    the second read (`host_busy`, a dropped connection, an oversize body) is reported as that fault, not as
    `not_json`.
 4. **Mapping** (one model call): only for a pasted JSON link, a Fix, or a remap. The menu is pre-filtered by

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import socket
 
 import pytest
@@ -567,7 +568,8 @@ _PDF = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n1 0 obj"
 _XLSX = b"PK\x03\x04\x14\x00\x06\x00\x08\x00\x00\x00!\x00"
 _PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
 _XLS = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00\x00\x00\x00"
-_BLOB = b"\x07\x13SBK\x00\x00\x01\x02\xfe"  # no known magic: a NUL in the head says it is a file
+_BLOB = b"\x07\x13SBK\x00\x00\x01\x02\xfe"  # no known magic: control bytes say it is a file
+_NOISE = bytes(random.Random(7).randrange(128, 256) for _ in range(1024))  # compressed, no magic, no control bytes
 
 
 @pytest.mark.parametrize(("ctype", "body"), [
@@ -678,9 +680,14 @@ def test_a_fault_on_the_sniffed_read_is_that_fault_not_not_data(monkeypatch) -> 
     (b"\xff\xd8\xff\xe0", "", True), (b"\x1f\x8b\x08\x00", "", True), (_XLS, "", True), (_BLOB, "", True),
     (b"a,b\n1,2\n", "", False), (b"", "", False), ("a,b\n".encode("utf-16"), "", False),
     ("ab".encode("utf-16-le"), "text/csv; charset=utf-16le", False), ("a,b\n1,2\n".encode("utf-16-be"), "", False),
-    (b"county,cases\n" * 60 + b"Cobb,\x00\n", "", False), (b"\x00\x01\x02\x03" + b"x" * 30, "", True)])
+    (b"county,cases\n" * 60 + b"Cobb,\x00\n", "", False), (b"\x00\x01\x02\x03" + b"x" * 30, "", True),
+    (_NOISE, "", True), (_NOISE, "application/octet-stream; charset=utf-8", True),
+    ("Zürich, café; crème brûlée\n".encode("latin-1") * 40, "", False),
+    ("東京都の天気\n".encode("shift_jis") * 90, "text/plain; charset=shift_jis", False),
+    ("東京都の天気\n".encode() * 60, "", False), (("東" * 400).encode(), "", False)])
 def test_looks_binary_reads_the_bytes(head, ctype, binary) -> None:
-    """A share of control bytes, never one byte: a text export with a stray NUL is still text."""
+    """Shares of the head, never one byte: a text export with a stray NUL is still text, a magic-less compressed
+    body (high bytes that are not UTF-8) is not, and legacy-charset or UTF-8 text cut mid-character still is."""
     assert netguard.looks_binary(head, ctype) is binary
 
 

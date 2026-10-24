@@ -20,6 +20,7 @@ approval and audited.
 
 from __future__ import annotations
 
+import codecs
 import ipaddress
 import socket
 import threading
@@ -151,21 +152,38 @@ _BINARY_HEAD = 1024
 # them; a text export with one stray NUL is not, so the rule is a share of the head, never a single byte.
 _CONTROL_BYTES = bytes(b for b in range(32) if b not in (9, 10, 12, 13)) + b"\x7f"
 _BINARY_CONTROL_SHARE = 0.10
+# A compressed or encrypted body with no magic is near-random: about half its bytes are high, and they do not form
+# UTF-8. Text in a declared legacy charset (Shift_JIS, GBK) is high-byte dense too, so only UTF-8 or no declared
+# charset is held to it; undeclared Latin-1 text is a few accented letters, far under the share.
+_HIGH_BYTES = bytes(range(128, 256))
+_BINARY_HIGH_SHARE = 0.30
 
 
 def looks_binary(head: bytes, content_type: str = "") -> bool:
-    """A body that is a file, not text: a known file magic (pdf, zip/xlsx, png, gif, jpeg, gzip, xls, rar, 7z, bz2),
-    or a head whose control bytes are 10% or more of it, unless UTF-16 explains them (a byte-order mark, a declared
-    UTF-16 charset, or the one-parity NUL run ``decode_body`` reads as UTF-16)."""
+    """A body that is a file, not text: a known file magic (pdf, zip/xlsx, png, gif, jpeg, gzip, xls, rar, 7z, bz2);
+    a head whose control bytes are 10% or more of it; or a head whose high bytes are 30% or more of it and are not
+    UTF-8 when no other charset is declared. UTF-16 is text (a byte-order mark, a declared UTF-16 charset, or the
+    one-parity NUL run ``decode_body`` reads as UTF-16)."""
     assert isinstance(head, (bytes, bytearray)), "the body's first bytes"
     head = bytes(head[:_BINARY_HEAD])
     if head.startswith(_BINARY_MAGIC):
         return True
-    controls = len(head) - len(head.translate(None, _CONTROL_BYTES))
-    if not head or controls < len(head) * _BINARY_CONTROL_SHARE:
+    declared = declared_charset(content_type)
+    if not head or head.startswith((b"\xff\xfe", b"\xfe\xff")) or declared in _UTF16 or _utf16_order(head):
         return False
-    utf16 = head.startswith((b"\xff\xfe", b"\xfe\xff")) or declared_charset(content_type) in _UTF16
-    return not (utf16 or _utf16_order(head))
+    if len(head) - len(head.translate(None, _CONTROL_BYTES)) >= len(head) * _BINARY_CONTROL_SHARE:
+        return True
+    high = len(head) - len(head.translate(None, _HIGH_BYTES))
+    return high >= len(head) * _BINARY_HIGH_SHARE and declared in ("", "utf-8", "utf8") and not _utf8_head(head)
+
+
+def _utf8_head(head: bytes) -> bool:
+    """The head is UTF-8, allowing a character the 1 KB cut left unfinished."""
+    try:
+        codecs.getincrementaldecoder("utf-8")().decode(head, final=False)
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 def decode_body(content: bytes, content_type: str = "") -> str:
