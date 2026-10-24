@@ -540,6 +540,54 @@ def test_fetch_json_accepts_structured_json_types(monkeypatch, ctype) -> None:
         {"properties": {"gridId": "TSA"}}
 
 
+_RSS = '<?xml version="1.0"?><rss><channel><title>Storms</title><item><title>Ana</title></item></channel></rss>'
+_ATOM = '<feed xmlns="http://www.w3.org/2005/Atom"><title>Storms</title><entry><title>Ana</title></entry></feed>'
+_CAP = '<?xml version="1.0"?><alert><info><event>Flood Warning</event></info></alert>'
+
+
+@pytest.mark.parametrize(("ctype", "body", "fmt"), [
+    ("application/rss+xml", _RSS, "feed"), ("application/atom+xml; charset=utf-8", _ATOM, "feed"),
+    ("application/xml", _RSS, "feed"), ("application/xml", _CAP, "xml"), ("application/cap+xml", _CAP, "xml"),
+    ("text/xml", _CAP, "xml")])
+def test_a_sniffed_read_takes_feeds_and_xml_by_their_own_types(monkeypatch, ctype, body, fmt) -> None:
+    """A pasted link or a research fetch reads an address nobody sealed a format for, to find out what it is. That
+    read admitted only text/*, so a feed labelled application/rss+xml (the usual label: the Hurricane Center's storm
+    feeds) or an alert labelled application/cap+xml was refused as "not JSON" before the sniffer saw a byte."""
+    import httpx
+
+    from smartbrain_3000 import ni_fetch
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": ctype}, text=body))
+    parsed, seen = ni_fetch.sniff_fetch("https://feeds.test/index-at.xml", allow_redirects=False)
+    assert seen == fmt and parsed
+
+
+@pytest.mark.parametrize("ctype", ["application/pdf", "application/zip", "application/octet-stream", "image/png"])
+def test_a_sniffed_read_still_refuses_a_binary_type(monkeypatch, ctype) -> None:
+    import httpx
+
+    from smartbrain_3000 import ni_fetch
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": ctype}, content=b"%PDF-1.7 binary"))
+    with pytest.raises(FetchError) as err:
+        ni_fetch.sniff_fetch("https://files.test/doc", allow_redirects=False)
+    assert err.value.kind == "not_json"  # the JSON refusal rides back: not a data file
+
+
+def test_an_xhtml_page_goes_to_the_page_door(monkeypatch) -> None:
+    import httpx
+
+    from smartbrain_3000 import ni_fetch
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "application/xhtml+xml"},
+                                                 text="<html><body><table><tr><td>1</td></tr></table></body></html>"))
+    with pytest.raises(ni_fetch.HtmlPage):
+        ni_fetch.sniff_fetch("https://pages.test/x", allow_redirects=False, keep_page=True)
+
+
 def test_fetch_json_still_refuses_a_non_json_media_type(monkeypatch) -> None:
     import httpx
 

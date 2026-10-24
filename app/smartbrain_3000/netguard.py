@@ -141,6 +141,16 @@ def _is_json_type(content_type: str) -> bool:
     return media.startswith("application/") and media.endswith("+json")
 
 
+# An allowlist entry that opts the list into the +xml suffix rule (``_is_xml_type``); never a prefix of a real type.
+_XML_SUFFIX = "+xml"
+
+
+def _is_xml_type(content_type: str) -> bool:
+    """A structured-syntax XML type (RFC 7303: application/cap+xml, kml+xml, gpx+xml…) is XML, as +json is JSON."""
+    media = (content_type or "").split(";", 1)[0].strip().lower()
+    return media.startswith("application/") and media.endswith("+xml")
+
+
 def decode_body(content: bytes, content_type: str = "") -> str:
     """A fetched body as text: BOM -> declared charset -> UTF-8 (with replacement). Never raises."""
     for bom, codec in _BOMS:
@@ -497,7 +507,8 @@ def _guarded_get_once(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                 if _challenge_header(response):  # a 2xx bot check (AWS WAF answers 202)
                     raise FetchError("upstream answered with a bot challenge", kind="challenge")
                 ctype = response.headers.get("content-type", "")
-                ct_ok = ctype.startswith(allowed_ct) or ("application/json" in allowed_ct and _is_json_type(ctype))
+                ct_ok = ctype.startswith(allowed_ct) or ("application/json" in allowed_ct and _is_json_type(ctype)) \
+                    or (_XML_SUFFIX in allowed_ct and _is_xml_type(ctype))
                 if not ct_ok and not accept_zip_magic:
                     raise FetchError(f"content-type not allowed: {ctype or 'unknown'}",
                                      kind="not_json", content_type=_media_type(response))
@@ -677,18 +688,24 @@ _CSV_CT = ("text/csv", "application/csv", "text/plain",
 _FEED_CT = ("application/", "text/")
 _XML_CT = ("application/", "text/")
 _TEXT_CT = ("text/",)
+# ``sniff``: an address whose format nobody sealed (a pasted link, a research fetch), read to find out what it is.
+# It admits every type the sniffer classifies: any text type, and the XML / feed / CSV types sites label their data
+# with. ``_XML_SUFFIX`` opts the list into RFC 7303's +xml suffix.
+_SNIFF_CT = ("text/", "application/xml", "application/rss+xml", "application/atom+xml", "application/rdf+xml",
+             "application/csv", _XML_SUFFIX)
 _FORMAT_CT: dict[str, tuple[str, ...]] = {
-    "csv": _CSV_CT, "feed": _FEED_CT, "xml": _XML_CT, "text": _TEXT_CT,
+    "csv": _CSV_CT, "feed": _FEED_CT, "xml": _XML_CT, "text": _TEXT_CT, "sniff": _SNIFF_CT,
 }
 _FORMAT_KIND: dict[str, str] = {
-    "csv": "not_csv", "feed": "not_feed", "xml": "not_xml", "text": "not_text",
+    "csv": "not_csv", "feed": "not_feed", "xml": "not_xml", "text": "not_text", "sniff": "not_text",
 }
 
 
 def safe_fetch_text(url: str, fmt: str, headers: dict | None = None,
                     allow_redirects: bool = True) -> dict:
     """Guarded GET returning ``{final_url, status, content_type, text, content}`` for a
-    non-JSON textual NI source (``format`` ∈ {csv, feed, xml, text}).
+    non-JSON textual NI source (``format`` ∈ {csv, feed, xml, text}), or an unsealed address read to sniff
+    its format (``sniff``).
 
     Same SSRF guard + streamed byte cap as ``safe_fetch_json``; the content-type
     allowlist is scoped per-format (see ``_FORMAT_CT``). The caller (NI's

@@ -59,7 +59,7 @@ def _get(url: str, fmt: str, headers: dict | None, allow_redirects: bool, port: 
     """The only place this module touches the network, politeness-engaged here and nowhere else (``port``
     is the one extra port a Library row declared). ``fmt`` ``json`` returns the parsed JSON itself."""
     assert isinstance(url, str) and url, "url required"
-    assert fmt == "json" or fmt in TEXTUAL_FORMATS or fmt == "text", "a known format"
+    assert fmt in ("json", "text", "sniff") or fmt in TEXTUAL_FORMATS, "a known format"
     if before_request is not None:
         before_request(url)
     with ni_polite.engaged(port=port):
@@ -130,10 +130,11 @@ def sniff_fetch(url: str, *, allow_redirects: bool = True, port: int | None = No
 
 
 def _sniffed_textual(url: str, allow_redirects: bool = True, port: int | None = None) -> tuple[object, str]:
-    """Fetch as text and parse by what it really is; HTML is refused (the page door reads pages)."""
+    """Fetch as text and parse by what it really is; HTML is refused (the page door reads pages). The read admits
+    the XML and feed types too (``sniff``): a feed labelled application/rss+xml is a feed, not a refusal."""
     assert url.startswith(("http://", "https://")), "an http(s) url"
     assert isinstance(allow_redirects, bool), "a redirect flag"
-    got = _get(url, "text", None, allow_redirects, port)
+    got = _get(url, "sniff", None, allow_redirects, port)
     text = got.get("text") if isinstance(got, dict) else ""
     if not isinstance(text, str):
         raise netguard.FetchError("no text body", kind="not_json") from None

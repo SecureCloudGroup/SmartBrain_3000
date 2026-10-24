@@ -130,6 +130,10 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **A pasted link or a research fetch can read a feed or XML file again when the site labels it as XML.** Feeds
+  served as `application/rss+xml` or `application/atom+xml`, XML served as `application/xml`, and XML types such
+  as `application/cap+xml` were refused as "not JSON" before the app looked at them, so the Hurricane Center's
+  storm feeds and similar sources could not be built from. Binary files are still refused.
 - **A data source that answers with a web page now says so.** When a site serves a
   maintenance or login page in place of its CSV, feed, XML or JSON data, the card reports
   "returned a web page, not its data", not "has nothing for this right now", and the
