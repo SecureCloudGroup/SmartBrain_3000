@@ -59,7 +59,7 @@ def _get(url: str, fmt: str, headers: dict | None, allow_redirects: bool, port: 
     """The only place this module touches the network, politeness-engaged here and nowhere else (``port``
     is the one extra port a Library row declared). ``fmt`` ``json`` returns the parsed JSON itself."""
     assert isinstance(url, str) and url, "url required"
-    assert fmt == "json" or fmt in TEXTUAL_FORMATS or fmt == "text", "a known format"
+    assert fmt in ("json", "text", "sniff") or fmt in TEXTUAL_FORMATS, "a known format"
     if before_request is not None:
         before_request(url)
     with ni_polite.engaged(port=port):
@@ -108,9 +108,11 @@ def fetch_parsed(url: str, fmt: str = "json", *, headers: dict | None = None,
 def sniff_fetch(url: str, *, allow_redirects: bool = True, port: int | None = None,
                 keep_page: bool = False) -> tuple[object, str]:
     """Paste-URL fetch: try JSON first; on a ``not_json`` refusal sniff the body and parse, returning
-    ``(parsed, format)``. Every other FetchError rides through; an HTML page re-raises the JSON refusal so
-    the flow routes it to the page door. ``keep_page`` True raises ``HtmlPage`` (the body already fetched) instead,
-    for a caller that reads page tables."""
+    ``(parsed, format)``. Every other FetchError rides through; an HTML page, a binary file or a body no parser
+    reads re-raises the JSON refusal so the flow routes it to the page door. A fault on the second read (the
+    host asked us to wait, a dropped connection, an oversize body) rides through as that fault, never as "not
+    data". ``keep_page`` True raises ``HtmlPage`` (the body already fetched) instead, for a caller that reads
+    page tables."""
     assert allow_redirects in (True, False), "a redirect flag"
     assert isinstance(url, str) and url, "url required"
     try:
@@ -125,15 +127,19 @@ def sniff_fetch(url: str, *, allow_redirects: bool = True, port: int | None = No
         if keep_page:
             raise
         raise page from None
-    except netguard.FetchError:
+    except netguard.FetchError as exc:
+        if not str(getattr(exc, "kind", None) or "").startswith("not_"):
+            raise  # a fault, not the shape of the body: reported as "not data" it would read as a decline
         raise page from None
 
 
 def _sniffed_textual(url: str, allow_redirects: bool = True, port: int | None = None) -> tuple[object, str]:
-    """Fetch as text and parse by what it really is; HTML is refused (the page door reads pages)."""
+    """Fetch as text and parse by what it really is; HTML is refused (the page door reads pages). The ``sniff`` read
+    admits any application/* or text/* label and refuses a binary body by its bytes, so a feed labelled
+    application/rss+xml or a CSV labelled application/vnd.ms-excel is read, not refused."""
     assert url.startswith(("http://", "https://")), "an http(s) url"
     assert isinstance(allow_redirects, bool), "a redirect flag"
-    got = _get(url, "text", None, allow_redirects, port)
+    got = _get(url, "sniff", None, allow_redirects, port)
     text = got.get("text") if isinstance(got, dict) else ""
     if not isinstance(text, str):
         raise netguard.FetchError("no text body", kind="not_json") from None

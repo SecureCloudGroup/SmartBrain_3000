@@ -691,7 +691,15 @@ finishes its current fetch and seals nothing.
 2. **Source** (code). A user-named `known_url` (the composer's field, a pasted link, a Fix) is the consent and
    is sampled directly. Otherwise the **auto-pick** runs (below). There is no pick pause for Library rows.
 3. **Sampling** (code): one consented fetch through `ni_fetch`; lists are deterministically downsampled to 2
-   exemplars (1 if still over 30 KB) before any model sees them.
+   exemplars (1 if still over 30 KB) before any model sees them. An address with no sealed format (a pasted link,
+   a research fetch) is read as JSON first, then once more as `netguard`'s `sniff` read, which admits any
+   `application/*` or `text/*` label (case-insensitive) and is parsed by what the first bytes say. Every textual
+   read refuses a binary body by its bytes (`looks_binary`: a pdf/zip/png/gif/jpeg/gzip/xls/rar/7z/bz2 magic, or
+   control bytes making up 10% or more of the first KB, or high bytes making up 30% or more that are not UTF-8
+   when no legacy charset is declared; UTF-16 is text, and a stray NUL in a text export is still text), after one
+   chunk. HTML goes to the page door. A fault on
+   the second read (`host_busy`, a dropped connection, an oversize body) is reported as that fault, not as
+   `not_json`.
 4. **Mapping** (one model call): only for a pasted JSON link, a Fix, or a remap. The menu is pre-filtered by
    code to the field's expected type; the model selects paths only; code verifies membership and type, retries
    once, else `failed(mapping)`. A tapped or auto-picked Library row is never model-mapped: it builds from its

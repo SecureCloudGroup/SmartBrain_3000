@@ -130,6 +130,13 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **A pasted link or a research fetch reads a data file by what it contains, not by its label.** Feeds served
+  as `application/rss+xml` or `application/atom+xml`, XML served as `application/xml` or `application/cap+xml`,
+  and CSVs served as `application/vnd.ms-excel` or `application/octet-stream` were refused as "not JSON" before
+  the app looked at them, so the Hurricane Center's storm feeds and similar sources could not be built from.
+  Now the first bytes decide: PDFs, spreadsheets, images and archives are still refused (on every data read,
+  after the first kilobyte), and the same size cap and address checks apply. When a site asks SmartBrain to
+  wait during that read, research now reports that instead of "not data".
 - **A data source that answers with a web page now says so.** When a site serves a
   maintenance or login page in place of its CSV, feed, XML or JSON data, the card reports
   "returned a web page, not its data", not "has nothing for this right now", and the

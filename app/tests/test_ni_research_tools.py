@@ -395,7 +395,7 @@ def test_html_and_non_data_pages_are_not_samples(monkeypatch) -> None:
     ctx2 = _ctx()
     ctx2.record(url, "search")
     assert tools.fetch_sample(ctx2, url)["error"] == "not_data"  # JSON refused, then sniffed as HTML with no table
-    assert [c["fmt"] for c in net.calls] == ["json", "text"]
+    assert [c["fmt"] for c in net.calls] == ["json", "sniff"]
 
 
 # --- schemas -----------------------------------------------------------------------------------------------------
