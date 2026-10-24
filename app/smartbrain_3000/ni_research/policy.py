@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from .. import db, gateway
+from .. import db, ni_models
 
 SETTINGS = ("auto", "cloud", "local", "off")
 MODES = ("cloud", "local", "ask", "off")
@@ -35,12 +35,14 @@ class Plan:
 
 
 def setting(conn) -> str:
-    """The research setting: env ``SMARTBRAIN_NI_RESEARCH``, then meta ``ni_research``; default ``auto``."""
+    """The research setting: env ``SMARTBRAIN_NI_RESEARCH``, then the research step's own setting
+    (``ni_models``), then meta ``ni_research``; default ``auto``. Only the older switch can say ``off``."""
     assert SETTINGS[0] == "auto", "auto is the default"
     assert conn is not None, "conn required"
     raw = os.environ.get(_ENV_SETTING)
     if raw is None or not raw.strip():
-        raw = db.meta_get(conn, "ni_research")
+        step = ni_models.stored(conn).get("research")
+        raw = step if step and step != "auto" else db.meta_get(conn, "ni_research")
     value = str(raw or "").strip().lower()
     return value if value in SETTINGS else "auto"
 
@@ -57,16 +59,11 @@ def web_enabled(conn) -> bool:
 
 
 def cloud_route(conn) -> str | None:
-    """The Anthropic route research would use: env or meta ``ni_research_model``, else the first ``anthropic/*``
-    on the ni / chat / agent routes. Never a CLI route and never a local one."""
+    """The Anthropic route research would use: ``ni_models.cloud_model`` (env or meta ``ni_research_model``, else
+    the first ``anthropic/*`` on the ni / chat / agent routes). Never a CLI route and never a local one."""
     assert _ENV_MODEL, "the env name"
     assert conn is not None, "conn required"
-    explicit = os.environ.get(_ENV_MODEL) or db.meta_get(conn, "ni_research_model")
-    routes = gateway.load_routes(conn)
-    for model in (explicit, *(gateway.resolve_model(c, routes) for c in ("ni", "chat", "agent"))):  # bounded: 4
-        if isinstance(model, str) and model.split("/", 1)[0] == "anthropic":
-            return model
-    return None
+    return ni_models.cloud_model(conn)
 
 
 def choose(setting_: str, cloud: str | None, local: str | None, consent: str | None, use_local: bool,

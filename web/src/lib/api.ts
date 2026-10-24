@@ -161,6 +161,32 @@ export interface UsageRow {
   plan_value: number | null;
 }
 
+// Neural Interface: which model each step runs on (cloud or local), and its calls on the cost view.
+export type NiStep = "build" | "research" | "refresh" | "summary";
+export type NiStepSetting = "auto" | "cloud" | "local";
+
+export interface NiStepModel {
+  step: NiStep;
+  label: string;
+  setting: NiStepSetting;
+  options: NiStepSetting[]; // summary is local-only: no "cloud"
+  where: "cloud" | "local" | null; // null = nothing routed for this setting, or the step is off
+  model: string | null;
+  off: boolean; // research turned off by its older switch (env SMARTBRAIN_NI_RESEARCH or the ni_research setting)
+}
+
+export interface NiStepUsageRow {
+  step: NiStep;
+  label: string;
+  model: string;
+  local: boolean;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost: number; // part of total_cost, never added to it
+  plan_value: number | null; // as UsageRow.plan_value (Claude Code calls)
+}
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
@@ -1118,8 +1144,14 @@ export const api = {
     if (range?.since) q.set("since", range.since);
     if (range?.until) q.set("until", range.until);
     const qs = q.toString();
-    return req<{ usage: UsageRow[]; total_cost: number }>(`/api/usage${qs ? `?${qs}` : ""}`);
+    return req<{ usage: UsageRow[]; total_cost: number; ni_steps?: NiStepUsageRow[] }>(`/api/usage${qs ? `?${qs}` : ""}`);
   },
+  getNiStepModels: () => req<{ steps: NiStepModel[] }>("/api/ni/step-models"),
+  putNiStepModels: (steps: Partial<Record<NiStep, NiStepSetting>>) =>
+    req<{ ok: boolean; steps: NiStepModel[] }>("/api/ni/step-models", {
+      method: "PUT",
+      body: JSON.stringify({ steps }),
+    }),
   putOllama: (url: string) =>
     req<{ ok: boolean; gateway_synced?: boolean }>("/api/local-models/ollama", { method: "PUT", body: JSON.stringify({ url }) }),
   putMlx: (url: string, api_key: string) =>
