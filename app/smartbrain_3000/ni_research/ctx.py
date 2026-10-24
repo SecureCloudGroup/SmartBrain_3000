@@ -108,6 +108,7 @@ class ResearchCtx:
     started: float = 0.0
     passed: dict | None = None                      # the last draft try_recipe passed: {"draft", "tried"}; propose it before the budget goes
     failed_fetches: dict = field(default_factory=dict)   # normal url -> the error a fetch of it gave (never fetched twice)
+    key_walls: list = field(default_factory=list)   # https addresses that asked for a key (P3: Use my key), at most 3
     memo: dict = field(default_factory=dict)        # (tool, args) -> the result of an identical earlier call
     replays: int = 0
     own_proposal: bool = False                      # True only while the loop itself proposes the held pass (no model call: no turn)

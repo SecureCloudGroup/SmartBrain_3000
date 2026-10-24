@@ -106,23 +106,24 @@ def fetch_parsed(url: str, fmt: str = "json", *, headers: dict | None = None,
 
 
 def sniff_fetch(url: str, *, allow_redirects: bool = True, port: int | None = None,
-                keep_page: bool = False) -> tuple[object, str]:
+                keep_page: bool = False, headers: dict | None = None) -> tuple[object, str]:
     """Paste-URL fetch: try JSON first; on a ``not_json`` refusal sniff the body and parse, returning
     ``(parsed, format)``. Every other FetchError rides through; an HTML page, a binary file or a body no parser
     reads re-raises the JSON refusal so the flow routes it to the page door. A fault on the second read (the
     host asked us to wait, a dropped connection, an oversize body) rides through as that fault, never as "not
     data". ``keep_page`` True raises ``HtmlPage`` (the body already fetched) instead, for a caller that reads
-    page tables."""
+    page tables. ``headers``: the access the caller resolved (a key), sent on both reads; redirects are then refused."""
     assert allow_redirects in (True, False), "a redirect flag"
     assert isinstance(url, str) and url, "url required"
+    assert not headers or not allow_redirects, "a key never follows a redirect"
     try:
-        return _get(url, "json", None, allow_redirects, port), "json"
+        return _get(url, "json", headers or None, allow_redirects, port), "json"
     except netguard.FetchError as exc:
         if getattr(exc, "kind", None) != "not_json":
             raise
         page = exc  # alive but not JSON: a data file, or an ordinary web page
     try:
-        return _sniffed_textual(url, allow_redirects, port)
+        return _sniffed_textual(url, allow_redirects, port, headers)
     except HtmlPage:
         if keep_page:
             raise
@@ -133,13 +134,14 @@ def sniff_fetch(url: str, *, allow_redirects: bool = True, port: int | None = No
         raise page from None
 
 
-def _sniffed_textual(url: str, allow_redirects: bool = True, port: int | None = None) -> tuple[object, str]:
+def _sniffed_textual(url: str, allow_redirects: bool = True, port: int | None = None,
+                     headers: dict | None = None) -> tuple[object, str]:
     """Fetch as text and parse by what it really is; HTML is refused (the page door reads pages). The ``sniff`` read
     admits any application/* or text/* label and refuses a binary body by its bytes, so a feed labelled
     application/rss+xml or a CSV labelled application/vnd.ms-excel is read, not refused."""
     assert url.startswith(("http://", "https://")), "an http(s) url"
     assert isinstance(allow_redirects, bool), "a redirect flag"
-    got = _get(url, "sniff", None, allow_redirects, port)
+    got = _get(url, "sniff", headers or None, allow_redirects, port)
     text = got.get("text") if isinstance(got, dict) else ""
     if not isinstance(text, str):
         raise netguard.FetchError("no text body", kind="not_json") from None

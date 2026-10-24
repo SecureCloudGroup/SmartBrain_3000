@@ -81,9 +81,11 @@ QUESTION_KINDS: frozenset[str] = frozenset({
 
 # Closed reopen affordances for terminal records. "retry" re-runs the sealed
 # request; "pick_source" re-enters the source pick; "keep_looking" turns a declined
-# shell into a standing order (release P2) and "stop_looking" ends one; "delete"
+# shell into a standing order (release P2) and "stop_looking" ends one; "use_key" brings the user's own key to
+# an address that asked for one (release P3); "delete"
 # always exists on the card chrome and is listed only when it is the honest primary way out.
-REOPEN_KINDS: frozenset[str] = frozenset({"retry", "pick_source", "keep_looking", "stop_looking", "delete"})
+REOPEN_KINDS: frozenset[str] = frozenset({"retry", "pick_source", "keep_looking", "stop_looking", "use_key",
+                                          "delete"})
 
 # Closed vocabulary of card actions the backend declares on a v2 board row / flow
 # (a public contract with the web client: unknown kinds must be ignored there).
@@ -91,7 +93,7 @@ ACTION_KINDS: frozenset[str] = frozenset({
     "keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "pause", "resume",
     "edit", "delete", "activate", "activate_sites", "give_access", "answer_date",
     "allow_model", "use_local", "fill_param", "add_credential", "review_fix", "pick_source",
-    "keep_looking", "stop_looking",
+    "keep_looking", "stop_looking", "use_key",
 })
 
 # ---- the declined card state (plan G6, P6, 6.1, 6.2: "a decline is acceptable, a wrong card is the failure") ----
@@ -171,7 +173,7 @@ _QUESTION_ACTIONS: dict[str, tuple[str, ...]] = {
 # board row ("delete" is on every row already). ``pick_source`` is a shell's: a finished card reopens via Fix.
 _REOPEN_ACTIONS: dict[str, tuple[str, ...]] = {"retry": ("retry",), "pick_source": ("pick_source",),
                                                "keep_looking": ("keep_looking",), "stop_looking": ("stop_looking",),
-                                               "delete": ()}
+                                               "use_key": ("use_key",), "delete": ()}
 assert set(_REOPEN_ACTIONS) == REOPEN_KINDS, "every reopen kind has its action"
 assert all(a in ACTION_KINDS for ways in (*_REOPEN_ACTIONS.values(), *_QUESTION_ACTIONS.values()) for a in ways), \
     "closed vocabulary"
@@ -395,9 +397,11 @@ def terminal_surface(state: str, record: dict, *, shell: bool) -> dict:
         move = {**move, "reopen": list(LOOKING_REOPEN)}  # a standing order is open: the way out is to stop it
     elif state == "declined" and not lookable(record):
         move = {**move, "reopen": [r for r in move["reopen"] if r != "keep_looking"]}
-    # pick_source and the standing order are a shell's: a finished card reopens via Fix (and re-research)
+    if state == "declined" and out["decline"]["key_wall"] is not None:
+        move = {**move, "reopen": ["use_key", *move.get("reopen", [])]}  # P3: a source that asked for a key
+    # pick_source, the standing order and Use my key are a shell's: a finished card reopens via Fix (and re-research)
     reopen = [r for r in move.get("reopen", []) if r in REOPEN_KINDS
-              and (shell or r not in ("pick_source", "keep_looking", "stop_looking"))]
+              and (shell or r not in ("pick_source", "keep_looking", "stop_looking", "use_key"))]
     if not question and not reopen:
         reopen = ["retry"]  # law backstop: never a bare terminal
     if reopen:
@@ -427,15 +431,18 @@ def clean_links(links: object) -> list[dict]:
 
 
 def decline_view(record: dict) -> dict:
-    """``{reason, headline, line, links, looking}`` of a declined record, from its sealed ``_decline_card`` (single
-    writer: the card renders this verbatim) and its open standing order, if any. A record without a valid seal
-    still answers honestly with the blind code ``no_answering_source``; the view is total."""
+    """``{reason, headline, line, links, looking, key_wall}`` of a declined record, from its sealed ``_decline_card``
+    (single writer: the card renders this verbatim), its open standing order, if any, and the host of an address
+    that asked for a key (P3: ``{host}``, never the address). A record without a valid seal still answers honestly
+    with the blind code ``no_answering_source``; the view is total."""
     assert isinstance(record, dict), "record required"
     sealed = record.get("_decline_card") if isinstance(record.get("_decline_card"), dict) else {}
     code = sealed.get("reason") if sealed.get("reason") in DECLINE_REASONS else "no_answering_source"
     line = " ".join(str(sealed.get("line") or "").split())[:200] or DECLINE_LINES[code]
     out = {"reason": code, "headline": DECLINE_HEADLINE, "line": line, "links": clean_links(sealed.get("links")),
            "looking": looking_view(record.get("_looking"))}
+    wall = key_wall_of(record)
+    out["key_wall"] = {"host": (urlsplit(wall).hostname or "")[:253]} if wall else None
     assert out["reason"] in DECLINE_REASONS and len(out["links"]) <= DECLINE_LINKS, "a closed decline"
     return out
 
@@ -449,14 +456,19 @@ def looking_view(looking: object) -> dict | None:
     return {"since": looking["since"][:40], "next_at": nxt[:40] if isinstance(nxt, str) else None}
 
 
-def seal_decline(ending: str, line: str | None, links: object) -> dict:
+def seal_decline(ending: str, line: str | None, links: object, key_wall: object = None) -> dict:
     """The ``_decline_card`` seal for one ``ENDINGS`` row that declines: ``{reason, line, links, look}``; ``look``
-    says a standing order could answer it (``LOOKABLE``)."""
+    says a standing order could answer it (``LOOKABLE``), plus ``key_wall`` (release P3) when the run met an https
+    address that asked for a key."""
     assert ending in ENDINGS, "a known ending"
     state, code = ENDINGS[ending]
     assert state == "declined" and code in DECLINE_REASONS, "this ending declines"
     text = " ".join(str(line or "").split())[:200] or DECLINE_LINES[code]
-    return {"reason": code, "line": text, "links": clean_links(links), "look": ending in LOOKABLE}
+    out = {"reason": code, "line": text, "links": clean_links(links), "look": ending in LOOKABLE}
+    wall = _key_wall_of(key_wall)
+    if wall is not None:
+        out["key_wall"] = wall
+    return out
 
 
 def lookable(record: dict) -> bool:
@@ -464,3 +476,18 @@ def lookable(record: dict) -> bool:
     assert isinstance(record, dict), "a record"
     sealed = record.get("_decline_card")
     return record.get("state") == "declined" and isinstance(sealed, dict) and sealed.get("look") is True
+
+
+def _key_wall_of(url: object) -> str | None:
+    """A sealed key-wall address: https with a host, bounded; None otherwise."""
+    if not isinstance(url, str) or len(url) > 500:
+        return None
+    parts = urlsplit(url.strip())
+    return url.strip() if parts.scheme == "https" and parts.hostname else None
+
+
+def key_wall_of(record: dict) -> str | None:
+    """The address a declined record offers Use my key for, or None."""
+    assert isinstance(record, dict), "a record"
+    sealed = record.get("_decline_card") if isinstance(record.get("_decline_card"), dict) else {}
+    return _key_wall_of(sealed.get("key_wall"))

@@ -182,6 +182,8 @@ def run_due(store: ni.NIStore) -> str | None:
         due = _when(looking.get("next_at"))
         if due is None or due > now:
             continue
+        if ni_flow._resolve_library() is None:
+            return None   # the Library is not there this tick (a fault, not the user's choice): every order waits
         if not ni_research_flow.can_research(store, item["id"], record):
             _declined(store, item["id"], record, None, "stopped looking: research is off")
             continue

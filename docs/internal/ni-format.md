@@ -882,8 +882,49 @@ A Library source whose parameter fills `from: vault_key` yields its address with
 URL) and the flow pauses at `awaiting_access` with the question `give_access`; nothing is fetched. `POST
 /flow/access {key?, email?}` (desktop-local, audited without values) stores the key as `ni:<id>:api_key` bound
 to the host (with the header prefix) and the email as SecretStore `contact:email`, then starts the worker. A
-same-host `api_key` another card holds is reused. Sampling and assembly attach the key only when the URL equals
+same-host `api_key` another Library card holds is reused by itself (for a Library row the host is the provider).
+Sampling and assembly attach the key only when the URL equals
 the sealed `_access.url`. The built spec carries refs and an `api_key` secret param, never a value.
+
+**Your own sources (release P3).** The same seal covers an address the user brings. `ni_flow.ask_for_key` seals
+`_access` for that exact https address with `key = {in: null, name: "", prefix: "", docs_url: ""}` (the placement
+is still to ask), makes it the card's own address (`_pasted`) and pauses at `awaiting_access`; the board's
+`access.key.place` is then true. Three ways in: the paste box's "It needs my key" tick (`POST /flow/pick-source
+{url, pasted: true, needs_key: true}`, https only, else 400); a fetch of the user's own address that answers with
+a key wall (`netguard.key_wall`: a 401, or a 403 with a JSON body; never a bot check, a rate limit or a page's
+plain 403, which is the page browser's); and **Use my key for <host>** on a decline (below). `POST /flow/access`
+then also takes `where` (`query` or `header`), `name` (`[A-Za-z0-9][A-Za-z0-9_.-]{0,39}`, never a header that
+carries the request itself: host, length, cookies, content negotiation) and an optional `prefix` (up to 12 of
+letters, digits, space, `_ : . -`), sealed into `_access.key` before the key is stored host-bound and marked
+`named` (`ni.put_credential(named=True)`). This `_access` is `named` too.
+
+A same-host key is never copied by itself to or from a named address (#549 review B1). Different owners share
+hosts (Apps Script, path-style buckets, hosted forms), no general rule tells them apart, and the remote decides the
+401 that would trigger the copy. `ni.find_reusable_credential` skips a `named` key unless the caller passes
+`named_too`, which only the user's tap does. When another card holds a key for the host and its placement is
+known (the card's own, or `_placement_on_host` reading the other card's sealed `$secret` ref), `missing_access`
+seals `_access.reuse` and the board's `access.key.reuse` offers **Use the key I gave for <host>**; `POST
+/flow/access {reuse: true}` copies it under this card with that placement (journaled, audited with `reuse`), and
+is 400 when the card offers none. A lookup fault offers nothing and asks for the key.
+
+A key the provider refuses (a key wall on the address the key was sealed for) is deleted and asked for again,
+placement included, with no reuse offered (`_access.refused`). A fresh start for the user's own address (Retry, a
+standing order's run, Use my key again) keeps the placement they gave, so a key this card already holds is used
+again; if it has gone, the run pauses for it rather than failing. The address has no sealed format, so its first
+read sniffs it as a paste is (`ni_fetch.sniff_fetch` with the key on both reads) and seals `_format`. A keyed read
+never follows a redirect.
+
+A research run reads no key. A fetch that meets a key wall answers the model `needs_key` and the run remembers the
+address (`ResearchCtx.key_walls`, at most 3). When the run ends without a card (not a compare), the decline seals
+the first one as `_decline_card.key_wall`; `decline.key_wall` on the wire is `{host}` only, never the address,
+and the card offers `use_key` first among its reopens (a shell's only). `POST /flow/use-key` (desktop-local,
+audited `ni_use_key` with the host) re-seeds the sealed request as a fresh record and pauses it for the key for
+that address; a same-host key already given is offered, never taken by itself.
+
+Signed-in pages (checked in P3, nothing promised): the page browser cannot carry a session. Every render runs in a
+fresh 0700 run directory that holds the engine's cookie file (`--storage-dir`) and is removed on every path
+(`browsers/runner.py`, `render_agent.clean_state`). A signed-in page would mean handing a sealed per-site session
+into the jailed engine, which is a new trust boundary with its own design and review.
 
 ## 32. Cards built from a Library source's declared answers
 
@@ -1355,7 +1396,7 @@ worker slot (`ni_flow.has_slot`), and nothing is written or charged before that:
 waits unchanged for the next pass, and a start refused anyway puts the declined record back as it was. A Keep
 looking tap with no slot free seals a first run due now (`runs: 0`, the user's own tap, never charged), and the
 next pass runs it. An order that can never run closes: an unreadable `since`, a record that lost its request, or
-research switched off since. A scheduled run whose card has no model consent stops at the consent question and is
+research switched off since (a Library that is missing at that tick is a fault, so the order waits instead). A scheduled run whose card has no model consent stops at the consent question and is
 not charged; the order then waits for the user's answer. A Keep anywhere (`ni_intake.remember`) marks every open order (`free_at`): its next run is free (`free:
 true`, for that run only: a fresh start drops it), reading kept and Library sources only, never research or a model (a record without its sealed intent
 waits for its own run), and keeps the order's own schedule. A run that finds a source lands the card held for Keep,

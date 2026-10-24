@@ -744,6 +744,9 @@ export type NiDisplay = G.Display;
 // paths on the card body).
 export type NiFlowState = G.FlowState;
 
+// Release P3: where the user's own key goes for a source they brought.
+export type NiKeyPlace = { where: "query" | "header"; name: string; prefix: string };
+
 export type NiSuggestion = G.Suggestion;
 
 // v2 build progress (flow field, read-only from the backend): a 4-step bar from the flow state.
@@ -1828,19 +1831,38 @@ export const api = {
   // the PATCH surface).
   // `pasted`: the user typed / pasted the link themselves (it builds even when the card
   // offered the same page as a link; the card then waits for their YES).
-  niFlowPickSource: (id: string, url: string, pasted = false) =>
+  // `needsKey` (release P3): the user said their pasted https link takes their own key; the card then
+  // asks where it goes and for the key before the first fetch.
+  niFlowPickSource: (id: string, url: string, pasted = false, needsKey = false) =>
     req<{ ok: boolean; started: boolean; needs?: string[] }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/pick-source`, {
         method: "POST",
-        body: JSON.stringify(pasted ? { url, pasted } : { url }),
+        body: JSON.stringify(pasted ? { url, pasted, ...(needsKey ? { needs_key: true } : {}) } : { url }),
       }),
-  // The picked source's key and/or the user's contact email, typed on the card.
-  niFlowAccess: (id: string, key?: string, email?: string) =>
+  // The picked source's key and/or the user's contact email, typed on the card. `place` (release P3):
+  // where a key for a source the user brought goes — a query parameter or a header, by name.
+  niFlowAccess: (id: string, key?: string, email?: string, place?: NiKeyPlace) =>
     req<{ ok: boolean; started: boolean; needs: string[] }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/access`, {
         method: "POST",
         body: JSON.stringify({ ...(key !== undefined ? { key } : {}),
-                               ...(email !== undefined ? { email } : {}) }),
+                               ...(email !== undefined ? { email } : {}),
+                               ...(place !== undefined ? { where: place.where, name: place.name,
+                                                           prefix: place.prefix } : {}) }),
+      }),
+  // Release P3: use the key the user gave another card for this host (the card offers it as access.key.reuse;
+  // never done without this tap, because different owners can share a host).
+  niFlowReuseKey: (id: string) =>
+    req<{ ok: boolean; started: boolean; needs: string[] }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/access`, {
+        method: "POST",
+        body: JSON.stringify({ reuse: true }),
+      }),
+  // Release P3: a declined card's search met a source that asked for a key; bring yours for it.
+  niFlowUseKey: (id: string) =>
+    req<{ ok: boolean; started: boolean; needs: string[] }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/use-key`, {
+        method: "POST",
       }),
   niFlowFix: (id: string) =>
     req<{ ok: boolean; started: boolean }>(

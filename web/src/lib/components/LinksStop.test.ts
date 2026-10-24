@@ -23,7 +23,7 @@ afterEach(async () => {
 function stopOf(props: {
   suggestions?: NiSuggestion[];
   error?: string;
-  onPaste?: (url: string) => Promise<boolean>;
+  onPaste?: (url: string, needsKey: boolean) => Promise<boolean>;
 }): HTMLElement {
   const target = document.createElement("div");
   document.body.appendChild(target);
@@ -67,12 +67,34 @@ describe("LinksStop", () => {
     expect(submit.disabled).toBe(false);
     root.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
     await settle();
-    expect(onPaste).toHaveBeenLastCalledWith("https://data.example.gov/feed.json");
+    expect(onPaste).toHaveBeenLastCalledWith("https://data.example.gov/feed.json", false);
     expect(input.value).not.toBe("");
     root.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
     await settle();
     expect(onPaste).toHaveBeenCalledTimes(2);
     expect(input.value).toBe("");
+  });
+
+  it("says the link needs the user's key only when ticked, and only for an https link", async () => {
+    const onPaste = vi.fn().mockResolvedValue(true);
+    const root = stopOf({ onPaste });
+    const [input, box] = Array.from(root.querySelectorAll("input")) as HTMLInputElement[];
+    expect(box.type).toBe("checkbox");
+    box.click();
+    input.value = "http://data.example.gov/feed.json";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    root.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    await settle();
+    expect(onPaste).toHaveBeenLastCalledWith("http://data.example.gov/feed.json", false);
+    box.click();
+    input.value = "https://api.rates.example.org/latest";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    root.querySelector("form")?.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    await settle();
+    expect(onPaste).toHaveBeenLastCalledWith("https://api.rates.example.org/latest", true);
+    expect(box.checked).toBe(false);   // an accepted paste clears the tick too
   });
 
   it("shows the server's refusal", () => {

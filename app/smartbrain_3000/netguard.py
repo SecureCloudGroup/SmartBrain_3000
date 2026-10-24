@@ -309,6 +309,16 @@ class FetchError(Exception):
         self.retry_after = retry_after[:64] if isinstance(retry_after, str) and retry_after else None
 
 
+def key_wall(exc: BaseException) -> bool:
+    """A refusal that asks for the user's own key (release P3): a 401, or an API's JSON 403. Never a bot check or
+    a rate limit (those are walls a key does not open), and never a page's plain 403 (the page browser's)."""
+    assert isinstance(exc, BaseException), "an exception"
+    status, kind = getattr(exc, "status", None), getattr(exc, "kind", None)
+    if kind in ("challenge", "rate_limited"):
+        return False
+    return status == 401 or (status == 403 and "json" in str(getattr(exc, "content_type", "") or ""))
+
+
 def _unwrap(addr: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
     """Return the embedded v4 for IPv4-mapped / NAT64 well-known v6, else ``addr``.
 

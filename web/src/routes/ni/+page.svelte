@@ -159,6 +159,10 @@
   // P3: source-pick + edit-modal state.
   let accessKeyText = $state<CardText>({});
   let accessEmailText = $state<CardText>({});
+  // Release P3: where the key for a source the user brought goes (the card asks when access.key.place).
+  let accessWhere = $state<Record<string, "query" | "header">>({});
+  let accessNameText = $state<CardText>({});
+  let accessPrefixText = $state<CardText>({});
   let editFor = $state<NiBoardItem | null>(null);
   let editTitle = $state("");
   let editInterval = $state("");
@@ -203,14 +207,14 @@
 
   // Returns true when the server took the source. The stop card passes the user's own pasted link
   // (it builds even when the card offered the same page as a link; that card then waits for their YES).
-  async function pickSource(item: NiBoardItem, urlText: string, pasted = true): Promise<boolean> {
+  async function pickSource(item: NiBoardItem, urlText: string, pasted = true, needsKey = false): Promise<boolean> {
     console.assert(item.flow?.state === "source", "pickSource: pause required");
     const url = urlText.trim();
     if (url.length < 8) return false;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
-      const out = await api.niFlowPickSource(item.id, url, pasted);
+      const out = await api.niFlowPickSource(item.id, url, pasted, needsKey);
       toast(out.needs && out.needs.length > 0
         ? "This source needs one more thing — see the card."
         : out.started === false
@@ -235,13 +239,36 @@
     const key = cardText(accessKeyText, item.id).trim();
     const email = cardText(accessEmailText, item.id).trim();
     if ((access.key && !key) || (access.contact && !email)) return;
+    const place = access.key?.place
+      ? { where: accessWhere[item.id] ?? "query", name: cardText(accessNameText, item.id).trim(),
+          prefix: cardText(accessPrefixText, item.id) }
+      : undefined;
+    if (place && !place.name) return;
     busyId = item.id;
     flowActionError = { ...flowActionError, [item.id]: "" };
     try {
       const out = await api.niFlowAccess(item.id, access.key ? key : undefined,
-                                         access.contact ? email : undefined);
+                                         access.contact ? email : undefined, place);
       accessKeyText = withoutCardText(accessKeyText, item.id);
       accessEmailText = withoutCardText(accessEmailText, item.id);
+      accessNameText = withoutCardText(accessNameText, item.id);
+      accessPrefixText = withoutCardText(accessPrefixText, item.id);
+      toast(out.started ? "Thanks — building the card now." : "Saved.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — try again." };
+    } finally {
+      busyId = null;
+    }
+  }
+
+  // Release P3: the user's tap to send the key they gave another card for this host to this address too.
+  async function reuseKey(item: NiBoardItem): Promise<void> {
+    console.assert(!!item.flow?.access?.key?.reuse, "reuseKey: the card offers it");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      const out = await api.niFlowReuseKey(item.id);
       toast(out.started ? "Thanks — building the card now." : "Saved.");
       await load();
     } catch (err) {
@@ -398,6 +425,23 @@
         await api.niFlowStopLooking(item.id);
         toast("Stopped looking for a source.");
       }
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "Couldn’t change the card." };
+    } finally {
+      busyId = null;
+    }
+  }
+
+  // Release P3: the decline met a source that asked for a key; the card then asks where it goes and for the key.
+  async function useKey(item: NiBoardItem): Promise<void> {
+    console.assert(typeof item.id === "string", "useKey: id is string");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      const out = await api.niFlowUseKey(item.id);
+      toast(out.started ? "Using the key you already gave for this site — building the card now."
+        : "Add your key on the card.");
       await load();
     } catch (err) {
       flowActionError = { ...flowActionError, [item.id]: describeError(err) || "Couldn’t change the card." };
@@ -1387,12 +1431,14 @@
                   canPick={hasAction(item, "pick_source")}
                   canKeepLooking={hasAction(item, "keep_looking")}
                   canStopLooking={hasAction(item, "stop_looking")}
+                  canUseKey={hasAction(item, "use_key")}
                   onFix={() => fixItem(item)}
                   onRefine={() => openRefine(item)}
                   onRetry={() => retryFlow(item)}
                   onPick={() => reopenPick(item)}
                   onKeepLooking={() => lookFlow(item, true)}
                   onStopLooking={() => lookFlow(item, false)}
+                  onUseKey={() => useKey(item)}
                 />
               {:else if item.flow.state === "failed" || item.flow.state === "unsupported"}
                 <!-- G1 single-writer law: the card renders the MASTER's reason
@@ -1496,7 +1542,7 @@
                     busy={busyId === item.id}
                     error={flowActionError[item.id] ?? ""}
                     clause={tapClause(item.flow)}
-                    onPaste={(url) => pickSource(item, url, true)}
+                    onPaste={(url, needsKey) => pickSource(item, url, true, needsKey)}
                   />
                 {/if}
               {:else if item.flow.state === "awaiting_access" && item.flow.access && hasAction(item, "give_access")}
@@ -1508,7 +1554,60 @@
                   class="ni-commission ni-pick-url"
                   onsubmit={(e) => { e.preventDefault(); void giveAccess(item); }}
                 >
-                  {#if access.key}
+                  {#if access.key?.reuse}
+                    <!-- Release P3: a key the user gave another card for this host. Different owners can share
+                         a host, so it is only sent to this address when the user taps. -->
+                    <p class="ni-note">
+                      You gave another card a key for {access.host}. Use it for this address too, or add a key below.
+                    </p>
+                    <button type="button" class="secondary" disabled={busyId === item.id}
+                      onclick={() => void reuseKey(item)}>Use the key I gave for {access.host}</button>
+                  {/if}
+                  {#if access.key?.place}
+                    <!-- Release P3: a source the user brought. Where the key goes is theirs to say (the
+                         provider's docs show it); it is sent only to this host, never shown to a model. -->
+                    <p class="ni-note">
+                      {access.host} asks for a key. Say where it goes (the provider's docs show it), then paste
+                      it. SmartBrain sends it only to {access.host}, over a secure connection.
+                    </p>
+                    <div class="ni-key-place">
+                      <select bind:value={accessWhere[item.id]} disabled={busyId === item.id}
+                        aria-label="Where the key goes">
+                        <option value="query">In the address (a query parameter)</option>
+                        <option value="header">In a header</option>
+                      </select>
+                      <input
+                        type="text"
+                        autocomplete="off"
+                        bind:value={accessNameText[item.id]}
+                        placeholder={(accessWhere[item.id] ?? "query") === "header" ? "Header name, e.g. X-API-Key"
+                          : "Parameter name, e.g. apikey"}
+                        maxlength="40"
+                        disabled={busyId === item.id}
+                        aria-label="The parameter or header name"
+                      />
+                      {#if (accessWhere[item.id] ?? "query") === "header"}
+                        <input
+                          type="text"
+                          autocomplete="off"
+                          bind:value={accessPrefixText[item.id]}
+                          placeholder="Prefix, if any (e.g. Bearer )"
+                          maxlength="12"
+                          disabled={busyId === item.id}
+                          aria-label="A prefix before the key, if the provider uses one"
+                        />
+                      {/if}
+                    </div>
+                    <input
+                      type="password"
+                      autocomplete="off"
+                      bind:value={accessKeyText[item.id]}
+                      placeholder="Your {access.host} key"
+                      maxlength="400"
+                      disabled={busyId === item.id}
+                      aria-label="Your key for {access.host}"
+                    />
+                  {:else if access.key}
                     <p class="ni-note">
                       {access.provider || access.host} needs your own free key.
                       {#if access.key.docs_url}
@@ -1547,6 +1646,7 @@
                   <button type="submit" class="secondary"
                     disabled={busyId === item.id
                       || (!!access.key && cardText(accessKeyText, item.id).trim().length === 0)
+                      || (!!access.key?.place && cardText(accessNameText, item.id).trim().length === 0)
                       || (access.contact && cardText(accessEmailText, item.id).trim().length < 6)}
                   >{busyId === item.id ? "Saving…" : "Continue"}</button>
                   {#if flowActionError[item.id]}
@@ -2456,6 +2556,18 @@
   }
   .ni-pick-url button {
     align-self: flex-start;
+  }
+  .ni-key-place {
+    /* where the key goes: stacked like the paste box, so a narrow card never squeezes an input */
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    margin-bottom: var(--s-2);
+  }
+  .ni-key-place select,
+  .ni-key-place input {
+    width: 100%;
+    min-width: 0;
   }
   .ni-more {
     position: relative;

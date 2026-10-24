@@ -4666,8 +4666,9 @@ def _resolve_shape_path(path: str, outputs: dict) -> tuple[bool, object]:
 
 # --- credential storage (host-bound) --------------------------------------
 
-def put_credential(secrets_store, item_id: str, name: str, value: str, host: str) -> str:
-    """Store a secret value under ``ni:<item_id>:<name>`` bound to ``host``.
+def put_credential(secrets_store, item_id: str, name: str, value: str, host: str, *, named: bool = False) -> str:
+    """Store a secret value under ``ni:<item_id>:<name>`` bound to ``host``. ``named``: the key was given for an
+    address the user or research named (release P3), not a Library provider's, so it is never copied silently.
 
     Body is JSON {"value":..., "host":...}: the engine refuses to attach the secret when
     a fetch host differs, so a stolen or misrouted credential cannot cross hosts. ``host``
@@ -4680,7 +4681,8 @@ def put_credential(secrets_store, item_id: str, name: str, value: str, host: str
     assert isinstance(host, str) and host, "host required (empty = no binding)"
     normalized = _normalize_host(host)
     key = f"ni:{item_id}:{name}"
-    secrets_store.put(key, json.dumps({"value": value, "host": normalized}))
+    body = {"value": value, "host": normalized, **({"named": True} if named else {})}
+    secrets_store.put(key, json.dumps(body))
     return key
 
 
@@ -4696,7 +4698,7 @@ def _normalize_host(host: str) -> str:
         return low
 
 
-def find_reusable_credential(secrets_store, name: str, host: str) -> str | None:
+def find_reusable_credential(secrets_store, name: str, host: str, *, named_too: bool = False) -> str | None:
     """W-F (field 2026-09-17): the VALUE of another card's credential with the
     same param name bound to the SAME host, or None.
 
@@ -4705,6 +4707,10 @@ def find_reusable_credential(secrets_store, name: str, host: str) -> str | None:
     the NEW item's own ``ni:<item_id>:<name>`` key (item-scoping and the K2
     loader prefix check stay intact), and journals the reuse. Never crosses
     hosts: the stored binding must equal the new card's fetch host exactly.
+
+    Release P3 (#549 review B1): a key given for an address the user or research named (``named``) is skipped unless
+    ``named_too``, which only the user's own tap passes. Tenants share hosts (Apps Script, path-style buckets) and no
+    general rule tells them apart, so a hostname is the provider only for a Library row.
     """
     assert secrets_store is not None, "secrets store required"
     assert isinstance(name, str) and name and isinstance(host, str) and host, "args required"
@@ -4721,7 +4727,8 @@ def find_reusable_credential(secrets_store, name: str, host: str) -> str | None:
             body = json.loads(secrets_store.get(key) or "")
         except Exception:  # unreadable row — skip, never fail the scan
             continue
-        if isinstance(body, dict) and body.get("host") == wanted and body.get("value"):
+        if isinstance(body, dict) and body.get("host") == wanted and body.get("value") \
+                and (named_too or not body.get("named")):
             return str(body["value"])
     return None
 

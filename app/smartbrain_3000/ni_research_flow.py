@@ -291,7 +291,9 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links:
     ending = out.ending or "research_declined_budget"
     if question["entities"] and ending != "research_declined_checks":
         ending = "compare_unbuildable"
-    return ni_flow._end(store, item_id, ending, "", links=out.links)
+    # P3: an address that asked for a key is offered as Use my key (one thing at a time: never for a compare)
+    wall = ctx.key_walls[0] if ctx.key_walls and not question["entities"] else None
+    return ni_flow._end(store, item_id, ending, "", links=out.links, key_wall=wall)
 
 
 def research_plan(store: ni.NIStore, item: dict) -> policy.Plan | None:
