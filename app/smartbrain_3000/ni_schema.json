@@ -27,6 +27,7 @@
         "review_fix",
         "run",
         "stop_looking",
+        "use_key",
         "use_local"
       ]
     },
@@ -565,6 +566,16 @@
               "type": "null"
             }
           ]
+        },
+        "key_wall": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlowKeyWall"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -573,21 +584,42 @@
         "headline",
         "line",
         "links",
-        "looking"
+        "looking",
+        "key_wall"
       ],
-      "description": "A declined card (flow state `declined`): the closed reason code, the headline, one plain line, up to three links and its open standing order, if any. Present only on a declined flow."
+      "description": "A declined card (flow state `declined`): the closed reason code, the headline, one plain line, up to three links, its open standing order, if any, and the host of a source that asked for a key (Use my key). Present only on a declined flow."
     },
     "FlowDocsKey": {
       "type": "object",
       "properties": {
         "docs_url": {
           "type": "string"
+        },
+        "place": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
       "required": [
-        "docs_url"
-      ]
+        "docs_url",
+        "place"
+      ],
+      "description": "The key a card asks for: its docs page, and `place` when the card also asks where the key goes (a source the user brought: a query parameter or a header)."
+    },
+    "FlowKeyWall": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 253
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "host"
+      ],
+      "description": "A source the run met that asked for a key: its host only."
     },
     "FlowLooking": {
       "type": "object",
@@ -1296,7 +1328,8 @@
         "keep_looking",
         "pick_source",
         "retry",
-        "stop_looking"
+        "stop_looking",
+        "use_key"
       ]
     },
     "RowDraft": {

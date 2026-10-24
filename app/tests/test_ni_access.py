@@ -153,7 +153,8 @@ def test_a_keyed_pick_asks_for_the_key_then_builds(client: TestClient, monkeypat
     flow = next(x for x in client.get("/api/ni/board").json()["items"] if x["id"] == iid)["flow"]
     assert flow["state"] == "awaiting_access"
     assert flow["access"] == {"host": "www.airnowapi.org", "provider": "AirNow",
-                              "key": {"docs_url": "https://docs.airnowapi.org/faq"}, "contact": False}
+                              "key": {"docs_url": "https://docs.airnowapi.org/faq", "place": False},
+                              "contact": False}
     assert client.post(f"/api/ni/items/{iid}/flow/access", json={"key": "has space"}).status_code == 400
     r = client.post(f"/api/ni/items/{iid}/flow/access", json={"key": " k-123 "})
     assert r.status_code == 200 and r.json()["started"] is True

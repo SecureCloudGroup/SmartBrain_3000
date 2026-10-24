@@ -1192,6 +1192,8 @@ class PickSourceIn(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
     # the user typed / pasted this link themselves (the card's paste form), not a tapped row
     pasted: bool = False
+    # P3: the user said the pasted link needs their key (the card asks where it goes, then the key)
+    needs_key: bool = False
 
 
 @router.post("/api/ni/items/{item_id}/flow/pick-source")
@@ -1223,6 +1225,8 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
         ni._validate_http_json_url_shape(url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"url: {exc}") from None
+    if body.needs_key and not (body.pasted and url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="a key only goes with a link you paste, over https")
     if ni_flow.link_row_for(record, url) is not None and not body.pasted:
         raise HTTPException(
             status_code=409,
@@ -1238,7 +1242,7 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
             log.warning("ni: recording a Library yes failed: %s", type(exc).__name__)
 
     _lib_row, missing, started = ni_flow.apply_pick(
-        store, item_id, url, record, pasted=body.pasted,
+        store, item_id, url, record, pasted=body.pasted, needs_key=body.needs_key,
         secrets=getattr(request.app.state, "secret_store", None), on_library_row=_vote)
     request.app.state.audit.append(
         "user", "ni_flow_pick_source", "reviewed", "executed", True,
@@ -1249,10 +1253,14 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
 
 
 class AccessIn(BaseModel):
-    """The picked source's key and/or the user's contact email, typed on the card."""
+    """The picked source's key and/or the user's contact email, typed on the card. For a source the user brought
+    (P3) the card also asks where the key goes: ``where`` (query or header), ``name`` and an optional ``prefix``."""
 
     key: str | None = Field(default=None, max_length=400)
     email: str | None = Field(default=None, max_length=254)
+    where: str | None = Field(default=None, max_length=8)
+    name: str | None = Field(default=None, max_length=40)
+    prefix: str | None = Field(default=None, max_length=12)
 
 
 @router.post("/api/ni/items/{item_id}/flow/access")
@@ -1268,7 +1276,8 @@ def give_flow_access(request: Request, item_id: str, body: AccessIn) -> dict:
         raise HTTPException(status_code=409, detail="the card isn't asking for a key or an email")
     secrets = _secret_store(request)
     try:
-        missing = ni_flow.give_access(store, item_id, secrets, key=body.key, email=body.email)
+        missing = ni_flow.give_access(store, item_id, secrets, key=body.key, email=body.email, where=body.where,
+                                      name=body.name, prefix=body.prefix)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     access = record.get("_access") or {}
@@ -1444,6 +1453,26 @@ def _offered(request: Request, item_id: str, action: str) -> tuple[ni.NIStore, d
     if ni_flow.is_working(item_id):
         raise HTTPException(status_code=409, detail="still stopping the last build — try again in a moment")
     return store, ni_flow._flow_read(store, item_id) or {}
+
+
+@router.post("/api/ni/items/{item_id}/flow/use-key")
+def use_key(request: Request, item_id: str) -> dict:
+    """Release P3: a declined shell whose search met an address that asked for a key takes the user's own key for
+    it. The card asks where the key goes and the key (a same-host key the user already gave is reused); the key is
+    bound to that host and never sent anywhere else or shown to a model."""
+    _require_desktop_local(request)
+    store, record = _offered(request, item_id, "use_key")
+    url = ni_master.key_wall_of(record)
+    assert url is not None, "use_key is offered only with a sealed key-walled address"
+    ni_flow.use_key_for(store, item_id, record, url)
+    missing = ni_flow.missing_access(store, item_id, getattr(request.app.state, "secret_store", None))
+    started = not missing and ni_flow.start_flow_worker(store, item_id, source_url=url)
+    request.app.state.audit.append(
+        "user", "ni_use_key", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "host": ni_flow._host_hint(url)}),
+        result_summary=tools.summarize({"started": bool(started), "needs": missing}),
+    )
+    return {"ok": True, "started": bool(started), "needs": missing}
 
 
 @router.post("/api/ni/items/{item_id}/flow/keep-looking")

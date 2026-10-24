@@ -19,6 +19,12 @@ to know when a release changes behavior.
   with no model call and no research. It still shows as a preview for your Keep. A source you say No to is not
   offered for that question again, and one that stops answering three times is forgotten. Nothing leaves your
   device.
+- **Neural Interface sources that need your own key.** When you paste a link, you can tick **It needs my key**;
+  a link that answers "unauthorized" asks for it by itself. The card asks where the key goes (in the address or
+  in a header, by the name the provider's docs give) and then for the key. The key is stored encrypted, sent only
+  to that one site over a secure connection, never to a model, and a second card on the same site reuses it.
+  When research finds a source that asks for a key, the card offers **Use my key for** that site. Pages you have
+  to sign in to are not supported yet.
 
 ### Changed
 

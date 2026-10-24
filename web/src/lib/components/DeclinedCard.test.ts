@@ -18,6 +18,7 @@ const DECLINE: FlowDecline = {
     { title: "Insecure", url: "http://x.example/a", host: "x.example" },
   ],
   looking: null,
+  key_wall: null,
 };
 
 const mounted: Array<ReturnType<typeof mount>> = [];
@@ -94,6 +95,18 @@ describe("DeclinedCard", () => {
     expect(labels(looking)).toEqual(["Stop looking"]);
     (looking.querySelector("button") as HTMLButtonElement).click();
     expect(onStopLooking).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Use my key only for the host that asked for one", () => {
+    const onUseKey = vi.fn();
+    const plain = cardOf({ canUseKey: true, canPick: true, onUseKey });
+    expect(labels(plain)).toEqual(["Paste a link"]);   // no key wall sealed: nothing to use a key for
+    const walled = cardOf({ decline: { ...DECLINE, key_wall: { host: "api.rates.example.org" } }, canUseKey: true,
+                            canPick: true, onUseKey });
+    expect(labels(walled)).toEqual(["Use my key for api.rates.example.org", "Paste a link"]);
+    expect(walled.querySelector(".dc-note:last-of-type")?.textContent).toContain("only there");
+    (walled.querySelector("button") as HTMLButtonElement).click();
+    expect(onUseKey).toHaveBeenCalledTimes(1);
   });
 
   it("shows the server's refusal of a reopen", () => {

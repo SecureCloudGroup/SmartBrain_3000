@@ -21,11 +21,12 @@
     error?: string;
     // What the paste's consent covers when the page needs the page browser, or "".
     clause?: string;
-    // Resolves true when the link was accepted.
-    onPaste: (url: string) => Promise<boolean>;
+    // Resolves true when the link was accepted. `needsKey` (release P3): the user said it takes their own key.
+    onPaste: (url: string, needsKey: boolean) => Promise<boolean>;
   } = $props();
 
   let pasted = $state("");
+  let needsKey = $state(false);
   const links = $derived(pickRows(suggestions).links);
 
   async function submit(): Promise<void> {
@@ -33,7 +34,10 @@
     const url = pasted.trim();
     console.assert(url.length === 0 || url.length >= 1, "submit: url trimmed");
     if (url.length < 8) return;
-    if (await onPaste(url)) pasted = "";
+    if (await onPaste(url, needsKey && url.startsWith("https://"))) {
+      pasted = "";
+      needsKey = false;
+    }
   }
 </script>
 
@@ -62,6 +66,10 @@
       disabled={busy}
       aria-label="Paste a source URL"
     />
+    <label class="muted ls-key">
+      <input type="checkbox" bind:checked={needsKey} disabled={busy} />
+      It needs my key
+    </label>
     {#if clause}
       <p class="muted ls-note">{clause}</p>
     {/if}
@@ -73,6 +81,11 @@
 </div>
 
 <style>
+  .ls-key {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+  }
   .ls {
     display: flex;
     flex-direction: column;

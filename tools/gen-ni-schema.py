@@ -106,14 +106,17 @@ def _flow_defs() -> dict[str, dict]:
         "Suggestion": suggestion, "FlowProgress": progress, "FlowTry": obj({"n": INT, "of": INT, "host": STR}),
         "FlowQuestion": question,
         "FlowAccess": obj({"host": STR, "provider": STR, "key": nullable(ref("FlowDocsKey")), "contact": BOOL}),
-        "FlowDocsKey": obj({"docs_url": STR}),
+        "FlowDocsKey": obj({"docs_url": STR, "place": BOOL},
+                           desc="The key a card asks for: its docs page, and `place` when the card also asks where "
+                                "the key goes (a source the user brought: a query parameter or a header)."),
         "FlowTap": obj({"render_notice": BOOL, "site_cap": INT}), "FlowBrowser": obj({"phase": STR, "pct": INT}),
         "FlowDecline": obj({"reason": ref("DeclineReason"), "headline": STR, "line": text(200),
                             "links": arr(ref("DeclineLink"), maxItems=ni_master.DECLINE_LINKS),
-                            "looking": nullable(ref("FlowLooking"))},
+                            "looking": nullable(ref("FlowLooking")), "key_wall": nullable(ref("FlowKeyWall"))},
                            desc="A declined card (flow state `declined`): the closed reason code, the headline, one plain "
-                                "line, up to three links and its open standing order, if any. Present only on a "
-                                "declined flow."),
+                                "line, up to three links, its open standing order, if any, and the host of a source "
+                                "that asked for a key (Use my key). Present only on a declined flow."),
+        "FlowKeyWall": obj({"host": text(253)}, desc="A source the run met that asked for a key: its host only."),
         "FlowLooking": obj({"since": text(40), "next_at": nullable(text(40))},
                            desc="An open standing order (Keep looking): when it began and when it looks next."),
         "DeclineLink": obj({"title": text(120), "url": text(500), "host": text(120)}),

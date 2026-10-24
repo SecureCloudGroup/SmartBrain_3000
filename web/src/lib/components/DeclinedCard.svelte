@@ -2,8 +2,8 @@
   // DeclinedCard — the honest end of an ask the system cannot answer reliably (plan G6: "a decline is
   // acceptable, a wrong card is the failure"). It says so plainly, gives the backend's one-line reason and up to
   // three links (read-only, opened in a new tab; nothing here builds or fetches), and offers the way back: run it
-  // again, paste a link to the data (a shell), keep looking for a source (a standing order) or stop, or on a
-  // finished card Fix / Refine. The page owns the requests; this component owns what it shows and nothing else
+  // again, paste a link to the data (a shell), keep looking for a source (a standing order) or stop, bring the
+  // user's own key to a source that asked for one (Use my key), or on a finished card Fix / Refine. The page owns the requests; this component owns what it shows and nothing else
   // needs to be kept for it.
   import Icon from "$lib/components/Icon.svelte";
   import type { FlowDecline } from "$lib/ni/types.gen";
@@ -20,12 +20,14 @@
     canPick = false,
     canKeepLooking = false,
     canStopLooking = false,
+    canUseKey = false,
     onFix,
     onRefine,
     onRetry,
     onPick,
     onKeepLooking = () => {},
     onStopLooking = () => {},
+    onUseKey = () => {},
   }: {
     decline: FlowDecline;
     busy?: boolean;
@@ -37,12 +39,14 @@
     canPick?: boolean;
     canKeepLooking?: boolean;
     canStopLooking?: boolean;
+    canUseKey?: boolean;
     onFix: () => void;
     onRefine: () => void;
     onRetry: () => void;
     onPick: () => void;
     onKeepLooking?: () => void;
     onStopLooking?: () => void;
+    onUseKey?: () => void;
   } = $props();
 
   const links = $derived(declinedLinks(decline));
@@ -68,8 +72,15 @@
       {/each}
     </ul>
   {/if}
-  {#if canFix || canRefine || canRetry || canPick || canKeepLooking || canStopLooking}
+  {#if decline.key_wall && canUseKey}
+    <p class="muted dc-note">{decline.key_wall.host} asks for a key. If you have one, SmartBrain can use it there,
+      and only there.</p>
+  {/if}
+  {#if canFix || canRefine || canRetry || canPick || canKeepLooking || canStopLooking || canUseKey}
     <div class="dc-actions">
+      {#if canUseKey && decline.key_wall}
+        <button class="secondary" disabled={busy} onclick={onUseKey}>Use my key for {decline.key_wall.host}</button>
+      {/if}
       {#if canKeepLooking}
         <button class="secondary" disabled={busy} onclick={onKeepLooking}>Keep looking</button>
       {/if}

@@ -4915,16 +4915,21 @@ def seal_access(store: ni.NIStore, item_id: str, url: str, row: dict) -> dict | 
 
 def missing_access(store: ni.NIStore, item_id: str, secrets_store) -> list[str]:
     """What the sealed ``_access`` still lacks: "key" and/or "contact". A key this user
-    already gave another card for the SAME host is reused (copied under this card)."""
+    already gave another card for the SAME host is reused (copied under this card); a key whose placement the
+    card still asks for (P3, ``key.in`` None) takes its placement from that card too, or asks for both."""
     access = (_flow_read(store, item_id) or {}).get("_access")
     if not isinstance(access, dict):
         return []
     missing = []
     if access.get("key"):
-        have = secrets_store is not None and bool(secrets_store.get(f"ni:{item_id}:{KEY_PARAM}"))
+        placed = access["key"].get("in") is not None
+        have = placed and secrets_store is not None and bool(secrets_store.get(f"ni:{item_id}:{KEY_PARAM}"))
         if not have and secrets_store is not None:
             reuse = ni.find_reusable_credential(secrets_store, KEY_PARAM, access["host"])
-            if reuse is not None:
+            where = access["key"] if placed else _placement_on_host(store, access["host"], item_id)
+            if reuse is not None and where is not None:
+                if not placed:
+                    _seal_placement(store, item_id, where)
                 ni.put_credential(secrets_store, item_id, KEY_PARAM, reuse, access["host"])
                 _try_journal(store, item_id, "param_changed",
                              f"reused your existing {access['host']} key for this card")
@@ -4936,6 +4941,80 @@ def missing_access(store: ni.NIStore, item_id: str, secrets_store) -> list[str]:
     return missing
 
 
+# P3 (release plan): a key the user brings for an address they named. Where it goes is theirs to say: a query
+# parameter or a header, by name, with an optional prefix ("Bearer "). Names are tokens; a header that carries the
+# request itself (its host, length, cookies, content negotiation) is never one a key may take.
+_ASK_PLACEMENT = {"in": None, "name": "", "prefix": "", "docs_url": ""}
+_KEY_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-]{0,39}")
+_KEY_PREFIX_RE = re.compile(r"[A-Za-z0-9 _:.\-]{0,12}")
+_NOT_KEY_HEADERS = frozenset({"host", "content-length", "content-type", "transfer-encoding", "connection", "cookie",
+                              "user-agent", "accept", "accept-encoding", "referer", "origin", "te", "upgrade"})
+
+
+def ask_for_key(store: ni.NIStore, item_id: str, url: str, *, refused: bool = False) -> dict:
+    """An address the user named (pasted, or one research found behind a key wall and the user tapped Use my key
+    for) asks for a key: seal ``_access`` for that exact https address with its placement still to ask, make it the
+    card's own address (``_pasted``) and pause. Nothing is fetched until the user says where the key goes and gives
+    it; the key is then bound to this host and only ever sent there (``ni.put_credential``)."""
+    assert store is not None and item_id, "args required"
+    host = (urlparse(url).hostname or "").lower()
+    assert url.startswith("https://") and host, "a key never rides http"
+    access = {"url": url[:ni._MAX_URL], "host": host[:253], "provider": host[:120], "key": dict(_ASK_PLACEMENT),
+              "contact": False}
+    note = (f"paused: {host} refused the key; check it and add it again" if refused
+            else f"paused: {host} asks for a key; add yours on the card")
+    return _transition(store, item_id, "awaiting_access", source_url=url, error=None, note=note, _access=access,
+                       _pasted=url)
+
+
+def use_key_for(store: ni.NIStore, item_id: str, record: dict, url: str) -> dict:
+    """Use my key (P3) on a declined card: its sealed request again as a fresh record (the card's own answers ride
+    along, nothing the decline sealed does), paused for the user's key for ``url``."""
+    assert isinstance(record, dict) and record.get("request"), "a declined record with its request"
+    fresh = _fresh_record(record, str(record["request"]), "source", f"use my key for {_host_hint(url)}")
+    _flow_write(store, item_id, fresh, revive=True)
+    return ask_for_key(store, item_id, url)
+
+
+def _clean_placement(where: object, name: object, prefix: object) -> dict:
+    """Where the user said their key goes, bounded; ValueError with the user-facing reason."""
+    if where not in ("query", "header"):
+        raise ValueError("say where the key goes: in the address (a query parameter) or in a header")
+    name_ = str(name or "").strip()
+    if not _KEY_NAME_RE.fullmatch(name_):
+        raise ValueError("give the parameter or header name the provider shows (letters, digits, - _ .)")
+    if where == "header" and name_.lower() in _NOT_KEY_HEADERS:
+        raise ValueError(f"{name_} isn't a header a key can go in")
+    prefix_ = str(prefix or "")
+    if not _KEY_PREFIX_RE.fullmatch(prefix_):
+        raise ValueError("a prefix is a short word such as 'Bearer ' (letters, digits, spaces)")
+    return {"in": where, "name": name_, "prefix": prefix_, "docs_url": ""}
+
+
+def _seal_placement(store: ni.NIStore, item_id: str, placement: dict) -> None:
+    """Write the key's placement into the card's sealed ``_access``."""
+    record = _flow_read(store, item_id) or {}
+    access = record.get("_access")
+    assert isinstance(access, dict) and isinstance(placement, dict), "a sealed access"
+    record["_access"] = {**access, "key": dict(placement)}
+    _flow_write(store, item_id, record)
+
+
+def _placement_on_host(store: ni.NIStore, host: str, item_id: str) -> dict | None:
+    """Where another card's key for this same host goes (its sealed source's key ref), or None. The value is
+    reused from that host's credential, which already carries any prefix."""
+    assert isinstance(host, str), "a host"
+    for item in store.list_items():  # bounded by ni._MAX_ITEMS
+        src = item["spec"].get("source") or {}
+        if item["id"] == item_id or (urlparse(str(src.get("url") or "")).hostname or "").lower() != host:
+            continue
+        for where, field_ in (("header", "headers"), ("query", "secret_query")):
+            for name, ref in (src.get(field_) or {}).items():  # bounded: a source's few headers
+                if isinstance(ref, dict) and str(ref.get("$secret") or "").endswith(f":{KEY_PARAM}"):
+                    return {"in": where, "name": str(name)[:40], "prefix": "", "docs_url": ""}
+    return None
+
+
 def pause_for_access(store: ni.NIStore, item_id: str, url: str, missing: list[str]) -> dict:
     """The card asks for the key and/or the contact email — nothing is fetched until then."""
     words = {"key": "your key", "contact": "your contact email"}
@@ -4944,9 +5023,11 @@ def pause_for_access(store: ni.NIStore, item_id: str, url: str, missing: list[st
 
 
 def give_access(store: ni.NIStore, item_id: str, secrets_store, *,
-                key: str | None, email: str | None) -> list[str]:
+                key: str | None, email: str | None, where: str | None = None, name: str | None = None,
+                prefix: str | None = None) -> list[str]:
     """Store what the user typed on the card (the key host-bound under this card, the email
-    sealed) and return what is STILL missing. Raises ValueError with the user-facing reason."""
+    sealed; for a key whose placement the card asks for, ``where``/``name``/``prefix`` first) and return what is
+    STILL missing. Raises ValueError with the user-facing reason."""
     assert store is not None and item_id and secrets_store is not None, "args required"
     access = (_flow_read(store, item_id) or {}).get("_access")
     if not isinstance(access, dict):
@@ -4955,6 +5036,9 @@ def give_access(store: ni.NIStore, item_id: str, secrets_store, *,
         value = key.strip()
         if not value or len(value) > _MAX_KEY_LEN or any(ch.isspace() or ord(ch) < 32 for ch in value):
             raise ValueError("paste the key exactly as the provider shows it (no spaces)")
+        if access["key"].get("in") is None:
+            access = {**access, "key": _clean_placement(where, name, prefix)}
+            _seal_placement(store, item_id, access["key"])
         ni.put_credential(secrets_store, item_id, KEY_PARAM,
                           str(access["key"].get("prefix") or "") + value, access["host"])
         _try_journal(store, item_id, "param_changed", f"key for {access['host']} added")
@@ -4967,7 +5051,7 @@ def _access_source(access: dict, item_id: str) -> dict:
     """The http_json source fields that carry a sealed ``_access`` (refs, never values)."""
     extra: dict = {}
     key = access.get("key")
-    if isinstance(key, dict):
+    if isinstance(key, dict) and key.get("in") in ("query", "header") and key.get("name"):  # placed (P3: asked first)
         ref = {"$secret": f"ni:{item_id}:{KEY_PARAM}"}
         if key.get("in") == "header":
             extra["headers"] = {key["name"]: ref}
@@ -5502,6 +5586,17 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             refused = _move_on(store, item_id, pick_url, "refused SmartBrain's request", host_wide=host_wide)
             if refused is not None:
                 return refused
+        if not remap and not picked and url.startswith("https://") and _netguard_mod.key_wall(exc):
+            # P3: the address the user named asks for a key (a 401, an API's JSON 403): the card asks for theirs,
+            # where it goes and the key, instead of failing. A key it already carried was refused: ask again.
+            sealed = live.get("_access")
+            refused = isinstance(sealed, dict) and sealed.get("url") == url and bool((sealed.get("key") or {}).get("in"))
+            paused = ask_for_key(store, item_id, url, refused=refused)
+            secrets = _resolve_secrets_store()
+            if not refused and secrets is not None and not missing_access(store, item_id, secrets):
+                # a key the user gave another card for this host fits: read the address once more, with it
+                return _sample_and_map(store, item_id, request, intent, url, call_model, do_fetch)
+            return paused
         if _plain_page_403(exc) and not picked and (not remap or own_page):
             # Round 20 (B3a): a plain 403 on a page (no bot challenge, not an API's JSON refusal) —
             # a pasted link no pick row took, or a Fix of a page card — may be read once in the page
@@ -6710,15 +6805,17 @@ def _pick_links(record: dict) -> list[dict]:
     return ni_master.clean_links([r for r in rows if r["url"]])
 
 
-def _end(store: ni.NIStore, item_id: str, ending: str, reason: str, *, links: list | None = None) -> dict:
+def _end(store: ni.NIStore, item_id: str, ending: str, reason: str, *, links: list | None = None,
+         key_wall: str | None = None) -> dict:
     """The one writer of a non-card ending that can decline. ``ending`` is a row of ``ni_master.ENDINGS``: when its
     state is ``declined`` the v2 flow seals the honest declined card (a closed code, ``reason`` as the one line,
-    up to three links). The table decides, not the caller."""
+    up to three links, and an https address that asked for a key, offered as Use my key). The table decides, not the
+    caller."""
     assert store is not None and item_id and isinstance(reason, str), "args required"
     state, code = ni_master.ENDINGS[ending]
     assert state == "declined" and code in ni_master.DECLINE_REASONS, "an ending that declines"
     record = _flow_read(store, item_id) or {}
-    seal = ni_master.seal_decline(ending, reason, _pick_links(record) if links is None else links)
+    seal = ni_master.seal_decline(ending, reason, _pick_links(record) if links is None else links, key_wall=key_wall)
     # the rows a stopped pick held went into the seal; the card never lists them again, and nothing can tap one
     _transition(store, item_id, "declined", error=f"{seal['reason']}: {seal['line']}"[:_MAX_ERROR],
                 note=f"declined ({seal['reason']}): {seal['line']}", _decline_card=seal, _auto_picked=None,
@@ -6955,7 +7052,8 @@ def board_flow_field(store: ni.NIStore, item_id: str, *, read_only: bool = False
         key = access.get("key") if isinstance(access.get("key"), dict) else None
         out["access"] = {"host": str(access.get("host") or ""),
                          "provider": str(access.get("provider") or ""),
-                         "key": {"docs_url": str(key.get("docs_url") or "")} if key else None,
+                         "key": {"docs_url": str(key.get("docs_url") or ""), "place": key.get("in") is None}
+                         if key else None,
                          "contact": bool(access.get("contact"))}
     out["actions"] = ni_master.actions_for(
         state, record, shell=shell, awaiting_yes=False, item_state="", has_payload=False)
@@ -7178,11 +7276,12 @@ def answer_model_consent(store: ni.NIStore, item_id: str, stamped: dict,
 
 
 def apply_pick(store: ni.NIStore, item_id: str, url: str, record: dict, *,
-               pasted: bool, secrets, on_library_row: Callable[[dict], None] | None = None
-               ) -> tuple[dict | None, list[str], bool]:
+               pasted: bool, secrets, on_library_row: Callable[[dict], None] | None = None,
+               needs_key: bool = False) -> tuple[dict | None, list[str], bool]:
     """Resume a source-pick pause with ``url``: mark a pasted link, seal a tapped Library
     row (``on_library_row`` runs right after, for the vote), ask for missing access, or
-    start the worker. Returns ``(library_row, missing, started)``."""
+    start the worker. ``needs_key`` (P3): the user said their pasted https link takes their key, so the card asks
+    where it goes and for the key before the first fetch. Returns ``(library_row, missing, started)``."""
     assert store is not None and item_id and url, "store + id + url required"
     assert isinstance(record, dict), "record required"
     if pasted:
@@ -7202,6 +7301,11 @@ def apply_pick(store: ni.NIStore, item_id: str, url: str, record: dict, *,
     missing: list[str] = []
     if lib_row and seal_access(store, item_id, url, lib_row) is not None:
         missing = missing_access(store, item_id, secrets)
+    elif pasted and needs_key and url.startswith("https://"):
+        ask_for_key(store, item_id, url)
+        missing = missing_access(store, item_id, secrets)
+        if missing:
+            return lib_row, missing, False  # the card is paused at awaiting_access, asking for the key
     if missing:
         pause_for_access(store, item_id, url, missing)
         return lib_row, missing, False

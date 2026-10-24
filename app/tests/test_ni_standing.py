@@ -275,3 +275,16 @@ def test_free_marks_one_run_never_the_next_start(lib, monkeypatch) -> None:  # n
     store, item_id = _open_order(monkeypatch, lib, since=NOW.isoformat(), free=True)
     fresh = ni_flow._fresh_record(ni_flow._flow_read(store, item_id), _ASK, "source", "no: looking again")
     assert "free" not in fresh["_looking"] and fresh["_looking"]["since"] == NOW.isoformat()
+
+
+def test_an_order_waits_while_the_library_is_not_there(lib, monkeypatch) -> None:  # noqa: F811
+    """A Library fault at tick time is not the user's choice: the order waits, as for a busy slot, and is not closed."""
+    store, item_id = _open_order(monkeypatch, lib, since=NOW.isoformat(), runs=1,
+                                 next_at=(NOW - timedelta(minutes=1)).isoformat())
+    before = ni_flow._flow_read(store, item_id)
+    monkeypatch.setattr(ni, "_clock", lambda: NOW)
+    monkeypatch.setattr(ni_flow, "_resolve_library", lambda: None)
+    monkeypatch.setattr(ni_refresh, "take_budget", lambda conn, now: (_ for _ in ()).throw(AssertionError("charged")))
+    started = _started(monkeypatch)
+    assert ni_standing.run_due(store) is None and started == []
+    assert ni_flow._flow_read(store, item_id) == before

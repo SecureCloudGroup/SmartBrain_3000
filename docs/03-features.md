@@ -412,7 +412,14 @@ How a card comes to life:
    answers, the card says so — *"I couldn't build a reliable card for this"* —
    with one plain line on why and up to three links to pages that may help. Those links open in
    a new tab; SmartBrain shows nothing it read off them. Pasting your own link
-   always works. Whatever is built is frozen: nothing can quietly change it
+   always works. If the link needs your own key, tick **It needs my key** (a
+   link that answers "unauthorized" asks by itself): the card asks where the
+   key goes, in the address or in a header, by the name the provider's docs
+   give, and then for the key. It is stored encrypted, sent only to that site
+   over a secure connection and never to a model, and another card on the same
+   site reuses it. When research finds a source that asks for a key, the card
+   offers **Use my key for** that site. Pages you have to sign in to are not
+   supported yet. Whatever is built is frozen: nothing can quietly change it
    later without asking you again. When you **Keep** a card that research built
    or that you made from a pasted link, its source joins your own sources, and
    the next ask for the same thing builds from it in seconds, with no model and

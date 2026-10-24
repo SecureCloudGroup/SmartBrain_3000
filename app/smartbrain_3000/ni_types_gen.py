@@ -10,7 +10,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 ActionKind = Literal[
     "activate", "activate_sites", "add_credential", "allow_model", "answer_date", "cancel", "delete",
     "dismiss", "edit", "fill_param", "fix", "give_access", "keep", "keep_looking", "pause", "pick_source",
-    "refine", "resume", "retry", "review_fix", "run", "stop_looking", "use_local"
+    "refine", "resume", "retry", "review_fix", "run", "stop_looking", "use_key", "use_local"
 ]
 
 Author = Literal[
@@ -78,12 +78,16 @@ class FlowBrowser(TypedDict):
 
 class FlowDocsKey(TypedDict):
     docs_url: str
+    place: bool
 
 class FlowAccess(TypedDict):
     host: str
     provider: str
     key: FlowDocsKey | None
     contact: bool
+
+class FlowKeyWall(TypedDict):
+    host: str
 
 class FlowLooking(TypedDict):
     since: str
@@ -95,6 +99,7 @@ class FlowDecline(TypedDict):
     line: str
     links: list[DeclineLink]
     looking: FlowLooking | None
+    key_wall: FlowKeyWall | None
 
 FlowQuestionKind = Literal[
     "add_key", "fill_params", "give_access", "model_consent", "pick_source", "supply_date", "validate"
@@ -182,7 +187,7 @@ RecipeWindow = TypedDict("RecipeWindow", {
 })
 
 ReopenKind = Literal[
-    "delete", "keep_looking", "pick_source", "retry", "stop_looking"
+    "delete", "keep_looking", "pick_source", "retry", "stop_looking", "use_key"
 ]
 
 class RowDraft(TypedDict):

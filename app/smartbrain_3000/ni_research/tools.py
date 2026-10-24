@@ -23,7 +23,7 @@ from .. import (
     page_verify,
     pagegraph,
 )
-from ..netguard import FetchError
+from ..netguard import FetchError, key_wall
 from ..ni_verify.classes import shadow_reasons
 from ..ni_verify.rows import SourceInfo, read_result
 from .ctx import (
@@ -94,7 +94,8 @@ def fetch_sample(ctx: ResearchCtx, url: str) -> dict:
     return _done(ctx, "fetch_sample", url, got)
 
 
-_FETCH_ERRORS = frozenset({"not_data", "fetch_failed", "robots", "redirect"})
+_FETCH_ERRORS = frozenset({"not_data", "fetch_failed", "robots", "redirect", "needs_key"})
+MAX_KEY_WALLS = 3   # key-walled addresses a run remembers for the card's Use my key
 
 
 def _already_fetched(ctx: ResearchCtx, url: str) -> dict | None:
@@ -152,6 +153,11 @@ def _fetch_and_digest(ctx: ResearchCtx, url: str, fmt: str | None, robots: bool 
             return error("redirect", "the source redirected; redirects are not followed")
         if exc.kind in ("not_json", "not_text", "not_csv", "not_feed", "not_xml", "not_table"):
             return error("not_data", "not a data file or a page with a data table")
+        if key_wall(exc) and url.startswith("https://"):
+            # P3: the run reads no key; the user can bring theirs for this address once the run ends (Use my key)
+            if url not in ctx.key_walls and len(ctx.key_walls) < MAX_KEY_WALLS:
+                ctx.key_walls.append(url)
+            return error("needs_key", "the source asks for a key; the user can add theirs after this run")
         return error("fetch_failed", clean_text(str(exc), 120))
     return _keep_sample(ctx, url, seen, parsed, digest(url, seen, parsed))
 

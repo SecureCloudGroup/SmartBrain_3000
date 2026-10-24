@@ -39,7 +39,7 @@ MAX_ENTRIES = 5             # questions one kept address answers
 MAX_MISSES = 3              # failed fetches in a row before a kept address is forgotten
 MAX_TRIES = 2               # kept addresses read for one ask
 _DRAFT_KEYS = ("version", "title", "goal", "params", "source", "pipeline", "scene", "display", "model")
-_FETCH_MISSES = frozenset({"fetch_failed", "not_data", "robots", "redirect"})
+_FETCH_MISSES = frozenset({"fetch_failed", "not_data", "robots", "redirect", "needs_key"})
 _LOCK = threading.Lock()    # guards read-merge-write of the sources slot
 
 
