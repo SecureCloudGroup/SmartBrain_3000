@@ -103,16 +103,46 @@ def test_an_answer_resets_a_seed_sources_failed_reads(seeded, monkeypatch) -> No
     assert ni_intake._seed_state(store) == {"off": [], "misses": {}}
 
 
-@pytest.mark.parametrize("damage", ["file", "version", "id", "draft"])
+def _damage(row: dict, damage: str) -> None:
+    """One way a shipped row can be wrong; every one of them is skipped, never read."""
+    entry = row["kept"]["entries"][0]
+    source = entry["draft"]["source"]
+    if damage == "id":
+        row["id"] = "local-k123"                                   # not a seed row
+    elif damage == "draft":
+        entry["draft"]["pipeline"] = [{"op": "llm", "prompt": "x"}]   # not replayable
+    elif damage == "http":   # the address it reads is in the clear, though its draft says https
+        row["access"]["url_template"] = URL.replace("https://", "http://")
+    elif damage == "key":    # keyed as another address: it would dodge the user's declines and off list
+        row["kept"]["key"] = "https://elsewhere.example.org/q.json"
+    elif damage == "provider":
+        row["provider"]["name"] = "elsewhere.example.org"
+    elif damage == "draft-url":   # the entry replays another address than the row reads
+        source["url"] = "https://elsewhere.example.org/q.json"
+    elif damage == "source-text":
+        entry["draft"]["source"] = "https://data.example.org/q.json"
+    elif damage == "headers":
+        source["headers"] = {"X-Api-Key": "abc"}
+    elif damage == "secret-query":
+        source["secret_query"] = {"key": "api_key"}
+    elif damage == "title":
+        entry["title"] = "t" * (ni_intake.MAX_TITLE + 1)
+    elif damage == "request":
+        entry["request"] = "r" * (ni_intake.MAX_REQUEST + 1)
+
+
+_ROW_DAMAGE = ["id", "draft", "http", "key", "provider", "draft-url", "source-text", "headers", "secret-query",
+               "title", "request"]
+
+
+@pytest.mark.parametrize("damage", ["file", "version", *_ROW_DAMAGE])
 def test_a_seed_this_version_cannot_read_is_skipped(seeded, monkeypatch, tmp_path, damage) -> None:
     row = copy.deepcopy(seeded)
     body = {"version": ni_intake.SEED_VERSION, "rows": [row]}
     if damage == "version":
         body["version"] = ni_intake.SEED_VERSION + 1
-    elif damage == "id":
-        row["id"] = "local-k123"                                   # not a seed row
-    elif damage == "draft":
-        row["kept"]["entries"][0]["draft"]["pipeline"] = [{"op": "llm", "prompt": "x"}]   # not replayable
+    elif damage != "file":
+        _damage(row, damage)
     path = tmp_path / f"seed-{damage}.json"
     path.write_text("{not json" if damage == "file" else json.dumps(body))
     monkeypatch.setattr(ni_intake, "SEED_FILE", path)
@@ -120,6 +150,43 @@ def test_a_seed_this_version_cannot_read_is_skipped(seeded, monkeypatch, tmp_pat
     store = _store()
     Net(monkeypatch, {URL: QUAKES})
     assert ni_intake.reuse(store, _ask(store), _ASK, dict(_INTENT)) is None
+
+
+@pytest.mark.parametrize("damage", ["source-text", "draft-url", "key"])
+def test_one_damaged_seed_row_never_costs_the_rest(seeded, monkeypatch, tmp_path, damage) -> None:
+    bad = copy.deepcopy(seeded)
+    bad["id"] = ni_intake.SEED_PREFIX + "bad"
+    _damage(bad, damage)
+    path = tmp_path / "seed-mixed.json"
+    path.write_text(json.dumps({"version": ni_intake.SEED_VERSION, "rows": [bad, seeded]}))
+    monkeypatch.setattr(ni_intake, "SEED_FILE", path)
+    assert [r["id"] for r in ni_intake.seed_rows()] == [seeded["id"]]
+    store = _store()
+    Net(monkeypatch, {URL: QUAKES})
+    assert ni_intake.reuse(store, _ask(store), _ASK, dict(_INTENT))["state"] == "ready"
+
+
+def test_a_kept_address_is_never_read_in_the_clear(monkeypatch) -> None:
+    """The research context's own rule: an address from the open web (search, kept, seed) counts only over https."""
+    from smartbrain_3000.ni_research.ctx import WEB_ORIGINS, ResearchCtx
+    ctx = ResearchCtx(request=_ASK, question={})
+    for origin in WEB_ORIGINS:
+        ctx.record(f"http://{origin}.example.org/q.json", origin)
+        ctx.record(f"https://{origin}.example.org/q.json", origin)
+    assert sorted(ctx.urls) == sorted(f"https://{o}.example.org/q.json" for o in WEB_ORIGINS)
+
+
+def test_a_no_holds_when_a_later_seed_words_its_question_otherwise(lib, seeded, monkeypatch, tmp_path) -> None:  # noqa: F811
+    store, item_id, out, _ = _flow(monkeypatch, _wrap(lib), store=_store(), seam=Script(), cloud="anthropic/x",
+                                   consented=True)
+    assert out["state"] == "ready" and ni_intake.forget(store, store.get_item(item_id)) == 1
+    later = copy.deepcopy(seeded)   # the next release's seed: the same address, its question worded otherwise
+    later["kept"]["entries"][0]["question"] = {**later["kept"]["entries"][0]["question"], "cadence": "daily"}
+    path = tmp_path / "seed-later.json"
+    path.write_text(json.dumps({"version": ni_intake.SEED_VERSION, "rows": [later]}))
+    monkeypatch.setattr(ni_intake, "SEED_FILE", path)
+    Net(monkeypatch, {URL: QUAKES})
+    assert ni_intake.reuse(store, _ask(store), _ASK, dict(_INTENT)) is None, "the user's No still holds"
 
 
 def test_a_seed_row_is_one_address_and_only_what_can_be_replayed(lib, monkeypatch) -> None:  # noqa: F811
@@ -187,9 +254,10 @@ def test_the_seed_asks_are_a_plain_list() -> None:
 
 
 @needs_tool
-def test_a_run_turns_a_card_research_built_into_a_candidate(lib, monkeypatch) -> None:  # noqa: F811
+def test_a_run_turns_a_card_research_built_into_a_candidate(lib, seeded, monkeypatch) -> None:  # noqa: F811
     """``run_one`` on a fresh store, as a new user: the intent read, Keep looking tapped, research lands the card,
-    and the row its Keep would write is the candidate."""
+    and the row its Keep would write is the candidate. A run reads no bundled seed (here one already answers the
+    ask), so a run after an export researches again instead of confirming the last export."""
     tool = _tool()
     Net(monkeypatch, {URL: QUAKES})
     monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
@@ -205,3 +273,4 @@ def test_a_run_turns_a_card_research_built_into_a_candidate(lib, monkeypatch) ->
     ni_research_flow.set_research_chat(None)
     assert run["outcome"] == "candidate", run.get("detail")
     assert run["path"] == "research" and run["url"] == URL and run["row"]["id"].startswith(ni_intake.SEED_PREFIX)
+    assert ni_intake.seed_rows() == [seeded], "the shipped seed is back in place after the run"

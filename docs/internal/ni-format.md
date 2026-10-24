@@ -883,9 +883,14 @@ seed after the user's own rows, skipping an address the user holds or declined, 
 checks, with the `seed` origin (`why: a source SmartBrain checked`, audited `ni_seed_pick`); the card lands held for
 Keep with `_built_from.path: seed`, which the live measure counts with the Library. Keep writes it into the user's
 own sources like any kept card. No on it, or 3 failed reads in a row, turns that entry off for this user only: the
-sealed reserved slot `seed` holds `{off: [<address>#<question hash>], misses}`. The file is read once per process
-and never written at runtime; a row, entry or file this version cannot read, or a draft the researcher's tools would
-not replay, is skipped.
+sealed reserved slot `seed` holds `{off: [<address>#<question hash>], misses}`, and a No also turns off the address
+for the question it was asked, so a later seed that words its entry otherwise keeps the No. The file is read once per
+process and never written at runtime. A kept row, the user's or the seed's, is read only when its parts name one
+address: `access.url_template` is https, `kept.key` is its normal form, `provider.name` is its host, and every entry's
+`draft.source.url` is that address too, so the declines, the held check and the off list key on what is fetched. A
+row, entry or file this version cannot read, an entry over its caps (request 500, title 200 characters), or a draft
+the researcher's tools would not replay (one plain https `http_json` source: no headers, no secret query, no key, no
+model step) is skipped, one row at a time. Every open-web origin (`search`, `kept`, `seed`) is read over https only.
 
 ## 31. The user's own key and contact email
 

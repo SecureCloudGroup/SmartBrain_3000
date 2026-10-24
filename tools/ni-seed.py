@@ -34,6 +34,7 @@ sys.path.insert(0, str(REPO / "app"))
 
 ASKS = REPO / "tools" / "ni-seed-asks.txt"
 SEED_FILE = REPO / "app" / "smartbrain_3000" / "ni_seed.json"
+NO_SEED = REPO / "tools" / "ni-seed-none.json"   # never written: a run reads no seed
 VERDICTS = ("right", "wrong")
 
 
@@ -67,6 +68,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     ni_flow.set_secrets_provider(lambda: secrets)
     bridge = lambda _m, prompt: llm(prompt, 600)
     out: dict = {"ask": ask, "outcome": "", "path": "", "host": "", "title": "", "url": "", "reading": [], "row": None}
+    shipped, ni_intake.SEED_FILE = ni_intake.SEED_FILE, NO_SEED   # research again, never confirm the last export
     try:
         item_id = ni_flow.create_shell_item(store, ask)
         rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model)
@@ -90,6 +92,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
         out["outcome"], out["detail"] = "crash", f"{type(exc).__name__}: {str(exc)[:160]}"
     finally:
         ni_flow.set_secrets_provider(None)
+        ni_intake.SEED_FILE = shipped
     return out
 
 
@@ -122,11 +125,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                 ev.research_seam(session, "cloud", local_model=args.model, cloud_model=args.research_model,
                                  real_chat=chat, real_search=ev.live_search):
             run = run_one(ask, idx, llm, args.model)
-        cost = float(session.research_stats().get("cost_usd") or 0.0)
+        stats = session.research_stats()   # cost_usd only when the gateway reports one; the tokens always
+        cost = float(stats.get("cost_usd") or 0.0)
         spend += cost
-        run.update(id=f"S{n}", secs=round(time.time() - started, 1), cost_usd=round(cost, 4))
+        run.update(id=f"S{n}", secs=round(time.time() - started, 1), cost_usd=round(cost, 4),
+                   research={k: stats[k] for k in ("calls", "prompt", "completion", "cache_read", "cache_write")},
+                   research_models=sorted({str(t.get("model") or "") for t in session.data.get("research") or []}))
         runs.append(run)
-        print(f"[{run['outcome']:>14}] S{n:<3} {ask[:44]:<44} {run['secs']:>5}s ${cost:.3f}  {run['host']}", flush=True)
+        print(f"[{run['outcome']:>14}] S{n:<3} {ask[:44]:<44} {run['secs']:>5}s ${cost:.3f} "
+              f"{stats['calls']} calls {stats['prompt'] + stats['completion']} tok  {run['host']}", flush=True)
         if run["row"] is not None:
             print(f"{'':>17}reading: {' | '.join(run['reading'])[:200]}", flush=True)
             print(f"{'':>17}from:    {run['url'][:160]} ({run['title'] or 'no title'})", flush=True)
@@ -141,7 +148,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     counts: dict[str, int] = {}
     for r in runs:
         counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
-    print(f"\nSUMMARY {json.dumps(counts)} research ${spend:.2f}; check {len(candidates)} in {verdicts}")
+    used = {k: sum(r["research"][k] for r in runs) for k in ("calls", "prompt", "completion", "cache_read")}
+    print(f"\nSUMMARY {json.dumps(counts)} research ${spend:.2f} {json.dumps(used)}; check {len(candidates)} in "
+          f"{verdicts}")
     return 0
 
 

@@ -87,7 +87,8 @@ def test_keep_on_the_board_writes_the_source(client, lib, monkeypatch) -> None: 
 # --- what a kept source matches ------------------------------------------------------------------------------------
 
 def _entry(question: dict, request: str = _ASK, title: str = "Earthquakes, past hour") -> dict:
-    return {"question": question, "request": request, "title": title, "draft": {}, "at": "2026-10-24", "misses": 0}
+    return {"question": question, "request": request, "title": title, "draft": {"source": {"type": "http_json", "url": URL}},
+            "at": "2026-10-24", "misses": 0}
 
 
 @pytest.mark.parametrize(("new", "fits"), [
@@ -258,6 +259,7 @@ def test_one_kept_source_that_faults_never_hides_the_next(lib, monkeypatch) -> N
     assert ni_intake.remember(store, store.get_item(first))
     other = "https://other.example.org/quakes.json"
     entry = {**_kept(store)[0]["kept"]["entries"][0], "at": "2099-01-01"}   # the newest: tried first
+    entry["draft"] = {**entry["draft"], "source": {**entry["draft"]["source"], "url": other}}   # it replays its own
     row = ni_intake._new_row(ni_research_flow.normal_url(other), other, entry)
     row["kept"]["entries"] = [entry]
     ni_intake._write(store, [*library_index.LocalSources(store).list(), row])

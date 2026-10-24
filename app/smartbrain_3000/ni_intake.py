@@ -32,6 +32,7 @@ import logging
 import pathlib
 import threading
 from datetime import UTC
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from . import library_index, ni, ni_flow, ni_recipe, ni_research_flow, ni_standing
@@ -48,6 +49,8 @@ KEEP_PATHS = frozenset({"research", "mapping", "kept", "seed"})   # built outsid
 MAX_ENTRIES = 5             # questions one kept address answers
 MAX_MISSES = 3              # failed fetches in a row before a kept address is forgotten
 MAX_TRIES = 2               # kept addresses read for one ask
+MAX_REQUEST = 500           # the user's words an entry keeps
+MAX_TITLE = 200             # a kept source's title
 _DRAFT_KEYS = ("version", "title", "goal", "params", "source", "pipeline", "scene", "display", "model")
 _FETCH_MISSES = frozenset({"fetch_failed", "not_data", "robots", "redirect", "needs_key"})
 _LOCK = threading.Lock()    # guards read-merge-write of the sources slot
@@ -78,14 +81,15 @@ def _question_of(store: ni.NIStore, item: dict) -> dict | None:
     return ni_research_flow.question_from_intent(str(item["spec"].get("goal") or record.get("request") or ""), intent)
 
 
-def _replayable(draft: dict) -> bool:
-    """Can the researcher's tools replay this draft as it stands (https, http_json, no key, no model step)?"""
-    url = str((draft.get("source") or {}).get("url") or "")
-    if not url.startswith("https://") or (draft.get("source") or {}).get("type") != "http_json":
+def _replayable(draft: object) -> bool:
+    """Can the researcher's tools replay this draft as it stands (one plain https http_json source: no headers, no
+    key, no model step)? The same rule ``propose_card`` applies, so a source it would refuse is never read."""
+    source = draft.get("source") if isinstance(draft, dict) else None
+    if not tools.plain_source(source) or not str(source.get("url") or "").startswith("https://"):
         return False
     try:
         ni_recipe.check_researcher_draft(draft)
-    except ValueError:
+    except (ValueError, TypeError, AttributeError, KeyError):   # a damaged draft is not replayable
         return False
     return True
 
@@ -102,8 +106,9 @@ def _kept_entry(store: ni.NIStore, item: dict) -> tuple[str, str, dict] | None:
     if question is None or question.get("entities") or not _replayable(draft):
         return None   # a compare, or not replayable by the researcher's tools (a key, a model step)
     url = str(draft["source"]["url"])
-    entry = {"question": question, "request": one_line(str(spec.get("goal") or ""), 500), "draft": draft,
-             "title": str(built.get("title") or ""), "at": ni._clock().astimezone(UTC).isoformat()[:40], "misses": 0}
+    entry = {"question": question, "request": one_line(str(spec.get("goal") or ""), MAX_REQUEST), "draft": draft,
+             "title": one_line(str(built.get("title") or ""), MAX_TITLE),
+             "at": ni._clock().astimezone(UTC).isoformat()[:40], "misses": 0}
     return normal_url(url), url, entry
 
 
@@ -171,15 +176,15 @@ def forget(store: ni.NIStore, item: dict) -> int:
             _write(store, rows)
     off = [_sig(key, e["question"]) for r in seed_rows() if r["kept"]["key"] == key
            for e in _entries(r) if matches(question, request, e)]
-    if off:
-        _seed_off(store, off)
+    if off:   # this question is off too, so a later seed that words the entry otherwise keeps the No
+        _seed_off(store, [*off, _sig(key, question)])
     return gone + len(off)
 
 
 def _new_row(key: str, url: str, entry: dict) -> dict:
     """A kept address as one of the user's own sources (the Add-a-source record shape, so the Library page shows it)."""
     assert key and url, "an address"
-    host = (url.split("/")[2] if url.count("/") >= 2 else "")[:253]
+    host = (urlsplit(url).hostname or "").lower()[:253]
     name = one_line(entry["title"] or entry["draft"].get("title") or host, 120)
     return {"id": KEPT_PREFIX + hashlib.sha256(key.encode()).hexdigest()[:11], "name": name,
             "description": one_line(f"Kept for: {entry['request']}", 600),
@@ -273,9 +278,10 @@ def reuse(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict |
     held = declined | {r["kept"]["key"] for r in own}
     seeded = [(r, e, True) for r in seed_rows() if r["kept"]["key"] not in held
               for e in _entries(r) if _fits(question, request, e, asked)]
-    if seeded:   # the user's own come first; a seed entry the user turned off is skipped
+    if seeded:   # the user's own come first; a seed entry turned off, or said No to for this question, is skipped
         off = set(_seed_state(store)["off"])
-        fits += [t for t in seeded if _sig(t[0]["kept"]["key"], t[1]["question"]) not in off]
+        fits += [t for t in seeded if _sig(t[0]["kept"]["key"], t[1]["question"]) not in off
+                 and _sig(t[0]["kept"]["key"], question) not in off]
     for n, (row, entry, seed) in enumerate(fits[:MAX_TRIES], 1):  # bounded: a couple of reads per ask
         try:
             landed = _try(store, item_id, request, intent, question, row, entry, n, seed=seed)
@@ -288,23 +294,42 @@ def reuse(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dict |
 
 
 def _row_ok(row: object) -> bool:
-    """A kept row this version can read: a row is user data that outlives upgrades, so a malformed one is skipped."""
-    return (isinstance(row, dict) and isinstance(row.get("kept"), dict) and isinstance(row["kept"].get("key"), str)
+    """A kept row this version can read: a row is user data that outlives upgrades (and the seed ships in a file),
+    so a malformed one is skipped. Its parts must name one address: the address it reads (https), its key and its
+    provider's host agree, so the declines, the held check and the off list all key on what is actually read."""
+    if not (isinstance(row, dict) and isinstance(row.get("kept"), dict) and isinstance(row["kept"].get("key"), str)
             and isinstance(row.get("access"), dict) and isinstance(row["access"].get("url_template"), str)
-            and isinstance(row.get("provider"), dict))
+            and isinstance(row.get("provider"), dict)):
+        return False
+    url = row["access"]["url_template"]
+    return (url.startswith("https://") and _same_address(url, row["kept"]["key"])
+            and str(row["provider"].get("name") or "") == (urlsplit(url).hostname or "").lower())
+
+
+def _same_address(url: str, key: str) -> bool:
+    """Is ``url`` the address ``key`` names? (An address ``urlsplit`` cannot read is no address.)"""
+    try:
+        return normal_url(url) == key
+    except ValueError:
+        return False
 
 
 def _entry_ok(entry: object) -> bool:
-    """A kept entry this version can read (the shape ``remember`` writes)."""
+    """A kept entry this version can read (the shape ``remember`` writes, its words within their caps)."""
     return (isinstance(entry, dict) and isinstance(entry.get("question"), dict)
             and all(isinstance(entry.get(k), str) for k in ("request", "title", "at"))
-            and isinstance(entry.get("draft"), dict))
+            and len(entry["request"]) <= MAX_REQUEST and len(entry["title"]) <= MAX_TITLE
+            and isinstance(entry.get("draft"), dict) and isinstance(entry["draft"].get("source"), dict)
+            and isinstance(entry["draft"]["source"].get("url"), str))
 
 
 def _entries(row: dict) -> list[dict]:
-    """A kept row's readable entries (none when it is not a kept row)."""
+    """A kept row's readable entries, each one replaying the row's own address (none when it is not a kept row)."""
     entries = row["kept"].get("entries") if isinstance(row.get("kept"), dict) else None
-    return [e for e in entries[:MAX_ENTRIES] if _entry_ok(e)] if isinstance(entries, list) else []
+    if not isinstance(entries, list):
+        return []
+    return [e for e in entries[:MAX_ENTRIES]
+            if _entry_ok(e) and _same_address(e["draft"]["source"]["url"], row["kept"]["key"])]
 
 
 def _try(store: ni.NIStore, item_id: str, request: str, intent: dict, question: dict, row: dict, entry: dict,
@@ -375,9 +400,13 @@ def _seed_at(path: str) -> tuple[dict, ...]:
     rows = raw.get("rows") if isinstance(raw, dict) and raw.get("version") == SEED_VERSION else None
     out = []
     for row in (rows if isinstance(rows, list) else [])[:MAX_SEED_ROWS]:  # bounded: MAX_SEED_ROWS
-        if not _row_ok(row) or not str(row.get("id") or "").startswith(SEED_PREFIX):
+        try:
+            if not _row_ok(row) or not str(row.get("id") or "").startswith(SEED_PREFIX):
+                continue
+            entries = [e for e in _entries(row) if _replayable(e["draft"])]
+        except Exception as exc:  # one damaged row never costs the rest of the seed
+            log.warning("ni_intake: a seed row was skipped: %s", type(exc).__name__)
             continue
-        entries = [e for e in _entries(row) if _replayable(e["draft"])]
         if entries:
             out.append({**row, "kept": {**row["kept"], "entries": entries}})
     return tuple(out)
@@ -389,7 +418,7 @@ def seed_rows() -> list[dict]:
 
 
 def _sig(key: str, question: dict) -> str:
-    """One seed entry: its address and the question it answers."""
+    """An address and a question: a seed entry's (the question it answers), or a No's (the question it was asked)."""
     blob = json.dumps(question, sort_keys=True, separators=(",", ":"), default=str)
     return f"{key}#{hashlib.sha256(blob.encode()).hexdigest()[:16]}"
 

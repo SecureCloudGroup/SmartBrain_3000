@@ -420,6 +420,12 @@ def brief_spec(ctx: ResearchCtx, spec: dict, parsed: object) -> dict:
             "display": {"size": display_size_for_span(str(built["scene"]["spans"]["desktop"]))}}
 
 
+def plain_source(source: object) -> bool:
+    """Is ``source`` the one kind a researcher draft reads: a plain http_json source, no headers, no secret query?"""
+    return (isinstance(source, dict) and source.get("type") == "http_json" and not source.get("headers")
+            and not source.get("secret_query"))
+
+
 def _run(ctx: ResearchCtx, draft: object) -> dict:
     """Validate ``draft`` as a researcher draft and run its pipeline on the stored sample (no network)."""
     assert isinstance(ctx, ResearchCtx), "a research ctx"
@@ -435,7 +441,7 @@ def _run(ctx: ResearchCtx, draft: object) -> dict:
     except (ValueError, TypeError, AssertionError) as exc:
         return error("invalid_spec", str(exc), limit=MAX_SPEC_DETAIL)
     source = spec.get("source") or {}
-    if source.get("type") != "http_json" or source.get("headers") or source.get("secret_query"):
+    if not plain_source(source):
         return error("invalid_spec", "a researcher draft reads one plain http_json source")
     key = normal_url(str(source.get("url") or ""))
     sample = ctx.samples.get(key)
