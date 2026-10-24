@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from . import ni_brief, ni_compare, ni_recipe
+from . import ni_brief, ni_compare, ni_models, ni_recipe
 from .zones import zone_named
 
 log = logging.getLogger("smartbrain.ni")
@@ -7428,14 +7428,17 @@ def _l1_already_tried_this_streak(last_iso: object,
 
 
 def _l1_resolve_local_model(store: NIStore, gateway_mod, spec: dict) -> str | None:
-    """Resolve the ``ni`` route (or item override); return None on non-local / busy."""
+    """The item override, else the ``refresh`` step's local model (``ni_models``: repair is local-only, whatever the
+    step's setting); None on non-local / busy."""
     assert store is not None and gateway_mod is not None, "store + gateway required"
     assert isinstance(spec, dict), "spec must be a dict"
     routes: dict = {}
     if hasattr(gateway_mod, "load_routes"):
         routes = gateway_mod.load_routes(store.conn)
     override = spec.get("model")
-    model = override or gateway_mod.resolve_model("ni", routes)
+    if override == ni_brief.LOCAL_MODEL:
+        override = None
+    model = override or ni_models.choose(store.conn, "refresh", routes, gateway_mod).local
     if not model or not gateway_mod.is_local(model):
         return None
     if not gateway_mod.local_available():
@@ -7458,7 +7461,7 @@ def _attempt_l1_repair(store: NIStore, item: dict, gateway_mod, model: str,
     expected_rev = int(item["spec_rev"])
     prompt = _build_l1_repair_prompt(item["spec"], exc, raw_excerpt)
     try:
-        text = _l1_local_call(gateway_mod, model, prompt)
+        text = _l1_local_call(gateway_mod, model, prompt, store.conn)
     except NIError:
         _record_repair_failed(store, item["id"], started, "call_failed")
         return
@@ -7486,14 +7489,15 @@ def _attempt_l1_repair(store: NIStore, item: dict, gateway_mod, model: str,
                      error=None, contract_ok=None)
 
 
-def _l1_local_call(gateway_mod, model: str, prompt: str) -> str:
-    """Local, no-tools chat call for L1 repair; wraps GatewayError as NIError."""
+def _l1_local_call(gateway_mod, model: str, prompt: str, conn=None) -> str:
+    """Local, no-tools chat call for L1 repair (recorded as the ``refresh`` step); wraps GatewayError as NIError."""
     assert gateway_mod is not None and model, "gateway + model required"
     assert isinstance(prompt, str) and prompt, "prompt required"
     try:
         data = gateway_mod.chat([{"role": "user", "content": prompt}], model)
     except gateway_mod.GatewayError as exc:
         raise NIError("llm_error", str(exc.status_code)) from None
+    ni_models.record(conn, "refresh", model, data)
     text = gateway_mod.completion_text(data) or ""
     if not isinstance(text, str):
         raise NIError("llm_error", "non-string reply")
@@ -8758,18 +8762,16 @@ def _shape_kb_hit(hit: object) -> dict:
 def _first_local_model(gateway_mod, routes: dict) -> str | None:
     """The first LOCAL model on the ni / chat / agent routes, or None."""
     assert gateway_mod is not None and isinstance(routes, dict), "gateway + routes required"
-    for capability in ("ni", "chat", "agent"):  # bounded to 3
-        candidate = gateway_mod.resolve_model(capability, routes)
-        if candidate and gateway_mod.is_local(candidate):
-            return candidate
-    return None
+    return ni_models.local_model(None, routes, gateway_mod)
 
 
 def _card_model(spec: dict, gateway_mod, routes: dict, store: NIStore, item_id: str) -> str | None:
-    """The model a model-source card refreshes on, following the build path's route order.
+    """The model a model-source card refreshes on.
 
-    An item-level ``spec.model`` wins. Else the ``ni`` route, then a LOCAL chat / agent model,
-    then whatever chat / agent is. A model off this computer needs this card's consent
+    An item-level ``spec.model`` wins. Else the ``refresh`` step's setting (``ni_models``): ``local``, or ``auto``
+    with a local model routed, refreshes on the local model. ``cloud`` (or ``auto`` with no local model) follows
+    the build path's order: the ``ni`` route, then a LOCAL chat / agent model, then whatever chat / agent is.
+    A model off this computer needs this card's consent
     (``spec._model_consent``); without it, or when the owner chose local (flow ``_use_local``),
     the card refreshes on the first local model, and only with none does it raise. Unlike the
     build path, an unconsented cloud ``ni`` route falls back to local here rather than asking.
@@ -8779,6 +8781,11 @@ def _card_model(spec: dict, gateway_mod, routes: dict, store: NIStore, item_id: 
     if spec.get("model"):
         return spec["model"]
     resolve = gateway_mod.resolve_model
+    choice = ni_models.choose(store.conn, "refresh", routes, gateway_mod)
+    if choice.setting == "local" or (choice.setting == "auto" and choice.local):
+        if not choice.local:
+            raise NIError("model_unrouted", "no local model routed")
+        return choice.local
     model = resolve("ni", routes)
     if not model:
         chat, agent = resolve("chat", routes), resolve("agent", routes)
@@ -8824,6 +8831,7 @@ def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore, item_id:
         data = gateway_mod.chat([{"role": "user", "content": source["instruction"]}], model)
     except gateway_mod.GatewayError as exc:
         raise NIError("model_error", str(exc.status_code)) from None
+    ni_models.record(store.conn, "refresh", model, data)
     text = gateway_mod.completion_text(data)
     if not isinstance(text, str) or not text:
         raise NIError("model_empty")
@@ -8836,18 +8844,14 @@ _OPTIONAL_LLM_ACQUIRE_S = 1.0   # how long an optional llm stage waits for the l
 def _first_local_route(routes: dict, gateway_mod) -> str | None:
     """The first LOCAL model on the ni / chat / agent routes, or None (a cloud route is never returned)."""
     assert isinstance(routes, dict), "routes required"
-    for capability in ("ni", "chat", "agent"):  # bounded to 3
-        model = gateway_mod.resolve_model(capability, routes)
-        if model and gateway_mod.is_local(model):
-            return model
-    return None
+    return ni_models.local_model(None, routes, gateway_mod)
 
 
 def _make_llm_call(store: NIStore, spec: dict, gateway_mod) -> object | None:
     """Build the ``(prompt) -> reply`` closure for the pipeline's llm stage (§13).
 
-    Same route resolution as ``_fetch_model``: item-level ``spec.model`` override wins,
-    else the ``ni`` capability route. Local-only (selfreview precedent): a non-local
+    An item-level ``spec.model`` override wins (the ``local/auto`` sentinel resolves to the local model at this
+    run), else the ``summary`` step's model (``ni_models``: local-only). Local-only (selfreview precedent): a non-local
     resolved model raises ``NIError('llm_requires_local')`` before any fetch, so the
     run fails cleanly without dialing the cloud. No tools are ever attached.
     """
@@ -8864,9 +8868,12 @@ def _make_llm_call(store: NIStore, spec: dict, gateway_mod) -> object | None:
         if not model:
             raise NIError("llm_unrouted", "no local model routed")
     else:
-        model = override or gateway_mod.resolve_model("ni", routes)
+        model = override or ni_models.choose(store.conn, "summary", routes, gateway_mod).model
     if not model:
-        raise NIError("llm_unrouted", "no ni model route configured")
+        routed = gateway_mod.resolve_model("ni", routes)
+        if routed and not gateway_mod.is_local(routed):
+            raise NIError("llm_requires_local", routed)
+        raise NIError("llm_unrouted", "no local model routed")
     if not gateway_mod.is_local(model):
         raise NIError("llm_requires_local", model)
     # a card whose every llm stage is optional (a brief's summary) never waits on the local slot: a busy model is
@@ -8886,6 +8893,7 @@ def _make_llm_call(store: NIStore, spec: dict, gateway_mod) -> object | None:
             if busy is not None and isinstance(exc, busy):
                 raise NIError("llm_error", "local model busy") from None
             raise
+        ni_models.record(store.conn, "summary", model, data)
         return gateway_mod.completion_text(data) or ""
 
     return _call

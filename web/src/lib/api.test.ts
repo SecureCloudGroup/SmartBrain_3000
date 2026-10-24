@@ -488,6 +488,15 @@ describe("page browser calls", () => {
     expect(JSON.parse(String(init!.body))).toEqual({ on: true });
   });
 
+  it("putNiStepModels puts {steps} to the step-models route", async () => {
+    const spy = captureFetch(200, { ok: true, steps: [] });
+    await api.putNiStepModels({ build: "cloud", refresh: "local" });
+    const [path, init] = spy.mock.calls[0];
+    expect(String(path)).toBe("/api/ni/step-models");
+    expect(init!.method).toBe("PUT");
+    expect(JSON.parse(String(init!.body))).toEqual({ steps: { build: "cloud", refresh: "local" } });
+  });
+
   it("niBriefSummary's refusal comes back as the server's sentence", async () => {
     captureFetch(409, { detail: "no local model" });
     await expect(api.niBriefSummary("c1", true)).rejects.toMatchObject({ status: 409, message: "no local model" });

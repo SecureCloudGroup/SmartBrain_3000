@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, type DiscoveredModel } from "$lib/api";
+  import { api, type DiscoveredModel, type NiStep, type NiStepModel, type NiStepSetting } from "$lib/api";
   import { describeError } from "$lib/errors";
 
   let models = $state<DiscoveredModel[]>([]);
@@ -19,8 +19,54 @@
   let ctxNotice = $state("");
   let ctxError = $state("");
 
+  // Neural Interface: cloud or local per step. Loaded on its own so a failure here never blanks the routing card.
+  let niSteps = $state<NiStepModel[]>([]);
+  let niChoice = $state<Record<string, NiStepSetting>>({});
+  let niBusy = $state(false);
+  let niNotice = $state("");
+  let niError = $state("");
+  const NI_OPTION: Record<NiStepSetting, string> = {
+    auto: "Automatic",
+    cloud: "Cloud model",
+    local: "Local model (this computer)",
+  };
+  const NI_AUTO: Record<NiStep, string> = {
+    build: "cloud when routed, else local",
+    research: "cloud when routed, else local",
+    refresh: "local when routed, else cloud",
+    summary: "always local",
+  };
+
+  function setNiSteps(steps: NiStepModel[]) {
+    niSteps = steps;
+    niChoice = Object.fromEntries(steps.map((s) => [s.step, s.setting]));
+  }
+
+  async function loadNiSteps() {
+    try {
+      setNiSteps((await api.getNiStepModels()).steps);
+    } catch (err) {
+      niError = describeError(err);
+    }
+  }
+
+  async function saveNiSteps() {
+    niBusy = true;
+    niError = "";
+    niNotice = "";
+    try {
+      setNiSteps((await api.putNiStepModels(niChoice)).steps);
+      niNotice = "Saved.";
+    } catch (err) {
+      niError = describeError(err);
+    } finally {
+      niBusy = false;
+    }
+  }
+
   async function load() {
     error = "";
+    void loadNiSteps();
     try {
       const [m, r, c] = await Promise.all([api.listModels(), api.getRoutes(), api.getContextLengths()]);
       models = m.models;
@@ -133,6 +179,33 @@
       <!-- Inline so the confirmation lands where the user is looking (was page-bottom, off-screen). -->
       {#if notice}<span class="muted" style="margin-left:0.75rem">{notice}</span>{/if}
       {#if saveError}<span class="error" style="margin-left:0.75rem">Save failed — {saveError}</span>{/if}
+    </p>
+  </div>
+
+  <h2 style="margin-top:2rem">Neural Interface steps</h2>
+  <p class="muted">
+    Choose a cloud or local model for each step of building and running a card. One-time work (building a card,
+    researching a source) defaults to the cloud model; repeated work (refreshes, summaries) defaults to the model
+    on this computer. A cloud step still asks each card before anything leaves this computer. Brief summaries
+    always stay local. See what each step cost under <a href="/usage">Usage &amp; cost</a>.
+  </p>
+  <div class="card">
+    {#each niSteps as s (s.step)}
+      <label for={`ni-step-${s.step}`}>{s.label}</label>
+      <select id={`ni-step-${s.step}`} bind:value={niChoice[s.step]}>
+        {#each s.options as o (o)}
+          <option value={o}>{o === "auto" ? `${NI_OPTION.auto} (${NI_AUTO[s.step]})` : NI_OPTION[o]}</option>
+        {/each}
+      </select>
+      <p class="muted" style="font-size:0.85rem; margin:0.25rem 0 0">
+        {#if s.model}Runs on {s.model} ({s.where}).{:else}No {s.setting === "auto" ? "" : `${s.setting} `}model is
+          routed for this step yet.{/if}
+      </p>
+    {/each}
+    <p style="margin-top:1rem">
+      <button disabled={niBusy || niSteps.length === 0} onclick={saveNiSteps}>{niBusy ? "Saving…" : "Save steps"}</button>
+      {#if niNotice}<span class="muted" style="margin-left:0.75rem">{niNotice}</span>{/if}
+      {#if niError}<span class="error" style="margin-left:0.75rem">{niError}</span>{/if}
     </p>
   </div>
 

@@ -2,11 +2,12 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { account } from "$lib/account.svelte";
-  import { api, type UsageRow } from "$lib/api";
+  import { api, type NiStepUsageRow, type UsageRow } from "$lib/api";
   import { describeError } from "$lib/errors";
   import Spinner from "$lib/components/Spinner.svelte";
 
   let rows = $state<UsageRow[]>([]);
+  let niRows = $state<NiStepUsageRow[]>([]);
   let total = $state(0);
   let error = $state("");
   let loaded = $state(false);
@@ -56,6 +57,7 @@
     try {
       const u = await api.getUsage(bounds());
       rows = u.usage;
+      niRows = u.ni_steps ?? [];
       total = u.total_cost;
     } catch (err) {
       error = describeError(err);
@@ -132,6 +134,34 @@
       </table>
       </div>
     </div>
+    {#if niRows.length > 0}
+      <div class="card">
+        <h2>Neural Interface by step</h2>
+        <p class="muted">
+          Which model each card step ran on, already counted in the total above. Choose cloud or local per
+          step in <a href="/settings/router">Settings › Model routing</a>.
+        </p>
+        <div class="table-scroll">
+        <table class="usage">
+          <thead>
+            <tr><th>Step</th><th>Model</th><th>Calls</th><th>Prompt</th><th>Completion</th><th>Cost</th></tr>
+          </thead>
+          <tbody>
+            {#each niRows as r (r.step + r.model)}
+              <tr>
+                <td>{r.label}</td>
+                <td>{r.model} <span class="muted">({r.local ? "local" : "cloud"})</span></td>
+                <td>{fmt(r.calls)}</td>
+                <td>{fmt(r.prompt_tokens)}</td>
+                <td>{fmt(r.completion_tokens)}</td>
+                <td>{r.local ? "free" : money(r.cost)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    {/if}
   {/if}
   {#if error}<p class="error">{error}</p>{/if}
 {:else}

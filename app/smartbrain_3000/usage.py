@@ -16,8 +16,8 @@ log = logging.getLogger(__name__)
 
 
 def record(conn, model: str, prompt_tokens: int, completion_tokens: int,
-           cost_usd: float | None = None) -> None:
-    """Insert one usage row (model + token counts).
+           cost_usd: float | None = None, purpose: str | None = None) -> None:
+    """Insert one usage row (model + token counts, and the caller's purpose label when it gave one).
 
     ``cost_usd`` is the API-equivalent cost a plan-covered call reports for itself
     (Claude Code's ``total_cost_usd``); None for providers whose cost is computed
@@ -25,10 +25,10 @@ def record(conn, model: str, prompt_tokens: int, completion_tokens: int,
     assert model, "model required to record usage"
     assert prompt_tokens >= 0 and completion_tokens >= 0, "token counts must be non-negative"
     conn.execute(
-        "INSERT INTO usage_log (id, model, prompt_tokens, completion_tokens, cost_usd)"
-        " VALUES (?, ?, ?, ?, ?);",
+        "INSERT INTO usage_log (id, model, prompt_tokens, completion_tokens, cost_usd, purpose)"
+        " VALUES (?, ?, ?, ?, ?, ?);",
         [uuid.uuid4().hex, model, int(prompt_tokens), int(completion_tokens),
-         float(cost_usd) if cost_usd is not None else None],
+         float(cost_usd) if cost_usd is not None else None, str(purpose)[:40] if purpose else None],
     )
 
 
@@ -77,8 +77,8 @@ def record_response(conn, model: str, response: object, purpose: str | None = No
     A response without a ``usage`` block is ignored; any failure is swallowed
     (logged at debug) so usage logging can never fail a turn. Prompt-cache tokens
     (either usage shape, see ``cache_tokens``) count toward the prompt total.
-    ``purpose`` is a caller label (e.g. "ni.fit") kept in the debug log:
-    usage_log has no purpose column, so rows aggregate by model in /api/usage.
+    ``purpose`` is a caller label (e.g. "ni.build") stored on the row; /api/usage totals by model, and by
+    purpose for the Neural Interface steps (``by_purpose``).
     """
     if conn is None or not model or not isinstance(response, dict):
         return
@@ -89,7 +89,7 @@ def record_response(conn, model: str, response: object, purpose: str | None = No
     try:
         created, read = cache_tokens(usage)
         record(conn, model, prompt_total(usage), usage.get("completion_tokens") or 0,
-               cost_usd=float(cost) if isinstance(cost, (int, float)) else None)
+               cost_usd=float(cost) if isinstance(cost, (int, float)) else None, purpose=purpose)
         if purpose:
             log.debug("usage recorded purpose=%s model=%s cache_creation=%d cache_read=%d",
                       purpose, model, created, read)
@@ -134,15 +134,8 @@ def _warn_if_server_is_reloading(model: str, usage: dict) -> None:
         log.debug("reload check skipped: %s", exc)
 
 
-def summary(conn, since: str | None = None, until: str | None = None) -> list[dict]:
-    """Per-model totals (call count + token sums), busiest model first.
-
-    ``since`` (inclusive) / ``until`` (exclusive) are optional UTC datetime
-    strings ('YYYY-MM-DD HH:MM:SS') bounding created_at — used by the cost
-    view's time-range picker. An exclusive upper bound at the next local
-    midnight avoids dropping rows in the final sub-second of a day.
-    """
-    assert conn is not None, "conn required for usage summary"
+def _window(since: str | None, until: str | None) -> tuple[str, list]:
+    """The WHERE clause bounding created_at (``since`` inclusive, ``until`` exclusive), with its params."""
     assert since is None or isinstance(since, str), "since must be a string or None"
     assert until is None or isinstance(until, str), "until must be a string or None"
     where, params = [], []
@@ -152,7 +145,35 @@ def summary(conn, since: str | None = None, until: str | None = None) -> list[di
     if until:
         where.append("created_at < ?")
         params.append(until)
-    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    return (" WHERE " + " AND ".join(where)) if where else "", params
+
+
+def by_purpose(conn, prefix: str, since: str | None = None, until: str | None = None) -> list[dict]:
+    """Totals per (purpose, model) for purposes starting with ``prefix`` (e.g. "ni."), busiest first."""
+    assert conn is not None, "conn required for usage summary"
+    assert prefix and "%" not in prefix and "_" not in prefix, "a plain purpose prefix"
+    clause, params = _window(since, until)
+    clause = (clause + " AND" if clause else " WHERE") + " purpose LIKE ?"
+    rows = conn.execute(
+        "SELECT purpose, model, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), "
+        f"SUM(cost_usd) FROM usage_log{clause} GROUP BY purpose, model ORDER BY 3 DESC;",
+        [*params, prefix + "%"],
+    ).fetchall()
+    return [{"purpose": r[0], "model": r[1], "calls": int(r[2]), "prompt_tokens": int(r[3]),
+             "completion_tokens": int(r[4]), "recorded_cost": float(r[5]) if r[5] is not None else None}
+            for r in rows]
+
+
+def summary(conn, since: str | None = None, until: str | None = None) -> list[dict]:
+    """Per-model totals (call count + token sums), busiest model first.
+
+    ``since`` (inclusive) / ``until`` (exclusive) are optional UTC datetime
+    strings ('YYYY-MM-DD HH:MM:SS') bounding created_at — used by the cost
+    view's time-range picker. An exclusive upper bound at the next local
+    midnight avoids dropping rows in the final sub-second of a day.
+    """
+    assert conn is not None, "conn required for usage summary"
+    clause, params = _window(since, until)
     rows = conn.execute(
         "SELECT model, COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), "
         "SUM(cost_usd) "

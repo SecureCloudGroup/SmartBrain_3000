@@ -184,6 +184,22 @@ Two more things worth knowing:
   model into minutes. Point it at a cloud model and your documents are sent to that provider
   as the tree is built — keep it on a local model if that matters to you.
 
+### Neural Interface steps
+
+Under the routing table, **Neural Interface steps** picks a cloud or local model for each
+step of a card's life:
+
+| Step | What it does | Automatic |
+| --- | --- | --- |
+| **Building a card** | Reads your ask, plans the query and writes the recipe. Runs once per card. | Cloud model when one is routed, else local |
+| **Researching a source** | Looks for a source when none is ready-made. Runs once per card. | Cloud model when one is routed, else local |
+| **Refreshing a model-answered card** | A card whose answer comes from a model, on every refresh. | Local model when one is routed, else cloud |
+| **Brief summaries** | The optional summary on a brief card, on every refresh. | Always local |
+
+The cloud model is the first Anthropic model on your routes. Picking cloud for a step never
+skips a card's own question: each card still asks before anything leaves this computer. **Usage
+& cost** shows each step's calls and the model they ran on.
+
 ### Model context length
 
 Under the routing table, **Model context length** tells SmartBrain how many tokens each

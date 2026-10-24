@@ -15,7 +15,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import gateway, usage
+from . import gateway, ni_models, usage
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +45,10 @@ assert set(CAPABILITY_LABELS).issubset(gateway.KNOWN_CAPABILITIES), (
 
 class RoutesBody(BaseModel):
     routes: dict[str, str]
+
+
+class StepModelsBody(BaseModel):
+    steps: dict[str, str]  # NI step -> auto | cloud | local (ni_models.SETTINGS)
 
 
 class ContextLengthsBody(BaseModel):
@@ -181,4 +185,41 @@ def get_usage(request: Request, since: str | None = None, until: str | None = No
         plan_value = r.pop("recorded_cost", None)
         out.append({**r, "cost": cost, "local": local, "plan_value": plan_value})
     assert total >= 0.0, "total cost must be non-negative"
-    return {"usage": out, "total_cost": total}
+    return {"usage": out, "total_cost": total,
+            "ni_steps": _ni_steps(request.app.state.dbx, pricing, _clean_dt(since), _clean_dt(until))}
+
+
+def _ni_steps(conn, pricing: dict, since: str | None, until: str | None) -> list[dict]:
+    """The Neural Interface's calls per step and model in the window, priced like the per-model rows (a part of
+    ``total_cost``, never added to it)."""
+    out = []
+    steps = {purpose: step for step, purpose in ni_models.PURPOSES.items()}
+    for r in usage.by_purpose(conn, "ni.", since, until):
+        step = steps.get(r["purpose"])
+        if step is None:
+            continue
+        price = pricing.get(r["model"])
+        cost = 0.0 if not price else r["prompt_tokens"] * price["prompt"] + r["completion_tokens"] * price["completion"]
+        out.append({"step": step, "label": ni_models.LABELS[step], "model": r["model"],
+                    "local": gateway.is_local(r["model"]), "calls": r["calls"], "prompt_tokens": r["prompt_tokens"],
+                    "completion_tokens": r["completion_tokens"], "cost": cost})
+    return out
+
+
+@router.get("/api/ni/step-models")
+def get_step_models(request: Request) -> dict:
+    """Which model each Neural Interface step runs on: its setting, the options it allows, and the model now."""
+    _require_unlocked(request)
+    return {"steps": ni_models.describe(request.app.state.dbx)}
+
+
+@router.put("/api/ni/step-models")
+def put_step_models(request: Request, body: StepModelsBody) -> dict:
+    """Save per-step settings (auto | cloud | local). An unknown step or setting, or cloud for a local-only
+    step, is a 400 and nothing is saved. Choosing cloud never gives a card consent: each card still asks."""
+    _require_unlocked(request)
+    try:
+        ni_models.save(request.app.state.dbx, dict(body.steps))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"ok": True, "steps": ni_models.describe(request.app.state.dbx)}
