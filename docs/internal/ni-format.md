@@ -882,7 +882,8 @@ A Library source whose parameter fills `from: vault_key` yields its address with
 URL) and the flow pauses at `awaiting_access` with the question `give_access`; nothing is fetched. `POST
 /flow/access {key?, email?}` (desktop-local, audited without values) stores the key as `ni:<id>:api_key` bound
 to the host (with the header prefix) and the email as SecretStore `contact:email`, then starts the worker. A
-same-host `api_key` another card holds is reused. Sampling and assembly attach the key only when the URL equals
+same-host `api_key` another Library card holds is reused by itself (for a Library row the host is the provider).
+Sampling and assembly attach the key only when the URL equals
 the sealed `_access.url`. The built spec carries refs and an `api_key` secret param, never a value.
 
 **Your own sources (release P3).** The same seal covers an address the user brings. `ni_flow.ask_for_key` seals
@@ -894,18 +895,31 @@ a key wall (`netguard.key_wall`: a 401, or a 403 with a JSON body; never a bot c
 plain 403, which is the page browser's); and **Use my key for <host>** on a decline (below). `POST /flow/access`
 then also takes `where` (`query` or `header`), `name` (`[A-Za-z0-9][A-Za-z0-9_.-]{0,39}`, never a header that
 carries the request itself: host, length, cookies, content negotiation) and an optional `prefix` (up to 12 of
-letters, digits, space, `_ : . -`), sealed into `_access.key` before the key is stored host-bound. A key another
-card holds for the same host is reused with that card's placement (`_placement_on_host` reads its sealed source's
-`$secret` ref), so a second card on a host asks nothing. A key the provider refuses (a key wall on the address
-the key was sealed for) asks again, placement included, rather than failing; the read with a reused key happens
-once, never in a loop. A keyed read never follows a redirect.
+letters, digits, space, `_ : . -`), sealed into `_access.key` before the key is stored host-bound and marked
+`named` (`ni.put_credential(named=True)`). This `_access` is `named` too.
+
+A same-host key is never copied by itself to or from a named address (#549 review B1). Different owners share
+hosts (Apps Script, path-style buckets, hosted forms), no general rule tells them apart, and the remote decides the
+401 that would trigger the copy. `ni.find_reusable_credential` skips a `named` key unless the caller passes
+`named_too`, which only the user's tap does. When another card holds a key for the host and its placement is
+known (the card's own, or `_placement_on_host` reading the other card's sealed `$secret` ref), `missing_access`
+seals `_access.reuse` and the board's `access.key.reuse` offers **Use the key I gave for <host>**; `POST
+/flow/access {reuse: true}` copies it under this card with that placement (journaled, audited with `reuse`), and
+is 400 when the card offers none. A lookup fault offers nothing and asks for the key.
+
+A key the provider refuses (a key wall on the address the key was sealed for) is deleted and asked for again,
+placement included, with no reuse offered (`_access.refused`). A fresh start for the user's own address (Retry, a
+standing order's run, Use my key again) keeps the placement they gave, so a key this card already holds is used
+again; if it has gone, the run pauses for it rather than failing. The address has no sealed format, so its first
+read sniffs it as a paste is (`ni_fetch.sniff_fetch` with the key on both reads) and seals `_format`. A keyed read
+never follows a redirect.
 
 A research run reads no key. A fetch that meets a key wall answers the model `needs_key` and the run remembers the
 address (`ResearchCtx.key_walls`, at most 3). When the run ends without a card (not a compare), the decline seals
 the first one as `_decline_card.key_wall`; `decline.key_wall` on the wire is `{host}` only, never the address,
 and the card offers `use_key` first among its reopens (a shell's only). `POST /flow/use-key` (desktop-local,
 audited `ni_use_key` with the host) re-seeds the sealed request as a fresh record and pauses it for the key for
-that address; a same-host key already given starts the build at once.
+that address; a same-host key already given is offered, never taken by itself.
 
 Signed-in pages (checked in P3, nothing promised): the page browser cannot carry a session. Every render runs in a
 fresh 0700 run directory that holds the engine's cookie file (`--storage-dir`) and is removed on every path

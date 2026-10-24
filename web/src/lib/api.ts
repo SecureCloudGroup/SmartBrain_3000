@@ -1850,6 +1850,14 @@ export const api = {
                                ...(place !== undefined ? { where: place.where, name: place.name,
                                                            prefix: place.prefix } : {}) }),
       }),
+  // Release P3: use the key the user gave another card for this host (the card offers it as access.key.reuse;
+  // never done without this tap, because different owners can share a host).
+  niFlowReuseKey: (id: string) =>
+    req<{ ok: boolean; started: boolean; needs: string[] }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/access`, {
+        method: "POST",
+        body: JSON.stringify({ reuse: true }),
+      }),
   // Release P3: a declined card's search met a source that asked for a key; bring yours for it.
   niFlowUseKey: (id: string) =>
     req<{ ok: boolean; started: boolean; needs: string[] }>(

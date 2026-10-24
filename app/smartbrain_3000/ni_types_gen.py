@@ -79,6 +79,7 @@ class FlowBrowser(TypedDict):
 class FlowDocsKey(TypedDict):
     docs_url: str
     place: bool
+    reuse: bool
 
 class FlowAccess(TypedDict):
     host: str

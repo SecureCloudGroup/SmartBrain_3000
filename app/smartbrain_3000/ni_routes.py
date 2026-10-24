@@ -1254,13 +1254,15 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
 
 class AccessIn(BaseModel):
     """The picked source's key and/or the user's contact email, typed on the card. For a source the user brought
-    (P3) the card also asks where the key goes: ``where`` (query or header), ``name`` and an optional ``prefix``."""
+    (P3) the card also asks where the key goes: ``where`` (query or header), ``name`` and an optional ``prefix``.
+    ``reuse``: the user tapped "Use the key I gave for <host>", which the card offers when another card has one."""
 
     key: str | None = Field(default=None, max_length=400)
     email: str | None = Field(default=None, max_length=254)
     where: str | None = Field(default=None, max_length=8)
     name: str | None = Field(default=None, max_length=40)
     prefix: str | None = Field(default=None, max_length=12)
+    reuse: bool = False
 
 
 @router.post("/api/ni/items/{item_id}/flow/access")
@@ -1277,7 +1279,7 @@ def give_flow_access(request: Request, item_id: str, body: AccessIn) -> dict:
     secrets = _secret_store(request)
     try:
         missing = ni_flow.give_access(store, item_id, secrets, key=body.key, email=body.email, where=body.where,
-                                      name=body.name, prefix=body.prefix)
+                                      name=body.name, prefix=body.prefix, reuse=body.reuse)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     access = record.get("_access") or {}
@@ -1287,7 +1289,8 @@ def give_flow_access(request: Request, item_id: str, body: AccessIn) -> dict:
     request.app.state.audit.append(
         "user", "ni_flow_access", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "host": access.get("host"),
-                                      "key": body.key is not None, "email": body.email is not None}),
+                                      "key": body.key is not None, "email": body.email is not None,
+                                      "reuse": body.reuse}),
         result_summary=tools.summarize({"started": bool(started), "needs": missing}),
     )
     return {"ok": True, "started": bool(started), "needs": missing}
@@ -1458,7 +1461,7 @@ def _offered(request: Request, item_id: str, action: str) -> tuple[ni.NIStore, d
 @router.post("/api/ni/items/{item_id}/flow/use-key")
 def use_key(request: Request, item_id: str) -> dict:
     """Release P3: a declined shell whose search met an address that asked for a key takes the user's own key for
-    it. The card asks where the key goes and the key (a same-host key the user already gave is reused); the key is
+    it. The card asks where the key goes and the key (a same-host key the user already gave is offered, for a tap); the key is
     bound to that host and never sent anywhere else or shown to a model."""
     _require_desktop_local(request)
     store, record = _offered(request, item_id, "use_key")

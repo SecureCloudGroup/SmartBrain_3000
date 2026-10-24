@@ -22,7 +22,8 @@ to know when a release changes behavior.
 - **Neural Interface sources that need your own key.** When you paste a link, you can tick **It needs my key**;
   a link that answers "unauthorized" asks for it by itself. The card asks where the key goes (in the address or
   in a header, by the name the provider's docs give) and then for the key. The key is stored encrypted, sent only
-  to that one site over a secure connection, never to a model, and a second card on the same site reuses it.
+  to that one site over a secure connection, never to a model. A second card on the same site offers **Use the key
+  I gave for** that site, and sends it only when you tap, because different owners can share one site.
   When research finds a source that asks for a key, the card offers **Use my key for** that site. Pages you have
   to sign in to are not supported yet.
 

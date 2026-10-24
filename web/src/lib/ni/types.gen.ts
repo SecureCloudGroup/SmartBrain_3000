@@ -66,10 +66,11 @@ export interface FlowBrowser {
   pct: number;
 }
 
-/** The key a card asks for: its docs page, and `place` when the card also asks where the key goes (a source the user brought: a query parameter or a header). */
+/** The key a card asks for: its docs page, `place` when the card also asks where the key goes (a source the user brought: a query parameter or a header), and `reuse` when another card has a key for this host the user can tap to use. */
 export interface FlowDocsKey {
   docs_url: string;
   place: boolean;
+  reuse: boolean;
 }
 
 export interface FlowAccess {

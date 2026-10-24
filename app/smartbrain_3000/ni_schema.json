@@ -597,14 +597,18 @@
         },
         "place": {
           "type": "boolean"
+        },
+        "reuse": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
       "required": [
         "docs_url",
-        "place"
+        "place",
+        "reuse"
       ],
-      "description": "The key a card asks for: its docs page, and `place` when the card also asks where the key goes (a source the user brought: a query parameter or a header)."
+      "description": "The key a card asks for: its docs page, `place` when the card also asks where the key goes (a source the user brought: a query parameter or a header), and `reuse` when another card has a key for this host the user can tap to use."
     },
     "FlowKeyWall": {
       "type": "object",

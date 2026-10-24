@@ -262,6 +262,22 @@
     }
   }
 
+  // Release P3: the user's tap to send the key they gave another card for this host to this address too.
+  async function reuseKey(item: NiBoardItem): Promise<void> {
+    console.assert(!!item.flow?.access?.key?.reuse, "reuseKey: the card offers it");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      const out = await api.niFlowReuseKey(item.id);
+      toast(out.started ? "Thanks — building the card now." : "Saved.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — try again." };
+    } finally {
+      busyId = null;
+    }
+  }
+
   async function answerDate(item: NiBoardItem): Promise<void> {
     console.assert(typeof item.id === "string", "answerDate: id required");
     const value = cardText(answerDateText, item.id).trim();
@@ -1538,6 +1554,15 @@
                   class="ni-commission ni-pick-url"
                   onsubmit={(e) => { e.preventDefault(); void giveAccess(item); }}
                 >
+                  {#if access.key?.reuse}
+                    <!-- Release P3: a key the user gave another card for this host. Different owners can share
+                         a host, so it is only sent to this address when the user taps. -->
+                    <p class="ni-note">
+                      You gave another card a key for {access.host}. Use it for this address too, or add a key below.
+                    </p>
+                    <button type="button" class="secondary" disabled={busyId === item.id}
+                      onclick={() => void reuseKey(item)}>Use the key I gave for {access.host}</button>
+                  {/if}
                   {#if access.key?.place}
                     <!-- Release P3: a source the user brought. Where the key goes is theirs to say (the
                          provider's docs show it); it is sent only to this host, never shown to a model. -->

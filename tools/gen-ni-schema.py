@@ -106,9 +106,10 @@ def _flow_defs() -> dict[str, dict]:
         "Suggestion": suggestion, "FlowProgress": progress, "FlowTry": obj({"n": INT, "of": INT, "host": STR}),
         "FlowQuestion": question,
         "FlowAccess": obj({"host": STR, "provider": STR, "key": nullable(ref("FlowDocsKey")), "contact": BOOL}),
-        "FlowDocsKey": obj({"docs_url": STR, "place": BOOL},
-                           desc="The key a card asks for: its docs page, and `place` when the card also asks where "
-                                "the key goes (a source the user brought: a query parameter or a header)."),
+        "FlowDocsKey": obj({"docs_url": STR, "place": BOOL, "reuse": BOOL},
+                           desc="The key a card asks for: its docs page, `place` when the card also asks where "
+                                "the key goes (a source the user brought: a query parameter or a header), and "
+                                "`reuse` when another card has a key for this host the user can tap to use."),
         "FlowTap": obj({"render_notice": BOOL, "site_cap": INT}), "FlowBrowser": obj({"phase": STR, "pct": INT}),
         "FlowDecline": obj({"reason": ref("DeclineReason"), "headline": STR, "line": text(200),
                             "links": arr(ref("DeclineLink"), maxItems=ni_master.DECLINE_LINKS),
