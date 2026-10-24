@@ -248,7 +248,8 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict) -> dic
     question = question_from_intent(request, intent)
     # a compare is searched one thing at a time: the intent's one place must not steer every search
     hint = {**ni_flow._library_hint(intent), **({"place": None} if question["entities"] else {})}
-    ctx = ResearchCtx(request=request, question=question, now=now, window=_window_of(request, intent),
+    names = tuple(n for n in intent.get("names") or [] if isinstance(n, str))[:8]   # validated whole words of the ask
+    ctx = ResearchCtx(request=request, question=question, now=now, window=_window_of(request, intent), names=names,
                       zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=ORIGINS_WEB if web else ORIGINS_LIBRARY,
                       searcher=_searcher() if web else None, library=_Library(lib, hint, set(record.get("_declined") or [])))
     ni_flow._transition(store, item_id, record.get("state") or "source", error=record.get("error"),

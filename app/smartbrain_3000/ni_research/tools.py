@@ -22,6 +22,7 @@ from .. import (
     pagegraph,
 )
 from ..netguard import FetchError
+from ..ni_verify import named
 from ..ni_verify.classes import shadow_reasons
 from ..ni_verify.rows import SourceInfo, read_result
 from .ctx import (
@@ -222,7 +223,7 @@ def library_search(ctx: ResearchCtx, query: str) -> dict:
         blocked = bool(row.get("needs_key") or row.get("needs_contact"))
         ctx.record(row["url"], "library", format=row.get("format"), scope=row.get("scope"),
                    title=one_line(row.get("title") or "", 120), blocked=blocked, query=query.strip(),
-                   page=row.get("page"))
+                   page=row.get("page"), provider=one_line(row.get("provider") or "", 80))
         found.append({"title": one_line(row.get("title") or "", 120), "provider": one_line(row.get("provider") or "", 80),
                       "url": row["url"], "format": row.get("format"), "scope": row.get("scope"),
                       "tier": row.get("tier"), "needs_access": blocked})
@@ -277,8 +278,32 @@ def _bounded(node: object, depth: int = 0) -> object:
     return node if isinstance(node, (bool, int, float)) or node is None else clean_text(str(node), 60)
 
 
-def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]:
-    """The ni_verify classes (window, threshold, compare, scope) plus an honest-empty check, as recipe checks."""
+def _owned(ctx: ResearchCtx) -> list[str]:
+    """What the place and compare classes own of the ask's names: its places, the things it compares and the places
+    research resolved (``resolver:text`` entries), so the named class never asks for them twice."""
+    assert isinstance(ctx.entities, list), "entities must be a list"
+    resolved = [str(e).split(":", 1)[-1] for e in ctx.entities[:6]]
+    return [*(str(p) for p in ctx.question.get("places") or []), *(str(e) for e in ctx.question.get("entities") or []),
+            *resolved]
+
+
+def _named(ctx: ResearchCtx, url: str, info: dict, served: object) -> list[str]:
+    """Class 5 (named): the ask's names must be carried by what the source served or how a trusted channel named it
+    (its address, its Library row or search result title and provider), never by the draft's own words."""
+    assert isinstance(info, dict), "source info"
+    assert isinstance(url, str), "an address"
+    phrases = named.phrases(ctx.request, [n for n in ctx.names if isinstance(n, str)], _owned(ctx))
+    if not phrases:
+        return []
+    text = served if isinstance(served, str) else json.dumps(served, default=str, ensure_ascii=False)
+    identity = [url, str(info.get("title") or ""), str(info.get("provider") or ""), str(info.get("page") or "")]
+    return named.check_named(phrases, text, identity)
+
+
+def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict, served: object = None) -> list[dict]:
+    """The ni_verify classes (window, threshold, compare, scope) plus an honest-empty check, as recipe checks, and,
+    with what the source ``served`` (a build, not a refresh: an address does not change its publisher), the named
+    class as the ``subject`` check."""
     assert isinstance(info, dict), "source info"
     assert isinstance(outputs, dict), "outputs must be a dict"
     texts = [str(v) for v in outputs.values()] + [ctx.request, str(ctx.question.get("subject") or "")]
@@ -293,7 +318,11 @@ def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]
     checks = [{"check": check, "ok": not found.get(cls), "reason": one_line("; ".join(found.get(cls) or []), 120)}
               for cls, check in _VERIFY_CLASSES.items()]
     empty = not any(v not in (None, "", [], {}) for v in outputs.values())
-    return [*checks, {"check": "empty", "ok": not empty, "reason": "every output is empty" if empty else ""}]
+    checks.append({"check": "empty", "ok": not empty, "reason": "every output is empty" if empty else ""})
+    if served is not None:
+        missing = _named(ctx, url, info, served)
+        checks.append({"check": "subject", "ok": not missing, "reason": one_line("; ".join(missing), 160)})
+    return checks
 
 
 def checks_for(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]:
@@ -408,7 +437,7 @@ def _run(ctx: ResearchCtx, draft: object) -> dict:
         return error("pipeline_failed", f"{exc.kind}: {exc.detail}" + _miss_hint(exc, spec["pipeline"], given),
                      limit=MAX_SPEC_DETAIL)
     info = ctx.urls.get(key) or {}
-    checks = _checks(ctx, outputs, source["url"], info)
+    checks = _checks(ctx, outputs, source["url"], info, served=sample["parsed"])
     if sample["format"] == _TABLE:
         checks.append(_page_check(ctx, sample, outputs))
     preview = _bounded(outputs)
