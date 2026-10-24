@@ -147,17 +147,22 @@ def _is_json_type(content_type: str) -> bool:
 _BINARY_MAGIC = (b"%PDF-", _ZIP_MAGIC, b"\x89PNG", b"GIF8", b"\xff\xd8\xff", b"\x1f\x8b", b"\xd0\xcf\x11\xe0",
                  b"Rar!", b"7z\xbc\xaf", b"BZh")
 _BINARY_HEAD = 1024
+# Control bytes text does not carry (tab, newline, form feed and carriage return are text). A file's head is dense with
+# them; a text export with one stray NUL is not, so the rule is a share of the head, never a single byte.
+_CONTROL_BYTES = bytes(b for b in range(32) if b not in (9, 10, 12, 13)) + b"\x7f"
+_BINARY_CONTROL_SHARE = 0.10
 
 
 def looks_binary(head: bytes, content_type: str = "") -> bool:
     """A body that is a file, not text: a known file magic (pdf, zip/xlsx, png, gif, jpeg, gzip, xls, rar, 7z, bz2),
-    or a NUL in its first KB that UTF-16 text does not explain (a byte-order mark, a declared UTF-16 charset, or the
-    one-parity NUL run ``decode_body`` reads as UTF-16)."""
+    or a head whose control bytes are 10% or more of it, unless UTF-16 explains them (a byte-order mark, a declared
+    UTF-16 charset, or the one-parity NUL run ``decode_body`` reads as UTF-16)."""
     assert isinstance(head, (bytes, bytearray)), "the body's first bytes"
     head = bytes(head[:_BINARY_HEAD])
     if head.startswith(_BINARY_MAGIC):
         return True
-    if b"\x00" not in head:
+    controls = len(head) - len(head.translate(None, _CONTROL_BYTES))
+    if not head or controls < len(head) * _BINARY_CONTROL_SHARE:
         return False
     utf16 = head.startswith((b"\xff\xfe", b"\xfe\xff")) or declared_charset(content_type) in _UTF16
     return not (utf16 or _utf16_order(head))

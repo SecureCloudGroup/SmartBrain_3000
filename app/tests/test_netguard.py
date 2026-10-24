@@ -678,9 +678,19 @@ def test_a_fault_on_the_sniffed_read_is_that_fault_not_not_data(monkeypatch) -> 
     (b"\xff\xd8\xff\xe0", "", True), (b"\x1f\x8b\x08\x00", "", True), (_XLS, "", True), (_BLOB, "", True),
     (b"a,b\n1,2\n", "", False), (b"", "", False), ("a,b\n".encode("utf-16"), "", False),
     ("ab".encode("utf-16-le"), "text/csv; charset=utf-16le", False), ("a,b\n1,2\n".encode("utf-16-be"), "", False),
-    (b"a,b\n1,\x00\n", "", True)])
+    (b"county,cases\n" * 60 + b"Cobb,\x00\n", "", False), (b"\x00\x01\x02\x03" + b"x" * 30, "", True)])
 def test_looks_binary_reads_the_bytes(head, ctype, binary) -> None:
+    """A share of control bytes, never one byte: a text export with a stray NUL is still text."""
     assert netguard.looks_binary(head, ctype) is binary
+
+
+def test_a_sealed_csv_with_a_stray_nul_still_reads(monkeypatch) -> None:
+    import httpx
+
+    _resolve_to(monkeypatch, "93.184.216.34")
+    body = b"county,cases\n" + b"Fulton,12\n" * 40 + b"Cobb,9\x00\n"
+    _serve(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "text/csv"}, content=body))
+    assert "Fulton,12" in netguard.safe_fetch_text("https://data.test/cases.csv", "csv")["text"]
 
 
 def test_an_xhtml_page_goes_to_the_page_door(monkeypatch) -> None:
