@@ -11,7 +11,25 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-25
+
+**Upgrading from 0.26.** One migration (43) adds a purpose label to the usage log, so **Usage & cost** can show
+each Neural Interface step. It is additive and forward-only, and runs on first launch. Three changes reach cards
+you already have:
+- A model-answered card with no recorded consent for a cloud model stops and asks for your OK until you rebuild it.
+- A card that reads someone else's site refreshes at most every 15 minutes.
+- `SMARTBRAIN_NI_FLOW` no longer does anything; a leftover `v1` is logged and ignored.
+
+Otherwise your cards refresh, edit, export and import as before.
+
 ### Added
+
+- **Choose a cloud or local model for each Neural Interface step.** **Settings → Model routing** has a new
+  **Neural Interface steps** table: building a card, researching a source and refreshing a model-answered card can
+  each run on Automatic, Cloud or Local. Automatic runs the one-time work (building, research) on the cloud model
+  when one is routed and the repeated work (refreshes) on this computer. Brief summaries and a card's in-pipeline
+  model step always stay local. Choosing cloud never skips a card's own question before anything leaves this
+  computer. **Usage & cost** shows each step's calls and the model they ran on.
 
 - **A source you keep becomes one of your own.** When you tap **Keep** on a Neural Interface card that research
   found or that you built from a pasted link, its source is saved with your own Library sources, and the next time
@@ -36,40 +54,6 @@ to know when a release changes behavior.
   no research, after any source you kept yourself, and the card says it was built from "a source SmartBrain
   checked". It still shows as a preview for your **Keep**. Keep makes it one of your own sources; No, or three
   failed reads in a row, turns it off for you only. Nothing about it leaves your device.
-
-### Changed
-
-- **A Neural Interface ask with nothing ready answers at once, and research waits for Keep looking.** When no
-  source you kept and no SmartBrain Library source answers an ask, the card now says so in seconds ("No ready
-  source answers this yet") with a paste box and a **Keep looking** button, instead of starting research by
-  itself. Keep looking researches now (with the model consent the card asks for), then again after 1, 2 and 4 days
-  and weekly, under the same daily research limit as background re-research, and at once with no model whenever
-  you keep a new source. It stops after 14 days, when a source is found, or when you tap **Stop looking**. A
-  look that cannot start because two other cards are building waits for the next free slot. With research
-  switched off, the card says no source answers and does not offer Keep looking.
-- **Every new Neural Interface card now builds with the new flow, and the old build flow is gone.** A new card
-  tries the best SmartBrain Library source by itself, falling through to the next when a source fails its
-  checks, shows the real card as a preview, and does not read the source again or refresh it until you tap
-  **Keep**. This is what `SMARTBRAIN_NI_FLOW=v2` turned on; the setting and the `ni_flow` meta key no longer do
-  anything. A leftover `SMARTBRAIN_NI_FLOW=v1` is logged as a warning at start-up and ignored (it does not
-  stop the app). What goes away: the pick card that asked you to tap a Library source and the searched web
-  pages it listed, and the pre-read of up to four search-result pages while a card is created (the cloud
-  researcher still searches, with your consent). A card that couldn't be built offers **Try again** and **Paste
-  a link** (it reopens the card so you can paste a link to the data); **Try again** re-runs your words, reading
-  again only a link you gave, never the last source the card tried. A Refine note asking for a different source
-  now works like **Try another source** (that source is set aside and the card looks again) instead of opening a
-  picker, and a source you said no to on a card is never built from again on that card, even when research finds
-  it on the web. Every way out a stopped card names is now a button the backend declares in its `actions`
-  (`pick_source` is `POST .../flow/reopen`). `GET .../flow` and
-  `POST .../flow/cancel` no longer answer 404 for lack of the setting, and every board row now carries
-  `actions`. Cards you already have are untouched: they refresh, edit, export and import as before.
-  `tools/ni-eval.py --flow` is removed (any value is an error); the eval always runs the one flow.
-  `ni_watch` now audits the cards the board actually serves (each row as `GET /api/ni/board` builds it, through
-  a table of row checks) instead of the internal flow record. `docs/internal/ni-format.md` is rewritten as a
-  stable spec of the system as it is, and `docs/internal/ni-cases.md` now points to the gold set
-  (`app/tests/ni_eval/gold/`, `docs/internal/ni-eval.md`).
-
-### Added
 
 - **Research reads data tables on ordinary web pages.** When no data file answers an ask, the researcher can now
   read a web page's `<table>`, by its column names, and build a card from its rows; before, every page it found
@@ -151,6 +135,36 @@ to know when a release changes behavior.
   web data file or page reading may ask after the first drift.
 
 ### Changed
+
+- **A Neural Interface ask with nothing ready answers at once, and research waits for Keep looking.** When no
+  source you kept and no SmartBrain Library source answers an ask, the card now says so in seconds ("No ready
+  source answers this yet") with a paste box and a **Keep looking** button, instead of starting research by
+  itself. Keep looking researches now (with the model consent the card asks for), then again after 1, 2 and 4 days
+  and weekly, under the same daily research limit as background re-research, and at once with no model whenever
+  you keep a new source. It stops after 14 days, when a source is found, or when you tap **Stop looking**. A
+  look that cannot start because two other cards are building waits for the next free slot. With research
+  switched off, the card says no source answers and does not offer Keep looking.
+- **Every new Neural Interface card now builds with the new flow, and the old build flow is gone.** A new card
+  tries the best SmartBrain Library source by itself, falling through to the next when a source fails its
+  checks, shows the real card as a preview, and does not read the source again or refresh it until you tap
+  **Keep**. This is what `SMARTBRAIN_NI_FLOW=v2` turned on; the setting and the `ni_flow` meta key no longer do
+  anything. A leftover `SMARTBRAIN_NI_FLOW=v1` is logged as a warning at start-up and ignored (it does not
+  stop the app). What goes away: the pick card that asked you to tap a Library source and the searched web
+  pages it listed, and the pre-read of up to four search-result pages while a card is created (the cloud
+  researcher still searches, with your consent). A card that couldn't be built offers **Try again** and **Paste
+  a link** (it reopens the card so you can paste a link to the data); **Try again** re-runs your words, reading
+  again only a link you gave, never the last source the card tried. A Refine note asking for a different source
+  now works like **Try another source** (that source is set aside and the card looks again) instead of opening a
+  picker, and a source you said no to on a card is never built from again on that card, even when research finds
+  it on the web. Every way out a stopped card names is now a button the backend declares in its `actions`
+  (`pick_source` is `POST .../flow/reopen`). `GET .../flow` and
+  `POST .../flow/cancel` no longer answer 404 for lack of the setting, and every board row now carries
+  `actions`. Cards you already have are untouched: they refresh, edit, export and import as before.
+  `tools/ni-eval.py --flow` is removed (any value is an error); the eval always runs the one flow.
+  `ni_watch` now audits the cards the board actually serves (each row as `GET /api/ni/board` builds it, through
+  a table of row checks) instead of the internal flow record. `docs/internal/ni-format.md` is rewritten as a
+  stable spec of the system as it is, and `docs/internal/ni-cases.md` now points to the gold set
+  (`app/tests/ni_eval/gold/`, `docs/internal/ni-eval.md`).
 
 - **Neural Interface cards are politer to the sites they read.** Cards
   that read the same address now share one request, and a site that is asked too often is rested: the
