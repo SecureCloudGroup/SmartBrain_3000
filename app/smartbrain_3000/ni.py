@@ -8770,8 +8770,8 @@ def _card_model(spec: dict, gateway_mod, routes: dict, store: NIStore, item_id: 
 
     An item-level ``spec.model`` wins. Else the ``refresh`` step's setting (``ni_models``): ``local``, or ``auto``
     with a local model routed, refreshes on the local model. ``cloud`` refreshes on the step's cloud model (the one
-    Settings names). ``auto`` with no local model follows the build path's older order: the ``ni`` route, then a
-    LOCAL chat / agent model, then whatever chat / agent is.
+    Settings names); so does ``auto`` with no local model when a cloud model is routed. With neither, the build
+    path's older order: the ``ni`` route, then a LOCAL chat / agent model, then whatever chat / agent is.
     A model off this computer needs this card's consent
     (``spec._model_consent``); without it, or when the owner chose local (flow ``_use_local``),
     the card refreshes on the first local model, and only with none does it raise. Unlike the
@@ -8789,7 +8789,7 @@ def _card_model(spec: dict, gateway_mod, routes: dict, store: NIStore, item_id: 
         return choice.local
     if choice.setting == "cloud" and not choice.cloud:
         raise NIError("model_unrouted", "no cloud model routed")
-    model = choice.cloud if choice.setting == "cloud" else resolve("ni", routes)
+    model = choice.cloud or resolve("ni", routes)   # the cloud model Settings names; the ni route only without one
     if not model:
         chat, agent = resolve("chat", routes), resolve("agent", routes)
         model = next((c for c in (chat, agent) if c and gateway_mod.is_local(c)), chat or agent)
