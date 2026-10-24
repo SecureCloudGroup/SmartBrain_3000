@@ -311,6 +311,7 @@ def test_a_seed_row_counts_only_when_it_builds_the_ask_again(lib, seeded, monkey
     assert ni_intake.seed_rows() == [seeded], "the shipped seed is back in place"
 
 
+@needs_tool
 def test_a_run_turns_a_card_research_built_into_a_candidate(lib, seeded, monkeypatch, tmp_path) -> None:  # noqa: F811
     """``run_one`` on a fresh store, as a new user: the intent read, Keep looking tapped, research lands the card,
     and the row its Keep would write is the candidate once it builds the ask again for another new user. A run reads
