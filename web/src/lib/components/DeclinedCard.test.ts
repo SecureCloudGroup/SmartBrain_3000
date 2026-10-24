@@ -17,6 +17,7 @@ const DECLINE: FlowDecline = {
     { title: "City open data", url: "https://data.example.gov/crimes", host: "data.example.gov" },
     { title: "Insecure", url: "http://x.example/a", host: "x.example" },
   ],
+  looking: null,
 };
 
 const mounted: Array<ReturnType<typeof mount>> = [];
@@ -76,6 +77,23 @@ describe("DeclinedCard", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
     const busy = cardOf({ canFix: true, canRetry: true, busy: true });
     expect(Array.from(busy.querySelectorAll("button")).every((b) => b.disabled)).toBe(true);
+  });
+
+  it("offers Keep looking, and once looking says so and offers to stop", () => {
+    const onKeepLooking = vi.fn();
+    const ready = cardOf({ decline: { ...DECLINE, reason: "no_ready_source" }, canKeepLooking: true, canPick: true,
+                           onKeepLooking });
+    expect(labels(ready)).toEqual(["Keep looking", "Paste a link"]);
+    expect(ready.querySelector(".dc-looking")).toBeNull();
+    (ready.querySelector("button") as HTMLButtonElement).click();
+    expect(onKeepLooking).toHaveBeenCalledTimes(1);
+    const onStopLooking = vi.fn();
+    const looking = cardOf({ decline: { ...DECLINE, looking: { since: new Date().toISOString(), next_at: null } },
+                             canStopLooking: true, onStopLooking });
+    expect(looking.querySelector(".dc-looking")?.textContent).toContain("Still looking (started just now)");
+    expect(labels(looking)).toEqual(["Stop looking"]);
+    (looking.querySelector("button") as HTMLButtonElement).click();
+    expect(onStopLooking).toHaveBeenCalledTimes(1);
   });
 
   it("shows the server's refusal of a reopen", () => {

@@ -18,6 +18,7 @@
         "fix",
         "give_access",
         "keep",
+        "keep_looking",
         "pause",
         "pick_source",
         "refine",
@@ -25,6 +26,7 @@
         "retry",
         "review_fix",
         "run",
+        "stop_looking",
         "use_local"
       ]
     },
@@ -361,6 +363,7 @@
         "ask_unsupported",
         "compare_unbuildable",
         "no_answering_source",
+        "no_ready_source",
         "research_gave_up",
         "source_cant_answer",
         "verify_refused"
@@ -552,6 +555,16 @@
             "$ref": "#/$defs/DeclineLink"
           },
           "maxItems": 3
+        },
+        "looking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlowLooking"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -559,9 +572,10 @@
         "reason",
         "headline",
         "line",
-        "links"
+        "links",
+        "looking"
       ],
-      "description": "A declined card (flow state `declined`): the closed reason code, the headline, one plain line and up to three links. Present only on a declined flow."
+      "description": "A declined card (flow state `declined`): the closed reason code, the headline, one plain line, up to three links and its open standing order, if any. Present only on a declined flow."
     },
     "FlowDocsKey": {
       "type": "object",
@@ -574,6 +588,34 @@
       "required": [
         "docs_url"
       ]
+    },
+    "FlowLooking": {
+      "type": "object",
+      "properties": {
+        "since": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40
+        },
+        "next_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 40
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "since",
+        "next_at"
+      ],
+      "description": "An open standing order (Keep looking): when it began and when it looks next."
     },
     "FlowPoll": {
       "type": "object",
@@ -1251,8 +1293,10 @@
     "ReopenKind": {
       "enum": [
         "delete",
+        "keep_looking",
         "pick_source",
-        "retry"
+        "retry",
+        "stop_looking"
       ]
     },
     "RowDraft": {

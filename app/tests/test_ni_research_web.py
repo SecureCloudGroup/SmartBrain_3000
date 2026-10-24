@@ -217,7 +217,7 @@ def test_only_the_cloud_and_ask_plans_carry_the_web() -> None:
 def _web_flow(monkeypatch, library, seam, found, bodies, store=None, **seam_kw):
     """The v2 external flow with a cloud research seam, a scripted search service and scripted fetches."""
     from test_ni_auto_pick import _store
-    from test_ni_research_loop import _INTENT
+    from test_ni_research_loop import _INTENT, LOOKING
     store = store or _store()
     net = Net(monkeypatch, bodies)
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: library)
@@ -226,7 +226,7 @@ def _web_flow(monkeypatch, library, seam, found, bodies, store=None, **seam_kw):
     ni_research_flow.set_research_search(searcher(found, log))
     ni_research_flow.set_research_chat(lambda model, messages, tools_: seam(messages, tools_), **seam_kw)
     item_id = ni_flow.create_shell_item(store, _ASK)
-    ni_flow._flow_write(store, item_id, ni_flow._make_record(_ASK, "intent"))
+    ni_flow._flow_write(store, item_id, {**ni_flow._make_record(_ASK, "intent"), "_looking": LOOKING})  # Keep looking
     out = ni_flow._run_external_flow(store, item_id, _ASK, dict(_INTENT), None,
                                      lambda p: '{"serves": true, "gaps": [], "wrong": []}',
                                      lambda u: (_ for _ in ()).throw(AssertionError("the auto-pick fetched")))

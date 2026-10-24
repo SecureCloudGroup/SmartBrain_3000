@@ -1316,6 +1316,7 @@ act.
 
 | ending | lands in | code |
 |---|---|---|
+| `no_ready_source` (no Library row or kept source fits, and the card is not a standing order: nothing researched) | `declined` | `no_ready_source` |
 | `research_declined_checks` (the verifier refused the card twice) | `declined` | `verify_refused` |
 | `research_declined_budget` (budget or steps spent, or the model stopped without a card) | `declined` | `research_gave_up` |
 | `research_declined_no_source` (the closed-world tier found no Library source) | `declined` | `no_answering_source` |
@@ -1336,7 +1337,33 @@ not finish (the model route raised, a reply or tool raised) ends `fault` and bec
 never a decline; the eval reads it as `error`, so an outage cannot earn the decline credit. Re-research records a
 fault as `repair_research_fault` (no back-off streak).
 
-**Codes.** `ni_master.DECLINE_REASONS`: `no_answering_source`, `research_gave_up`, `verify_refused`,
+**Nothing ready: answer at once, then keep looking (release P2).** An ask answers in seconds from what is ready (a
+source the user kept, a Library row that declares its answers). When nothing is and a run could research
+(`ni_research_flow.can_research`: the Library is there and the tier is not off), `ni_research_flow.fallback` ends
+the card at once as `no_ready_source` with the Library's link pages, and runs no research: a standing order is the
+only way research starts. When no run could research, the card ends `no_source_research_off` and offers no Keep
+looking. **Keep looking** (`POST /items/{id}/flow/keep-looking`, audited `ni_keep_looking`) is offered only on a
+shell whose decline sealed `look: true`: its ending is in `ni_master.LOOKABLE` (`no_ready_source` and the three
+research declines), read by `ni_master.lookable`. It seals `_looking = {since, runs, next_at}` on the flow record (one of the card's own answers,
+so it rides every fresh start) and runs the sealed request again with the intent it was understood under (no model
+reads the words again), research allowed, asking for model consent first when the card has none. While the order
+is open the card stays `declined`, says when it started, and offers **Stop looking** (`/flow/stop-looking`,
+audited `ni_stop_looking`) and the paste box. `ni_standing.run_due` (one per scheduler tick, skipped while the
+gateway breaker is open) closes orders older than 14 days and runs the first one due: after 1, 2, 4 and then every 7
+days, each run under the shared daily research ceiling (`ni_refresh.take_budget`). A run starts only with a free
+worker slot (`ni_flow.has_slot`), and nothing is written or charged before that: with every slot busy the order
+waits unchanged for the next pass, and a start refused anyway puts the declined record back as it was. A Keep
+looking tap with no slot free seals a first run due now (`runs: 0`, the user's own tap, never charged), and the
+next pass runs it. An order that can never run closes: an unreadable `since`, a record that lost its request, or
+research switched off since. A scheduled run whose card has no model consent stops at the consent question and is
+not charged; the order then waits for the user's answer. A Keep anywhere (`ni_intake.remember`) marks every open order (`free_at`): its next run is free (`free:
+true`, for that run only: a fresh start drops it), reading kept and Library sources only, never research or a model (a record without its sealed intent
+waits for its own run), and keeps the order's own schedule. A run that finds a source lands the card held for Keep,
+as any card from outside the Library; the scheduler runs only declined cards, and a No on the found card goes on
+looking under the same order.
+The eval harnesses tap Keep looking on a lookable decline, as a person would.
+
+**Codes.** `ni_master.DECLINE_REASONS`: `no_ready_source`, `no_answering_source`, `research_gave_up`, `verify_refused`,
 `compare_unbuildable`, `source_cant_answer`, `ask_unsupported`. `DECLINE_LINES` holds a default line per code (a
 caller may pass a more specific one, cut to 200 characters); `DECLINE_HEADLINE` is "I couldn't build a reliable
 card for this". The record's `error` is `"<code>: <line>"`. The line is built only from code copy, the intent's
@@ -1351,10 +1378,12 @@ card lists them read-only; none builds a card.
 `/run` and `/commission` refuse it, and the sweep skips a terminal record. A finished card whose Fix ended
 declined keeps rendering its working payload (the terminal record is hidden).
 
-**Wire shape.** `{state: "declined", error, reason (= the line), decline, reopen, actions}`. `FlowDecline`,
+**Wire shape.** `{state: "declined", error, reason (= the line), decline, reopen, actions}`; `decline.looking` is
+`{since, next_at}` while a standing order is open, else null. `FlowDecline`,
 `DeclineLink` and `DeclineReason` are in the generated schema (`app/smartbrain_3000/ni_schema.json`, produced by
-`tools/gen-ni-schema.py`; `--check` fails when it is stale). Actions: a shell `["retry", "pick_source", "delete"]`,
-a finished card `["retry", "fix", "refine", "delete"]`. The client (`DeclinedCard.svelte`) shows the headline, the line, the
+`tools/gen-ni-schema.py`; `--check` fails when it is stale). Actions: a shell `["keep_looking", "retry", "pick_source", "delete"]` (no `keep_looking` on a
+decline not sealed `look: true`), a shell with an open order `["stop_looking", "pick_source", "delete"]`, a finished card
+`["retry", "fix", "refine", "delete"]`. The client (`DeclinedCard.svelte`) shows the headline, the line, the
 https links (at most three) and the buttons the page declares; the page owns the requests.
 
 ## 40. Page tables
