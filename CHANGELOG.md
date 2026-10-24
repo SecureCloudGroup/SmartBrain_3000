@@ -130,6 +130,9 @@ to know when a release changes behavior.
 
 ### Fixed
 
+- **A researched card no longer keeps showing the day it was built.** A card found by research could have
+  today's date written into its address ("earthquakes from last week to today"), so once you kept it, it kept
+  showing that same week. Research now only offers a card whose address is always current.
 - **A new card no longer gives up on a source because SmartBrain was spacing out its own requests.**
   SmartBrain sends a site at most five requests at once, then one every 30 seconds. A card being built
   treated that self-imposed wait as the source failing, so after a few cards on one site (several weather

@@ -166,7 +166,7 @@ def run_one(ask: str, idx, llm, model: str) -> dict:
     try:
         item_id = ni_flow.create_shell_item(store, ask)
         rec = ni_flow.run_flow(store, item_id, gateway_call=bridge, ni_route_model=model)
-        v2 = ni_flow._is_v2(store)  # v2 auto-picks inside run_flow: nothing to tap
+        v2 = True  # one flow since S10 (#542): it auto-picks inside run_flow, nothing to tap
         if v2 and rec.get("state") in ("source", "awaiting_access", "declined"):
             return _v2_stop(store, item_id, rec, out)
         for _tap in range(0 if v2 else 3):  # a source that refuses us re-lands the pick: tap the next one, like a person

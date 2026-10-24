@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import copy
 import json
-from urllib.parse import urlsplit
+import re
+from datetime import date, timedelta
+from urllib.parse import unquote, urlsplit
 
 from .. import (
     ni,
@@ -296,6 +298,43 @@ def _checks(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]
     return [*checks, {"check": "empty", "ok": not empty, "reason": "every output is empty" if empty else ""}]
 
 
+_ADDRESS_DAY_RE = re.compile(r"(?<!\d)(20\d\d)[-/.]?(0[1-9]|1[0-2])[-/.]?(0[1-9]|[12]\d|3[01])(?!\d)")
+_ADDRESS_EPOCH_RE = re.compile(r"(?<!\d)(1[6-9]\d{8})(\d{3})?(?!\d)")
+_FIXED_NEAR = timedelta(days=7)   # a moment this close to now in an address is "today" written down, not an asked day
+
+
+def _fixed_moment(url: str, now) -> str | None:
+    """The date or timestamp within a week of ``now`` that ``url`` writes into its path or query, else None. A card
+    reads the same sealed address every day, so an address that fixes "today" (or "the past week", from-to) shows that
+    day forever; a day far from now is a day the ask named and may stay."""
+    assert isinstance(url, str), "an address"
+    assert now.tzinfo is not None, "now must be aware"
+    parts = urlsplit(url)
+    text = unquote(f"{parts.path}?{parts.query}")[:2000]
+    today = now.date()
+    for m in _ADDRESS_DAY_RE.finditer(text):  # bounded by the capped address
+        try:
+            day = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            continue
+        if abs(day - today) <= _FIXED_NEAR:
+            return m.group(0)
+    for m in _ADDRESS_EPOCH_RE.finditer(text):  # epoch seconds (or milliseconds)
+        if abs(int(m.group(1)) - now.timestamp()) <= _FIXED_NEAR.total_seconds():
+            return m.group(0)
+    return None
+
+
+def _stable(urls: list[str], now) -> dict:
+    """The ``stable`` recipe check for a build: no source address fixes a day near now. Build only; the refresh
+    re-check (``checks_for``) never runs it, as a sealed address cannot change."""
+    assert isinstance(urls, list) and urls, "the build's source addresses"
+    fixed = next((f for f in (_fixed_moment(u, now) for u in urls[:8]) if f), None)
+    return {"check": "stable", "ok": fixed is None, "reason": "" if fixed is None else one_line(
+        f"the address fixes the date {fixed}, so a kept card would show that day forever: use an address that is "
+        "always current", 160)}
+
+
 def checks_for(ctx: ResearchCtx, outputs: dict, url: str, info: dict) -> list[dict]:
     """The recipe checks for ``outputs`` (the verifier ``try_recipe`` and ``propose_card`` run), for the refresh
     re-check (S9): the same classes on a fresh payload, so a constraint cannot pass at Keep by a different rule."""
@@ -408,7 +447,7 @@ def _run(ctx: ResearchCtx, draft: object) -> dict:
         return error("pipeline_failed", f"{exc.kind}: {exc.detail}" + _miss_hint(exc, spec["pipeline"], given),
                      limit=MAX_SPEC_DETAIL)
     info = ctx.urls.get(key) or {}
-    checks = _checks(ctx, outputs, source["url"], info)
+    checks = [*_checks(ctx, outputs, source["url"], info), _stable([source["url"]], ctx.now)]
     if sample["format"] == _TABLE:
         checks.append(_page_check(ctx, sample, outputs))
     preview = _bounded(outputs)
@@ -734,7 +773,8 @@ def propose_compare(ctx: ResearchCtx, compare: object) -> dict:
     built, err = _compare_spec(ctx, things, values, fmt, label, unit)
     if built is None:
         return _done(ctx, "propose_compare", "compare", err)
-    checks = _checks(ctx, built["outputs"], things[0]["url"], ctx.urls.get(things[0]["url"]) or {})
+    checks = [*_checks(ctx, built["outputs"], things[0]["url"], ctx.urls.get(things[0]["url"]) or {}),
+              _stable([t["url"] for t in things], ctx.now)]
     if any(not c["ok"] for c in checks):
         reasons = [f"{c['check']}: {c['reason']}" for c in checks if not c["ok"]]
         return _done(ctx, "propose_compare", "compare", {**error("verify_failed", "; ".join(reasons)), "reasons": reasons})

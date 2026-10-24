@@ -764,12 +764,17 @@ this card's consent.
 - `off`: no researcher.
 
 A proposal is checked by code (`ni_research.tools._checks`: place, window, threshold, compare, empty,
-`subject` for page readings), may be refused twice, and lands as a held card with `_built_from.path:
+`subject` for page readings, and at build `stable`), may be refused twice, and lands as a held card with `_built_from.path:
 research` and a sealed `recipe = {question, sources, constraints, tier, verification?, provenance?, research?}`
 (`ni_recipe`). `tier` is `curated`, `verified_endpoint` or `page_reading`. Researcher drafts may carry no `llm`
 stage, `$secret`, model or MCP source, or model-chosen interval. The interval is stamped by code from
 `recipe.question.cadence`. A run that could not finish ends `fault` (a failed, retryable card), never a
 decline.
+
+The `stable` check (`tools._stable`) refuses a research address whose path or query writes a date or epoch timestamp
+within a week of now (`starttime=<last week>&endtime=<today>`): the card reads that sealed address every day, so it
+would show that day forever. A day further away is one the ask named and stays. It runs at build only; the refresh
+re-check (`checks_for`) never runs it.
 
 ### Consent
 
