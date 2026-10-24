@@ -196,13 +196,29 @@ def test_research_time_stops_while_a_build_waits_for_a_host(wire, monkeypatch) -
     from smartbrain_3000.ni_research.ctx import ResearchCtx
 
     slept = _sleeps(wire, monkeypatch)
-    ctx = ResearchCtx(request="weather", question={})
-    with ni_polite.waiting():
+    with ni_polite.waiting():   # a build: research starts inside its wait, as run_flow runs it
+        ctx = ResearchCtx(request="weather", question={})
         for n in range(ni_polite.HOST_BURST + 1):
             _fetch(f"https://bucket-host.example/v4/{n}")
-    assert slept and ctx.elapsed() == 0.0
-    wire.now[0] += 5.0
-    assert ctx.elapsed() == 5.0, "work time still counts"
+        assert slept and ctx.elapsed() == 0.0
+        wire.now[0] += 5.0
+        assert ctx.elapsed() == 5.0, "work time still counts"
+
+
+def test_a_builds_wait_never_leaks_into_later_clock_readings(wire, monkeypatch) -> None:
+    """PR #544 re-check B1: the time slept is counted per build, never as a running total, so a later research run on
+    the same thread (another build, a test after the politeness tests) never reads a clock thrown off by it."""
+    from smartbrain_3000.ni_research.ctx import ResearchCtx
+
+    slept = _sleeps(wire, monkeypatch)
+    for build in range(3):
+        with ni_polite.waiting():
+            for n in range(ni_polite.HOST_BURST + 1):
+                _fetch(f"https://bucket-host-{build}.example/v5/{n}")
+    assert slept and ni_polite.work_clock() == wire.now[0], "no build's wait is still subtracted after it ends"
+    ctx = ResearchCtx(request="weather", question={})
+    wire.now[0] += 2.0
+    assert ctx.elapsed() == 2.0
 
 
 # --- Retry-After ---------------------------------------------------------------------------

@@ -309,21 +309,27 @@ def engaged(port: int | None = None, robots: bool | None = None):
 def waiting(seconds: float = BUILD_WAIT_S):
     """Run the body (a card build someone is waiting on) so a host over SmartBrain's own budget is waited for, up to
     ``seconds`` in all on this thread, instead of refused. Refreshes never wait: a busy host defers them. Nested, it
-    never grants more than the allowance left, and what the inner body waits is charged to the outer one."""
+    never grants more than the allowance left, and what the inner body waits is charged to the outer one. The time
+    slept is counted from zero for the outermost span and dropped when it ends, so it never leaks past the build."""
     assert 0.0 <= seconds <= RETRY_AFTER_CAP_S, "a bounded wait"
     saved = getattr(SHARED._local, "wait", None)
     granted = float(seconds) if saved is None else min(float(saved), float(seconds))
     SHARED._local.wait = granted
+    if saved is None:
+        SHARED._local.slept = 0.0
     try:
         yield SHARED
     finally:
         used = granted - float(getattr(SHARED._local, "wait", 0.0) or 0.0)
         SHARED._local.wait = None if saved is None else max(0.0, float(saved) - used)
+        if saved is None:
+            SHARED._local.slept = 0.0
 
 
 def work_clock() -> float:
     """A monotonic clock that stops while this thread waits for a host's budget (``waiting()``): research measures
-    its time budget by it, so SmartBrain's own spacing never spends the researcher's clock."""
+    its time budget by it, so SmartBrain's own spacing never spends the researcher's clock. Read only as a
+    difference within one build (a reading carries no meaning of its own and may be any finite number)."""
     return _clock() - float(getattr(SHARED._local, "slept", 0.0) or 0.0)
 
 

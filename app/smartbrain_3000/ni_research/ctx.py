@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, tzinfo
@@ -117,7 +118,7 @@ class ResearchCtx:
         self.started = self.clock()
 
     def elapsed(self) -> float:
-        assert self.started >= 0, "a start time"
+        assert math.isfinite(self.started), "a start time (any finite reading: the clock is read as a difference)"
         assert callable(self.clock), "a clock"
         return self.clock() - self.started
 
