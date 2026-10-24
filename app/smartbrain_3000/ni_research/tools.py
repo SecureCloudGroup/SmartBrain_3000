@@ -56,7 +56,8 @@ _STRUCTURED = frozenset({"json", "csv", "feed", "xml"})
 _TABLE = ni.TABLE_FORMAT   # the sample format of a web page's data table (page reading)
 _MANY_KINDS = frozenset({"latest_items", "ranking"})
 _VERIFY_CLASSES = {"window": "window", "threshold": "threshold", "compare": "compare", "scope": "place"}
-_ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint"}
+_ORIGIN_WHY = {"library": "a Library source", "search": "a search result", "preview": "the previewed endpoint",
+               "composed": "an address worked out on a site a search found"}
 
 
 def _done(ctx: ResearchCtx, tool: str, arg: object, result: dict) -> dict:

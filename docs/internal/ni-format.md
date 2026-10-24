@@ -757,7 +757,12 @@ this card's consent.
   (`library_search`, `web_search`, `fetch_sample`, `try_recipe`, `propose_card`, `propose_compare`). The open web
   (search and public pages) is on unless the kill switch (`SMARTBRAIN_NI_RESEARCH_WEB` or meta
   `ni_research_web` set to `off`) limits it to the Library. Fetches carry no headers, no POST, no redirects,
-  and every address must have been handed over by a search or the Library, never composed.
+  and every address must have been handed over by a search or the Library, or (origin `composed`, 2026-10-24) be
+  an https address the model worked out on the site of a search result: the result's host with a leading `www.`
+  dropped, or a host under it, and on a host that splits owners by path (cloud storage, raw file hosts) the same
+  first path segment. A composed source is recorded as `kind: endpoint`, why "an address worked out on a site a
+  search found". Only a consent sealed under the wording that names composed addresses (`_model_consent_compose`)
+  allows them; an older web consent keeps exact-address research (`ORIGINS_WEB_EXACT`), and the run is told so.
 - `local`: the closed-world mode. Code ranks Library rows and the local model only picks one and fills the
   recipe. Never the web.
 - `ask`: the card shows the consent question (`model_consent`, §29 Consent) and nothing is sent.
@@ -788,9 +793,11 @@ forever. A day further away is one the ask named and stays. Like `subject` it ru
 ### Consent
 
 - A card whose resolved model is not local and differs from the card's `_model_consent` stops before any model
-  call with an answerable `unsupported` whose question is `model_consent {model, local, prompt, web}`. The
-  wording names what leaves the device (the request and samples from the source), and with the open web on,
-  the search and page items. `POST /flow/answer {kind: model_consent, value: allow|local}` stamps the consent
+  call with an answerable `unsupported` whose question is `model_consent {model, local, prompt, web, compose}`.
+  The wording names what leaves the device (the request and samples from the source), and with the open web on,
+  the search and page items and the addresses research works out on a search-found site. The answer seals the
+  scope the wording showed: `_model_consent_web` and `_model_consent_compose` (each `true` or absent on a spec;
+  compose only beside web), carried, stripped and refused like the consent. `POST /flow/answer {kind: model_consent, value: allow|local}` stamps the consent
   (sealed into the spec so Fix does not re-ask) or builds with the local model. The engine's `llm` stage stays
   local-only.
 - `run_flow` resolves its model live from the `ni` route with `chat` and `agent` fallbacks and prefers a local
@@ -808,7 +815,7 @@ out the card offers is always a button on its row.
 
 - **Retry** (`POST /flow/retry`) re-runs a terminal shell's sealed request from a fresh record
   (`ni_flow._fresh_record`): the card's own answers (`_declined`, `_model_consent`, `_model_consent_web`,
-  `_use_local`) and the address the user named themselves (`_pasted`, written only at intake, by a paste or by
+  `_model_consent_compose`, `_use_local`) and the address the user named themselves (`_pasted`, written only at intake, by a paste or by
   an approved chat call) ride along; nothing a previous build sealed does, so the engine's last address is never
   read as the user's. 409 while a worker still runs, for a finished card, and for a non-terminal flow. No and
   Paste a link start from the same fresh record.

@@ -3776,17 +3776,22 @@ def _model_consent_of(store: ni.NIStore, item_id: str, record: dict) -> str | No
     return sealed if isinstance(sealed, str) and sealed else None
 
 
-def _model_consent_web_of(store: ni.NIStore, item_id: str, record: dict) -> bool:
-    """Whether the consent ``_model_consent_of`` returns was given under the open-web wording. The scope
-    is read from the same place as the consent itself, so a scope never outlives the answer it came with."""
+_CONSENT_SCOPES = ("_model_consent_web", "_model_consent_compose")   # what a consent's wording named, widest last
+
+
+def _model_consent_web_of(store: ni.NIStore, item_id: str, record: dict, scope: str = "_model_consent_web") -> bool:
+    """Whether the consent ``_model_consent_of`` returns was given under the wording that names ``scope``: the open
+    web, or (``_model_consent_compose``) also addresses research works out on a site a search found. The scope is
+    read from the same place as the consent itself, so a scope never outlives the answer it came with."""
     assert store is not None and item_id, "args required"
-    assert isinstance(record, dict), "a record"
+    assert isinstance(record, dict) and scope in _CONSENT_SCOPES, "a record and a known scope"
     consent = record.get("_model_consent")
     if isinstance(consent, str) and consent:
-        return record.get("_model_consent_web") is True
+        return record.get("_model_consent_web") is True and record.get(scope) is True
     item = store.get_item(item_id)
     spec = (item or {}).get("spec", {}) if item else {}
-    return isinstance(spec.get("_model_consent"), str) and spec.get("_model_consent_web") is True
+    return (isinstance(spec.get("_model_consent"), str) and spec.get("_model_consent_web") is True
+            and spec.get(scope) is True)
 
 
 _RESEARCH_DISCLOSURE = (" If no ready-made source fits, it may also research one with the same service. That "
@@ -3801,7 +3806,9 @@ _RESEARCH_DISCLOSURE_WEB = (" If no ready-made source fits, it may also research
                             "digests of up to 8 data samples or pages it reads, today's date, your time zone and the "
                             "place you named, and the research steps so far (the tool transcript); never email, notes or "
                             "other cards, and no knowledge-base text. Its search queries reach the search "
-                            "provider, and the sites it reads see this computer's IP address. A card built from "
+                            "provider, and the sites it reads see this computer's IP address. It may also work "
+                            "out an address on a site a search found (such as that site's own data feed), so "
+                            "words of your question can reach that site inside the address. A card built from "
                             "the web is always held for your Keep and only starts refreshing after you Keep it.")
 
 
@@ -3827,11 +3834,13 @@ def _ask_model_consent(store: ni.NIStore, item_id: str, model: str,
         prompt = (f"This card would use {model}, a service outside this computer. Building sends your request "
                   "and samples from the source to it; the finished card still refreshes on this computer."
                   + (_RESEARCH_DISCLOSURE_WEB if web else _RESEARCH_DISCLOSURE))
-    # ``web`` stamps the scope the wording showed; the answer seals exactly that scope (never the switch's later state)
+    # ``web`` and ``compose`` stamp the scope the wording showed; the answer seals exactly that scope (never the
+    # switch's later state). The web wording names composed addresses, so the two ride together
     return _terminate_unsupported(
         store, item_id,
         f"building this card would use {model}, which runs outside this computer",
-        question={"kind": "model_consent", "model": model, "local": local or "", "prompt": prompt, "web": web})
+        question={"kind": "model_consent", "model": model, "local": local or "", "prompt": prompt, "web": web,
+                  "compose": web})
 
 
 def warn_retired_flow_flag() -> None:
@@ -6484,8 +6493,9 @@ def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,
     consent = holder.get("_model_consent")
     if isinstance(consent, str) and consent:
         spec["_model_consent"] = consent  # ruling 2: consent lives with the card
-        if holder.get("_model_consent_web") is True:  # with the scope it was given under
-            spec["_model_consent_web"] = True
+        for scope in _CONSENT_SCOPES:  # bounded: with the scope it was given under
+            if holder.get("_model_consent_web") is True and holder.get(scope) is True:
+                spec[scope] = True
     # needs_params wave (2026-09-14): bind ``ni:self:<name>`` refs to the shell's
     # concrete item id — the retired create_ni_item_from_recipe tool did this via
     # ``_add_item_with_rewrite``; the flow's handoff never inherited it, so a
@@ -7073,7 +7083,7 @@ def start_remap(store: ni.NIStore, item_id: str, request: str, url: str) -> bool
 # What a fresh start from the sealed request keeps: the card's own answers (the addresses the user said No to, the
 # model consent and its scope, the local-model choice). Never a seal a previous build wrote: a Library pick, its clock
 # template, a tried row, the engine's own last address. Retry, No and Paste a link all start here (S10 review B1/M2).
-_CARD_ANSWERS = ("_declined", "_model_consent", "_model_consent_web", "_use_local")
+_CARD_ANSWERS = ("_declined", "_model_consent", *_CONSENT_SCOPES, "_use_local")
 
 
 def _fresh_record(record: dict, request: str, state: str, note: str, *, keep_named: bool = False,
@@ -7086,7 +7096,7 @@ def _fresh_record(record: dict, request: str, state: str, note: str, *, keep_nam
     named = record.get("_pasted") if keep_named and isinstance(record.get("_pasted"), str) else None
     intent = record.get("intent") if state != "intent" and isinstance(record.get("intent"), dict) else None
     fresh = _make_record(request, state, source_url=named, intent=intent, error=error, notes=[note[:_MAX_NOTE]])
-    for key in _CARD_ANSWERS:  # bounded: four keys
+    for key in _CARD_ANSWERS:  # bounded: five keys
         if record.get(key) is not None:
             fresh[key] = record[key]
     if named:
@@ -7125,8 +7135,11 @@ def answer_model_consent(store: ni.NIStore, item_id: str, stamped: dict,
     model = str(stamped.get("model") or "")
     local = str(stamped.get("local") or "")
     if value == "allow" and model:
-        # the scope is the wording the owner saw: only a question that showed the web items grants the web
-        fields: dict = {"_model_consent": model, "_model_consent_web": stamped.get("web") is True}
+        # the scope is the wording the owner saw: only a question that showed the web items grants the web, and
+        # only one that also named composed addresses grants those
+        web = stamped.get("web") is True
+        fields: dict = {"_model_consent": model, "_model_consent_web": web,
+                        "_model_consent_compose": web and stamped.get("compose") is True}
     elif value == "local" and local:
         fields = {"_use_local": True}
     else:

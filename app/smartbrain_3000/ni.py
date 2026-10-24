@@ -598,8 +598,8 @@ def validate_spec(spec: object, *, allow_empty_params: bool = False, researcher:
                "interval_minutes", "history", "alerts",
                "_l1_last_attempt", "_l1_trial", "_template",
                "_l2_last_attempt", "_l2_proposal", "_research_last_attempt", "_born", "_shell",
-               "_model_consent", "_model_consent_web", "_built_from", "_present_ok", "_fit", "query",
-               "interpretation", "_render_ok", "_feed_candidates", "recipe", "brief"}
+               "_model_consent", "_model_consent_web", "_model_consent_compose", "_built_from", "_present_ok",
+               "_fit", "query", "interpretation", "_render_ok", "_feed_candidates", "recipe", "brief"}
     _closed_keys(body, allowed, "spec")
     _validate_born_marker(body.get("_born"))
     _validate_built_from(body.get("_built_from"))
@@ -896,7 +896,12 @@ def _validate_model_consent(value: object) -> None:
 
 def _validate_model_consent_web(body: dict) -> None:
     """S5b: the consent above was given under the open-web wording. ``true`` beside a ``_model_consent``
-    or absent; carried, stripped and refused exactly like the consent it qualifies."""
+    or absent; carried, stripped and refused exactly like the consent it qualifies. ``_model_consent_compose``
+    (2026-10-24): that wording also named addresses research works out on a site a search found; ``true`` beside
+    a web scope, or absent."""
+    if "_model_consent_compose" in body and (body["_model_consent_compose"] is not True
+                                             or body.get("_model_consent_web") is not True):
+        raise ValueError("spec._model_consent_compose must be true beside a _model_consent_web, or absent")
     if "_model_consent_web" not in body:
         return
     if body["_model_consent_web"] is not True or not body.get("_model_consent"):
