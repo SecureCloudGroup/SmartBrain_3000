@@ -23,7 +23,7 @@ MAX_SAMPLES = 8
 _MAX_URLS = 200
 _MAX_QUERIES = 4
 _BAD_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".lan", ".home", ".corp")
-ORIGINS = ("library", "search", "preview")
+ORIGINS = ("library", "search", "preview", "kept")
 PROPOSE_TOOLS = frozenset({"propose_card", "propose_compare"})   # the tools that end a run with a proposal
 MAX_REPLAYS = 3         # repeats of an identical call answered from memory without a turn
 MAX_MEMO = 32           # remembered call results
@@ -175,7 +175,8 @@ class ResearchCtx:
             self.trace.append({"tool": tool, "arg": one_line(arg, 200), "outcome": one_line(outcome, 200)})
 
     def record(self, url: str, kind: str, **info: object) -> None:
-        """Remember a result URL, exactly, as a fetch origin: ``library`` | ``search`` | ``preview``. A search
+        """Remember a result URL, exactly, as a fetch origin: ``library`` | ``search`` | ``preview`` | ``kept`` (a
+        source the user kept, ``ni_intake``). A search
         result counts only over https: an address from the open web is never read in the clear. ``query`` (S7):
         the search that handed it over, kept (a few, bounded) so a compare can tell which thing an address is for."""
         assert isinstance(url, str), "url must be text"

@@ -164,8 +164,10 @@ def _can_land(ctx: ResearchCtx, item_id: str, request: str, proposal: dict,
     return tools.landing_reason(ctx, spec, preview, item_id)
 
 
-def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, proposal: dict, out: loop.Outcome) -> dict:
-    """Land the proposal as a held card (preview, nothing recurs until Keep), noting how it was built."""
+def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, proposal: dict, out: loop.Outcome,
+          note: str | None = None) -> dict:
+    """Land the proposal as a held card (preview, nothing recurs until Keep), noting how it was built (``note``: the
+    caller's own words for it, as a kept source's reuse says)."""
     assert isinstance(proposal, dict), "a proposal"
     assert store is not None and item_id, "args required"
     spec = _stamp(proposal["spec"], request)
@@ -173,7 +175,8 @@ def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, propo
     url = str(spec["source"]["url"])
     title = (ctx.urls.get(normal_url(url)) or {}).get("title") or ""
     seen = f"{ctx.fetches} fetches" + (f", {ctx.searches} searches" if ctx.searches else "")
-    note = f"researched ({out.mode}): {out.usage['calls']} model calls, {seen}, tier {proposal['tier']}; held for your Keep"
+    note = note or (f"researched ({out.mode}): {out.usage['calls']} model calls, {seen}, tier {proposal['tier']}; "
+                    "held for your Keep")
     ni_flow._transition(store, item_id, "assembling", source_url=url, note=note)
     ni_flow._try_journal(store, item_id, "updated", note)
     return ni_flow._finalize(store, item_id, spec, preview, note=note, born="flow", fetched_at=ctx.now,

@@ -4018,6 +4018,12 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     compared = ni_compare_flow.try_compare(store, item_id, request, intent, do_fetch)  # S7: an ask that compares things
     if compared is not None:
         return compared
+    # P1: a source the user kept for this question goes first (local import: intake builds on the research glue,
+    # which imports this module)
+    from . import ni_intake
+    kept = ni_intake.reuse(store, item_id, request, intent)
+    if kept is not None:
+        return kept
     rows = _without_declined(store, item_id, _library_candidates(request, intent, limit=_AUTO_ROWS))
     buildable = _buildable(rows)
     if not buildable:

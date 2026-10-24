@@ -11,6 +11,15 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Added
+
+- **A source you keep becomes one of your own.** When you tap **Keep** on a Neural Interface card that research
+  found or that you built from a pasted link, its source is saved with your own Library sources, and the next time
+  you ask for the same thing (the same kind of answer, place and subject) the card is built from it in seconds,
+  with no model call and no research. It still shows as a preview for your Keep. A source you say No to is not
+  offered for that question again, and one that stops answering three times is forgotten. Nothing leaves your
+  device.
+
 ### Changed
 
 - **Every new Neural Interface card now builds with the new flow, and the old build flow is gone.** A new card

@@ -31,6 +31,7 @@ from . import (
     ni_brief,
     ni_compare,
     ni_flow,
+    ni_intake,
     ni_library,
     ni_master,
     ni_mcp,
@@ -145,6 +146,25 @@ def _awaiting_yes_of(item: dict) -> dict | None:
     assert block is None or set(block) <= {"from", "host", "title", "used_key"}, "closed keys"
     assert block is None or block["from"] in AWAITING_FROM, "closed vocab"
     return block
+
+
+def _remember_best_effort(store: ni.NIStore, item_id: str) -> None:
+    """P1: a Kept card built outside the Library becomes one of the user's own sources (``ni_intake``). A record,
+    never a gate: a locked or full store leaves the Keep as it is."""
+    try:
+        item = store.get_item(item_id)
+        if item is not None:
+            ni_intake.remember(store, item)
+    except Exception as exc:  # intake is a convenience on top of the Keep the user already made
+        log.warning("ni keep: intake failed: %s", type(exc).__name__)
+
+
+def _forget_best_effort(store: ni.NIStore, item: dict) -> None:
+    """P1: No to a held card: a source the user kept is not offered for this question again (``ni_intake``)."""
+    try:
+        ni_intake.forget(store, item)
+    except Exception as exc:  # the No is recorded either way
+        log.warning("ni no: intake forget failed: %s", type(exc).__name__)
 
 
 def _used_access(source: object) -> bool:
@@ -555,6 +575,8 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
         request.app.state.audit.append(  # Keep: the user accepts SmartBrain's own pick; recurring begins
             "user", "ni_keep", "reviewed", "executed", True,
             args_summary=tools.summarize({"item_id": item_id, "host": (before["spec"].get("_built_from") or {}).get("host")}))
+    if body.ok and held:
+        _remember_best_effort(store, item_id)
     if not body.ok and held:
         # NO to a web page / dataset reading: back to the source pick without that source —
         # never a dead end (the declined address is never offered on this card again)
@@ -563,6 +585,7 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
         _journal_best_effort(store, item_id, "c2_wrong",
                              f"user said no to the reading from {host}"
                              + (f": {note}" if note else ""))
+        _forget_best_effort(store, before)
         try:
             moved = ni_flow.decline_reading(store, item_id)
         except Exception as exc:  # the verdict is recorded; the card stays a draft the user can redo
