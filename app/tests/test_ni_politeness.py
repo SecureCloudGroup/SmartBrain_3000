@@ -118,6 +118,67 @@ def test_cards_over_budget_stay_due_and_are_never_failed(wire) -> None:
     assert wire.count("bucket-host.example") == ni_polite.HOST_BURST + 3, "the refill serves them"
 
 
+# --- a card build waits out SmartBrain's own spacing -----------------------------------------------
+
+def _sleeps(wire, monkeypatch) -> list:
+    slept: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        wire.now[0] += seconds
+
+    monkeypatch.setattr(ni_polite, "_sleep", sleep)
+    return slept
+
+
+def test_a_build_waits_for_the_bucket_where_a_refresh_defers(wire, monkeypatch) -> None:
+    """tune2 (2026-10-24): six weather asks lost their Library source to SmartBrain's own budget. A build someone is
+    waiting on waits for the refill; a refresh still defers (the card stays due)."""
+    slept = _sleeps(wire, monkeypatch)
+    for n in range(ni_polite.HOST_BURST):
+        _fetch(f"https://bucket-host.example/v1/{n}")
+    with pytest.raises(netguard.FetchError) as busy:
+        _fetch("https://bucket-host.example/v1/refresh")
+    assert busy.value.kind == "host_busy" and not slept
+    with ni_polite.waiting():
+        assert _fetch("https://bucket-host.example/v1/build") == {"text": "hello"}
+    assert len(slept) == 1 and slept[0] <= ni_polite.HOST_REFILL_S
+    assert getattr(ni_polite.SHARED._local, "wait", 0.0) == 0.0, "the allowance ends with the build"
+
+
+def test_a_build_waits_at_most_its_allowance(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    with ni_polite.waiting(ni_polite.HOST_REFILL_S):
+        for n in range(ni_polite.HOST_BURST + 1):  # the burst, then one refill's wait
+            _fetch(f"https://bucket-host.example/v2/{n}")
+        with pytest.raises(netguard.FetchError) as busy:
+            _fetch("https://bucket-host.example/v2/more")
+    assert busy.value.kind == "host_busy"
+    assert sum(slept) <= ni_polite.HOST_REFILL_S
+
+
+def test_a_build_never_waits_out_a_pause_the_host_asked_for(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    url = "https://slow-host.example/api"
+    wire.answers[url] = netguard.FetchError("upstream returned HTTP 429", status=429, retry_after="20")
+    with ni_polite.waiting():
+        with pytest.raises(netguard.FetchError):
+            _fetch(url)
+        with pytest.raises(netguard.FetchError) as second:
+            _fetch("https://slow-host.example/other")
+    assert second.value.kind == "host_busy" and not slept, "the host's word, not SmartBrain's spacing"
+
+
+def test_run_flow_builds_inside_the_wait(monkeypatch) -> None:
+    from smartbrain_3000 import ni_flow
+
+    seen: list[float] = []
+    monkeypatch.setattr(ni_flow, "_run_flow", lambda *a: seen.append(ni_polite.SHARED._local.wait) or {})
+    ni_flow.run_flow(object(), "item-1")
+    assert seen == [ni_polite.BUILD_WAIT_S]
+    assert getattr(ni_polite.SHARED._local, "wait", 0.0) == 0.0
+
+
 # --- Retry-After ---------------------------------------------------------------------------
 
 def test_retry_after_seconds_pauses_the_host_then_releases_it(wire) -> None:

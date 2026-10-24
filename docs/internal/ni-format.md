@@ -111,7 +111,10 @@ The closed set (`_SOURCE_TYPES`; validators refuse anything else): `http_json`, 
 - Fetched through `ni_fetch` over `netguard` only: SSRF pin, redirect re-validation, byte cap, content-type
   check, and the politeness layer `ni_polite` (per-host budget, Retry-After pause, fetch dedupe, port policy
   80/443 or the one port a Library row declares, robots.txt for page reads and for any source that is not
-  a Library row). A host over budget defers the card (`host_busy`), it is never a failure.
+  a Library row). A host over budget defers the card (`host_busy`), it is never a failure. A card build
+  (`run_flow`, inside `ni_polite.waiting()`) waits for the bucket instead, up to `BUILD_WAIT_S` (60 s) in all,
+  so SmartBrain's own spacing never drops a source or sends the build to research; a pause the host asked
+  for (429 / 503) is never waited out.
 - `validate_public_url` runs on the param-substituted URL at every create, update and commission. The
   scheme and authority are literal: `{{param:...}}` may appear only in the path or query. Param values are
   percent-encoded at substitution (`quote(safe="")`).

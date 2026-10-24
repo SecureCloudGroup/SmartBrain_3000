@@ -6,6 +6,8 @@ One shared object sits behind ``netguard``'s guarded request while an NI fetch r
 * a per-host token bucket (``HOST_BURST`` tokens, one back every ``HOST_REFILL_S``). A host over
   budget DEFERS the card: ``FetchError(kind="host_busy")``, which the engine maps to the
   ``host_busy`` capacity status (``ni.CAPACITY_KINDS``): the card stays due, is never marked failed.
+  A card build someone is waiting on (``waiting()``) instead waits for the bucket to refill, up to
+  ``BUILD_WAIT_S`` in all: SmartBrain's own spacing is never a verdict on the source.
 * a per-host pause from 429 / 503 answers, honouring ``Retry-After`` (seconds or HTTP date), capped
   at ``RETRY_AFTER_CAP_S``.
 * fetch dedupe on the tick: cards on one URL reuse one response for ``DEDUPE_TTL_S`` (third-party
@@ -41,6 +43,7 @@ from . import netguard
 CADENCE_FLOOR_MINUTES = 15     # D9: third-party API / page cadence floor
 HOST_BURST = 5                 # requests a host may take at once
 HOST_REFILL_S = 30.0           # one more request allowed per this many seconds
+BUILD_WAIT_S = 2 * HOST_REFILL_S  # longest a card build waits, in all, for SmartBrain's own per-host budget
 RETRY_AFTER_CAP_S = 3600.0     # longest pause one answer can impose on a host
 RETRY_AFTER_MIN_S = 1.0
 RETRY_DEFAULT_S = 300.0        # 429 / 503 with no usable Retry-After
@@ -57,6 +60,7 @@ _OWN_SUFFIXES = (".local", ".lan", ".internal", ".home.arpa", ".localdomain", ".
 _FLOORED_SOURCES = ("http_json", "http_page", "http_image")
 _clock = time.monotonic        # module attributes so a test can move time
 _wall = time.time
+_sleep = time.sleep
 
 
 def is_own_host(host: str) -> bool:
@@ -130,8 +134,24 @@ class Politeness:
 
     # --- budget -------------------------------------------------------------------------
     def admit(self, host: str) -> None:
-        """Take one request from ``host``'s bucket, or raise ``FetchError(kind="host_busy")``."""
+        """Take one request from ``host``'s bucket, or raise ``FetchError(kind="host_busy")``. Inside ``waiting()``
+        an empty bucket is waited for while this thread's wait allowance lasts; a pause the host asked for
+        (429 / 503) never is: that is the host's word, not SmartBrain's spacing."""
         assert host, "host required"
+        for _ in range(HOST_BURST):  # bounded: each pass sleeps for at least one refill's share, or ends
+            need = self._take(host)
+            if need == 0.0:
+                return
+            allowance = float(getattr(self._local, "wait", 0.0) or 0.0)
+            if need < 0.0 or need > allowance:
+                raise netguard.FetchError("host is over its request budget", kind="host_busy")
+            self._local.wait = allowance - need
+            _sleep(need)
+        raise netguard.FetchError("host is over its request budget", kind="host_busy")
+
+    def _take(self, host: str) -> float:
+        """Take a token from ``host``'s bucket: 0.0 when taken, else the seconds until one is back, or -1.0 when the
+        host itself paused us."""
         now = _clock()
         with self._lock:
             state = self._hosts.get(host)
@@ -141,9 +161,12 @@ class Politeness:
                 state = self._hosts[host] = _Host(now)
             state.tokens = min(float(HOST_BURST), state.tokens + (now - state.stamp) / HOST_REFILL_S)
             state.stamp = now
-            if state.paused_until > now or state.tokens < 1.0:
-                raise netguard.FetchError("host is over its request budget", kind="host_busy")
+            if state.paused_until > now:
+                return -1.0
+            if state.tokens < 1.0:
+                return max((1.0 - state.tokens) * HOST_REFILL_S, 0.01)
             state.tokens -= 1.0
+            return 0.0
 
     def pause(self, host: str, seconds: float) -> None:
         """Pause ``host`` for ``seconds`` (already clamped by the caller)."""
@@ -279,6 +302,19 @@ def engaged(port: int | None = None, robots: bool | None = None):
         SHARED._local.port = saved_port
         SHARED._local.robots = saved_robots
         netguard.set_politeness(previous)
+
+
+@contextlib.contextmanager
+def waiting(seconds: float = BUILD_WAIT_S):
+    """Run the body (a card build someone is waiting on) so a host over SmartBrain's own budget is waited for, up to
+    ``seconds`` in all on this thread, instead of refused. Refreshes never wait: a busy host defers them."""
+    assert 0.0 <= seconds <= RETRY_AFTER_CAP_S, "a bounded wait"
+    saved = getattr(SHARED._local, "wait", 0.0)
+    SHARED._local.wait = float(seconds)
+    try:
+        yield SHARED
+    finally:
+        SHARED._local.wait = saved
 
 
 def robots_for(spec: object) -> bool:

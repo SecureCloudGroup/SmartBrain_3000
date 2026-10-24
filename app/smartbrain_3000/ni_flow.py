@@ -41,7 +41,16 @@ from . import claudecli as _claudecli_mod
 from . import gateway as _gateway_mod
 from . import jailrun as _jailrun_mod
 from . import netguard as _netguard_mod
-from . import ni, ni_brief, ni_compare, ni_master, ni_query, page_verify, pagegraph
+from . import (
+    ni,
+    ni_brief,
+    ni_compare,
+    ni_master,
+    ni_polite,
+    ni_query,
+    page_verify,
+    pagegraph,
+)
 from . import ni_fetch as _ni_fetch
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
@@ -3622,6 +3631,14 @@ def run_flow(store: ni.NIStore, item_id: str, *,
     tests; production callers leave it None.
     """
     assert store is not None and item_id, "store + id required"
+    with ni_polite.waiting():  # someone is waiting on this build: SmartBrain's own per-site spacing is waited out
+        return _run_flow(store, item_id, gateway_call, fetcher, ni_route_model, source_url)
+
+
+def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str], str] | None,
+              fetcher: Callable[[str], object] | None, ni_route_model: str | None,
+              source_url: str | None) -> dict:
+    """``run_flow``'s body, inside its politeness wait."""
     record = _flow_read(store, item_id)
     if record is None:
         raise ValueError("no flow record for item; call start_flow first")
