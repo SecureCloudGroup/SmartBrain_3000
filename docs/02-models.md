@@ -171,6 +171,7 @@ from your providers.
 | **Agent tasks (schedules)** | Scheduled runs and background turns. These call tools, so pick a model that reliably tool-calls. | **Same as Chat** |
 | **Embedding (semantic search)** | Turning your documents and queries into vectors for meaning search. Only embedding models are offered. | `ollama/nomic-embed-text:v1.5` |
 | **Document summaries** | The background summary tree that makes "summarize this" instant on large documents. | Same as Chat |
+| **Neural Interface** | The model Neural Interface cards use when they need one. Each step's own choice, under **Neural Interface steps** below, can override it. | Each step picks from your Chat and Agent routes, as below. |
 
 Chat is the root: the two slots that say *Same as Chat* really do follow it, so setting Chat
 alone is a complete configuration.
@@ -196,8 +197,9 @@ step of a card's life:
 | **Refreshing a model-answered card** | A card whose answer comes from a model, on every refresh. | Local model when one is routed, else cloud |
 | **Brief summaries** | The optional summary on a brief card, on every refresh. | Always local |
 
-The cloud model is the first Anthropic model on your routes. On Automatic, the step's own
-default wins over the **Neural Interface** routing slot: with an Anthropic model routed, cards
+The cloud model is the first Anthropic model on the Neural Interface, Chat and Agent routes, in
+that order, and the local model is the first local one in the same order. On Automatic, the
+step's own default wins over the **Neural Interface** routing slot: with an Anthropic model routed, cards
 build on it even if that slot names a local model. Choose **Local** for the step to keep building
 on this computer. Picking cloud for a step never
 skips a card's own question: each card still asks before anything leaves this computer. **Usage

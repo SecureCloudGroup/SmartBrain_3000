@@ -118,10 +118,22 @@ number you can check:
   pass** (a pass rides the same ~30-second background tick as feeds and
   schedules, with its own time budget) — so a screenful of cards drains
   steadily without ever crowding out your chat or your schedules.
-- **1 minute is the cadence floor** — cards are near-live, never real-time. A
-  card with a language-model step in its pipeline floors at **5 minutes**
-  instead, and only one such card runs per pass: the local model is a single
-  slot, and your chat has priority on it.
+- **15 minutes is the cadence floor for someone else's site**, whatever a card
+  was set to; a card on your own network floors at **1 minute** — near-live,
+  never real-time. A card with a language-model step in its pipeline floors at
+  **5 minutes**, and only one such card runs per pass: the local model is a
+  single slot, and your chat has priority on it.
+- **At most five requests at once to one site, then one every 30 seconds.** A
+  site that answers "slow down" (HTTP 429 or 503) is left alone for as long as
+  it asks, **up to an hour**. Cards read only ports 80 and 443, unless a Library
+  source or an address you kept names its own port; your own network may use
+  any port.
+- **Keep looking** researches when you tap it, then again after 1, 2 and 4 days,
+  then weekly, and stops after **14 days**. Those later runs and background
+  re-research share a ceiling of **10 research runs a day** across all cards (at
+  most one re-research a day per card); the run your tap starts is not counted.
+- **A source you kept, or one SmartBrain checked, is set aside after 3 failed
+  reads in a row**, so a dead source stops costing every ask a fetch.
 - **An alert's cooldown is at least 5 minutes** (an hour unless you set one).
   Alerts are edge-triggered on top of that — a condition that stays true fires
   once, not every refresh.

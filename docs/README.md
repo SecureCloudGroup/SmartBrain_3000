@@ -27,7 +27,7 @@ Everything after that is optional and can be read when you need it.
 | --- | --- | --- |
 | 1 | [Getting started](01-getting-started.md) | Requirements, install on macOS/Windows/Linux, first run, locking and unlocking, how updates install themselves, troubleshooting, uninstall. |
 | 2 | [Connect a model](02-models.md) | Cloud provider keys (OpenAI, Anthropic, Google). Local models with MLX or Ollama, including one-tap connect. Model routing — which model does which job. Context length. Embedding models for semantic search. Voice: the on-device dictation engine and its one-time model download. |
-| 3 | [Using SmartBrain_3000](03-features.md) | The tour: Chat and its tools, the approval tiers, Voice (dictate and listen), Knowledge, feeds (follow a website), Planner, Schedules, Info, Email, Memory, web search, self-improvement, Usage & cost, Activity. |
+| 3 | [Using SmartBrain_3000](03-features.md) | The tour: Chat and its tools, the approval tiers, Voice (dictate and listen), Knowledge, feeds (follow a website), the Neural Interface (cards that watch things for you), Planner, Schedules, Info, Email, Memory, web search, self-improvement, Usage & cost, Activity. |
 | 4 | [Share knowledge with Vaults](04-vaults.md) | Group documents into a vault, scope a search to it, share it as a sealed file, publish it publicly, subscribe to someone else's by URL and take verified updates. |
 | 5 | [Connect external tools (MCP)](05-mcp.md) | Expose your Knowledge base read-only to a desktop AI client such as Claude Desktop or Cursor. |
 | 6 | [Backup & recovery](06-backup-recovery.md) | Export your data as JSON, take an encrypted backup, restore one, change your passphrase, get back in with the Recovery Key, and start completely fresh. |
@@ -49,6 +49,8 @@ Everything after that is optional and can be read when you need it.
 | Resend a message (Retry) | [Using SmartBrain_3000 → After an answer](03-features.md#after-an-answer) |
 | Add documents and search them | [Using SmartBrain_3000 → Knowledge](03-features.md#knowledge) |
 | Follow a website (feeds) | [Using SmartBrain_3000 → Follow websites](03-features.md#follow-websites-feeds) |
+| Ask for a card that watches something (Neural Interface) | [Using SmartBrain_3000 → Neural Interface](03-features.md#neural-interface) |
+| Choose a cloud or local model for each Neural Interface step | [Connect a model → Neural Interface steps](02-models.md#neural-interface-steps) |
 | Is something wrong? Settings → Status | [Getting started → Troubleshooting](01-getting-started.md#troubleshooting) |
 | What's in Settings? | [Using SmartBrain → Settings](03-features.md#settings) |
 | Run a prompt on a timer | [Using SmartBrain_3000 → Schedules](03-features.md#schedules) |
