@@ -25,9 +25,9 @@ Below them sit four controls: **Help** (this guide, offline, no unlock needed), 
 The top strip shows an **Encrypted · On-device** chip and, on a phone, the remote connection
 state. The version you're running is under the logo, top-left.
 
-The **Desktop** shows all nine areas. On a **paired phone**
-([Remote access](08-remote-access.md)) you get the eight meant for use on the go — Chat,
-Knowledge, Planner, Schedules, Email, Info, Activity, and Usage — while Settings and
+The **Desktop** shows all ten areas. On a **paired phone**
+([Remote access](08-remote-access.md)) you get the nine meant for use on the go — Chat,
+Neural, Knowledge, Planner, Schedules, Email, Info, Activity, and Usage — while Settings and
 first-time setup stay on the Desktop.
 
 ## Chat
@@ -409,8 +409,9 @@ How a card comes to life:
    sends): now, then again over the next two weeks, less often each time, and
    at once (with no model) whenever you keep a new source. The card says it is
    still looking until it finds one or you tap **Stop looking**. With research
-   switched off in Settings, the card does not offer Keep looking. If nothing
-   answers, the card says so — *"I couldn't build a reliable card for this"* —
+   switched off in Settings, the card does not offer Keep looking. When research
+   finds nothing it can trust, or Keep looking ends without a source, the card
+   says so — *"I couldn't build a reliable card for this"* —
    with one plain line on why and up to three links to pages that may help. Those links open in
    a new tab; SmartBrain shows nothing it read off them. Pasting your own link
    always works. If the link needs your own key, tick **It needs my key** (a

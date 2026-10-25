@@ -14,10 +14,14 @@ to know when a release changes behavior.
 ## [0.27.0] - 2026-10-25
 
 **Upgrading from 0.26.** One migration (43) adds a purpose label to the usage log, so **Usage & cost** can show
-each Neural Interface step. It is additive and forward-only, and runs on first launch. Three changes reach cards
+each Neural Interface step. It is additive and forward-only, and runs on first launch. Five changes reach cards
 you already have:
 - A model-answered card with no recorded consent for a cloud model stops and asks for your OK until you rebuild it.
+- A model-answered card now refreshes on your local model when one is routed, even if you had allowed a cloud model
+  for it. Choose **Cloud** for *Refreshing a model-answered card* under **Settings → Model routing** to go back.
 - A card that reads someone else's site refreshes at most every 15 minutes.
+- A card that reads a web page, or a source found outside the Library, is no longer read from a site whose
+  robots.txt asks automated readers to stay out.
 - `SMARTBRAIN_NI_FLOW` no longer does anything; a leftover `v1` is logged and ignored.
 
 Otherwise your cards refresh, edit, export and import as before.
@@ -103,12 +107,13 @@ Otherwise your cards refresh, edit, export and import as before.
   source once to build the preview and doesn't read it again, or refresh it, until you
   tap Keep. "Try another source" moves on to the next one. While it builds, the card
   shows its progress and a Cancel button. Sources that need your key are tried last,
-  and only after you type the key. If no Library source answers, the card lists the
-  Library's links and nothing else is fetched.
+  and only after you type the key. If no Library source answers, the card says so at
+  once (see **Keep looking** under *Changed*).
 
 - **The new flow's researcher can search the web (cloud model, with your consent).** When no
-  Library source fits, it can run up to 3 web searches and read a published JSON, RSS, CSV or
-  XML file, and a card built that way is a preview you must Keep before it refreshes. It only
+  Library source fits and you tap **Keep looking** (under *Changed*), it can run up to 3 web
+  searches and read a published JSON, RSS, CSV or XML file, and a card built that way is a
+  preview you must Keep before it refreshes. It only
   fetches the exact https addresses a search returned, never a link a page supplied or an
   address of its own, and follows each site's robots.txt. A consent given before web research
   (or with it switched off) covers the Library only; the card asks again. The consent now lists what leaves your computer, including that search
