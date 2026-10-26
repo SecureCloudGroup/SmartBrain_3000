@@ -11,6 +11,8 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+- A paired phone can now ask for a Neural Interface card (the request text only) and drive cards it already has: Retry, Cancel, Fix, Refine, Reopen, Stop looking, filling a non-secret value, the brief-summary switch, and the findings and measure views. It can also tap the fixed-choice consents: allow a cloud model on a card, Activate for other sites, Keep looking, and the repair policy. The Mac checks each one and logs it as "from paired phone". Typed answers, pasted links, keys, trust changes, backups, pairing and updates stay Mac-only, and the phone's refusal now says so ("Finish this on your Mac").
+
 ## [0.27.0] - 2026-10-25
 
 **Upgrading from 0.26.** One migration (43) adds a purpose label to the usage log, so **Usage & cost** can show

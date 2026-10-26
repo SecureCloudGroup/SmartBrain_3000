@@ -229,11 +229,25 @@ def _require_store(request: Request) -> SecretStore:
 # to mean only "not relayed from a phone". This is the ONE implementation.
 
 
+DESKTOP_ONLY_DETAIL = "Finish this on your Mac: it can't be done from a paired phone."
+
+
+def from_paired_phone(request: Request) -> bool:
+    """True when the credential is not a Desktop one (a bridged phone or a LAN browser)."""
+    assert request is not None, "request required"
+    return getattr(request.state, "sb_authority", None) != auth.DESKTOP
+
+
+def via_tag(request: Request) -> dict[str, str]:
+    """Audit tag for a phone-originated action ({} from the Desktop)."""
+    return {"via": "paired phone"} if from_paired_phone(request) else {}
+
+
 def _require_desktop_local(request: Request) -> None:
     """Refuse anything but a Desktop credential (403)."""
     assert request is not None, "request required"
-    if getattr(request.state, "sb_authority", None) != auth.DESKTOP:
-        raise HTTPException(status_code=403, detail="this endpoint is Desktop-local only")
+    if from_paired_phone(request):
+        raise HTTPException(status_code=403, detail=DESKTOP_ONLY_DETAIL)
 
 
 def _mint_session(request: Request, response: Response) -> None:

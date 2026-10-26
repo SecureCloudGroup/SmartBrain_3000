@@ -11,7 +11,13 @@ from datetime import UTC, datetime
 
 import pytest
 from test_ni import _FakeGateway, _store
-from test_ni_answers import _INTENT, _QUERY_MARK, _ir_reply, _value, lib  # noqa: F401  (lib is a fixture)
+from test_ni_answers import (  # noqa: F401  (lib is a fixture)
+    _INTENT,
+    _QUERY_MARK,
+    _ir_reply,
+    _value,
+    lib,
+)
 from test_ni_auto_pick import _model, _Search  # noqa: F401
 from test_ni_auto_pick import _store as _flow_store
 from test_ni_research_tools import Net, _ctx

@@ -8,7 +8,12 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from test_ni_answers import _INTENT, OPEN_METEO, WEATHER_URL, lib  # noqa: F401  (lib is a fixture)
+from test_ni_answers import (  # noqa: F401  (lib is a fixture)
+    _INTENT,
+    OPEN_METEO,
+    WEATHER_URL,
+    lib,
+)
 from test_ni_auto_pick import _fetcher, _model, _row, _store, _Wrap
 
 from smartbrain_3000 import ni_flow, ni_master

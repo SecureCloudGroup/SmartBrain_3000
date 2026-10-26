@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, Response
 
 from . import (
+    account,
     gateway,
     library_client,
     library_index,
@@ -774,10 +775,9 @@ def activate_item(request: Request, item_id: str) -> dict:
     """Round 20 (B3a, R6): the Activate panel of a card whose page loads other sites — the
     user saw the sealed site list and allows every future update to load them. Seals the
     ``_render_ok`` attestation (kept like ``_c2_ok``; any rebuild asks again) and commissions
-    the card; it then waits for its YES like every page card. Desktop-local (a consent for
-    new egress, like the pick), audited. 404 / 409 when the card isn't waiting for its sites."""
+    the card; it then waits for its YES like every page card. Open to a paired phone
+    as a fixed-choice tap (T, 2026-10-26: no key, no free text; audited "via paired phone"). 404 / 409 when the card isn't waiting for its sites."""
     assert request is not None and item_id, "request + item id required"
-    _require_desktop_local(request)
     store = _store(request)
     if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
@@ -791,7 +791,7 @@ def activate_item(request: Request, item_id: str) -> dict:
     ni_flow.clear_flow_slot(store, item_id)
     request.app.state.audit.append(
         "user", "ni_activate_render", "reviewed", "executed", True,
-        args_summary=tools.summarize({"item_id": item_id, "sites": len(sites)}),
+        args_summary=tools.summarize({"item_id": item_id, "sites": len(sites), **account.via_tag(request)}),
         result_summary=tools.summarize({"state": "commissioning"}),
     )
     return {"state": "commissioning", "sites": sites}
@@ -1099,11 +1099,15 @@ def intake(request: Request, body: IntakeIn) -> dict:
     (Approve source / Add key / Fill / Activate / Looks right / Retry). No
     chat model anywhere in the path — the operator-ruled manager posture.
 
-    Desktop-local (creation is consent-bearing); audited as a user action.
+    Open to a paired phone as an ask only (no ``source_url``: a pasted link is a consent);
+    the card then stops at its first consent step, which is Desktop-local. Audited as a user action.
     ``source_url`` (optional) is the user's own URL — validated for shape here
     and by netguard at the sampling fetch.
     """
-    _require_desktop_local(request)
+    phone = account.from_paired_phone(request)
+    if phone and (body.source_url or "").strip():
+        # A pasted link is the consent to fetch it: that stays on the Mac for now.
+        raise HTTPException(status_code=403, detail=account.DESKTOP_ONLY_DETAIL)
     store = _store(request)
     text = body.request.strip()
     if not text:
@@ -1125,7 +1129,8 @@ def intake(request: Request, body: IntakeIn) -> dict:
     request.app.state.audit.append(
         "user", "ni_intake", "reviewed", "executed", True,
         args_summary=tools.summarize({"request": text[:200],
-                                       "source_url": source_url}),
+                                       "source_url": source_url,
+                                       **account.via_tag(request)}),
         result_summary=tools.summarize({"id": item_id, "started": bool(started)}),
     )
     return {"id": item_id, "started": bool(started)}
@@ -1139,7 +1144,6 @@ def retry_flow(request: Request, item_id: str) -> dict:
     running flow refuses (409). Deterministic: nothing about the request or
     consent state changes — this is 'try the same thing again', honestly.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1177,7 +1181,6 @@ def cancel_item_flow(request: Request, item_id: str) -> dict:
     """Cancel: stop the card's running flow (cooperative; the worker finishes its current fetch and
     seals nothing). Desktop-local, audited. 404 for an unknown item; 409 unless a flow is
     running (not ready, not already ended)."""
-    _require_desktop_local(request)
     store = _store(request)
     if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
@@ -1307,7 +1310,6 @@ def fix_item_flow(request: Request, item_id: str) -> dict:
     (the shared remap entry: API and web-page sources, params filled, never
     a new host). Desktop-local, audited. ValueError guidance surfaces as 409.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1340,7 +1342,6 @@ def refine_item(request: Request, item_id: str, body: RefineIn) -> dict:
     source with the note sealed as part of the goal, judge-verified).
     Desktop-local, audited; ValueError guidance surfaces as 409.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1374,7 +1375,8 @@ def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict
     and the worker re-runs the sealed request. 409 unless the record's stamped
     question matches the answered kind. Desktop-local, audited.
     """
-    _require_desktop_local(request)
+    if body.kind != "model_consent":  # a typed answer stays on the Mac; the consent is a fixed choice
+        _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1414,7 +1416,8 @@ def _answer_model_consent(request: Request, store, item_id: str, stamped: dict,
     request.app.state.audit.append(
         "user", "ni_flow_answer", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "kind": "model_consent",
-                                       "answer": value, "model": model if value == "allow" else local}),
+                                       "answer": value, "model": model if value == "allow" else local,
+                                       **account.via_tag(request)}),
         result_summary=tools.summarize({"started": bool(started)}),
     )
     return {"ok": True, "started": bool(started)}
@@ -1426,7 +1429,6 @@ def reopen_flow_pick(request: Request, item_id: str) -> dict:
     link to the data (the "paste a link" way back a decline promises). 409 for finished cards (Fix owns those) and
     for flows that are not over, or whose card does not offer the action.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1487,14 +1489,13 @@ def use_key(request: Request, item_id: str) -> dict:
 def keep_looking(request: Request, item_id: str) -> dict:
     """Release P2: a declined shell becomes a standing order. It looks again now (research allowed, after the
     card's model consent), then on a backoff and whenever you keep a new source, for up to 14 days."""
-    _require_desktop_local(request)
     store, record = _offered(request, item_id, "keep_looking")
     if not ni_standing.lookable(record):  # the card changed since its actions were read
         raise HTTPException(status_code=409, detail="this card does not offer that now")
     started = ni_standing.start(store, item_id, record)
     request.app.state.audit.append(
         "user", "ni_keep_looking", "reviewed", "executed", True,
-        args_summary=tools.summarize({"item_id": item_id}),
+        args_summary=tools.summarize({"item_id": item_id, **account.via_tag(request)}),
         result_summary=tools.summarize({"started": bool(started)}),
     )
     return {"id": item_id, "started": bool(started)}
@@ -1503,7 +1504,6 @@ def keep_looking(request: Request, item_id: str) -> dict:
 @router.post("/api/ni/items/{item_id}/flow/stop-looking")
 def stop_looking(request: Request, item_id: str) -> dict:
     """Release P2: close the card's standing order; it keeps its decline and links."""
-    _require_desktop_local(request)
     store, _record = _offered(request, item_id, "stop_looking")
     ni_standing.stop(store, item_id)
     request.app.state.audit.append(
@@ -1517,14 +1517,12 @@ def stop_looking(request: Request, item_id: str) -> dict:
 def get_measure(request: Request) -> dict:
     """Release P4: the live measure (desktop-local). How each card was built, whether you kept it, and whether a kept
     card still works seven days on, counted per way in and in total, with the rows (the eval's export)."""
-    _require_desktop_local(request)
     return ni_measure.view(_store(request))
 
 
 @router.get("/api/ni/findings")
 def get_findings(request: Request, limit: int = 50) -> dict:
     """G1 oversight surface: open watcher findings, newest first (desktop-local)."""
-    _require_desktop_local(request)
     store = _store(request)
     return {"findings": ni_watch.list_findings(store.conn, limit=limit)}
 
@@ -1532,7 +1530,6 @@ def get_findings(request: Request, limit: int = 50) -> dict:
 @router.post("/api/ni/findings/{finding_id}/resolve")
 def resolve_finding_route(request: Request, finding_id: str) -> dict:
     """Mark one finding resolved from the Health surface. 404 when absent/closed."""
-    _require_desktop_local(request)
     store = _store(request)
     if not ni_watch.resolve_finding(store.conn, finding_id):
         raise HTTPException(status_code=404, detail="finding not found or already resolved")
@@ -1567,7 +1564,6 @@ def put_param(request: Request, item_id: str, body: ParamIn) -> dict:
     (origin=user), so the A3 rule applies — a param that shapes the effective
     URL strips ``_c2_ok``/``contract`` and the card re-commissions honestly.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1637,9 +1633,9 @@ def _param_label(item: dict, name: str) -> str:
 class RepairPolicyIn(BaseModel):
     """Partial repair-policy update: either flag may be absent (unchanged).
 
-    Closed shape mirrors ``ni._validate_repair_policy``. The route is desktop-local:
-    an L2 opt-in is a consent-bearing switch (§23) and must never ride the bridged
-    phone response surface. The web UI's toggle lands here; the tool chokepoint's
+    Closed shape mirrors ``ni._validate_repair_policy``. The route is open to a paired
+    phone as a fixed-choice tap (T, 2026-10-26); an L2 opt-in is a consent-bearing switch
+    (§23), so the audit row carries ``via`` when it came from a phone. The web UI's toggle lands here; the tool chokepoint's
     ``update_ni_item`` handler is the agent-side equivalent (approval card = consent).
     """
 
@@ -1656,7 +1652,6 @@ def set_repair_policy(request: Request, item_id: str, body: RepairPolicyIn) -> d
     A3 rule) — a policy flip is a plain user edit and inherits the same posture.
     Refuses when the item is missing (404); pydantic validates the shape.
     """
-    _require_desktop_local(request)
     store = _store(request)
     current = store.get_item(item_id)
     if current is None:
@@ -1682,7 +1677,8 @@ def set_repair_policy(request: Request, item_id: str, body: RepairPolicyIn) -> d
     request.app.state.audit.append(
         "user", "ni_repair_policy_set", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id,
-                                       "repair_policy": new_spec["repair_policy"]}),
+                                       "repair_policy": new_spec["repair_policy"],
+                                       **account.via_tag(request)}),
         result_summary=tools.summarize({"repair_policy": new_spec["repair_policy"]}),
     )
     return {"ok": True, "repair_policy": new_spec["repair_policy"]}
@@ -1705,7 +1701,6 @@ def set_brief_summary(request: Request, item_id: str, body: BriefSummaryIn) -> d
     brief, is not kept yet, or no local model exists: there is never a fallback to a cloud model, and the
     headlines are untouched either way. Off: the stage and the pin are removed. The next refresh writes the
     summary (the card's Refresh)."""
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:

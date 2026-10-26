@@ -775,16 +775,17 @@ def test_D2c_export_strips_repair_policy_and_l2_state(client: TestClient) -> Non
 
 
 def test_D2b_repair_policy_route_sets_flag(client: TestClient) -> None:
-    """D2b: POST /repair-policy is the desktop-local setter — flips l2_frontier
-    end-to-end + refuses a phone (Desktop authority only)."""
+    """D2b: POST /repair-policy flips l2_frontier end-to-end, from the
+    Desktop or as a paired phone's tap."""
     _unlock(client)
     iid = _seed_failing_with_proposal(client)
     store = client.app.state.ni
 
-    # 403 without desktop-local.
+    # A paired phone may tap it too (T, 2026-10-26): audited "via paired phone".
     r = client.post(f"/api/ni/items/{iid}/repair-policy",
                     json={"l2_frontier": False}, headers=_PHONE)
-    assert r.status_code == 403, r.text
+    assert r.status_code == 200, r.text
+    assert any("paired phone" in str(e) for e in client.get("/api/audit").json()["entries"])
 
     r = client.post(f"/api/ni/items/{iid}/repair-policy",
                     json={"l2_frontier": False})
