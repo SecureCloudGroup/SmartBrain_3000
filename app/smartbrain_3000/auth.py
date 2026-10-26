@@ -33,6 +33,7 @@ cookie store) — out of scope per SECURITY.md.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import hmac
 import logging
@@ -68,6 +69,15 @@ OPEN_ROUTES: frozenset[tuple[str, str]] = frozenset({
     # cookie never rides it; the route's own one-shot ``state`` is its defense.
     ("GET", "/api/email/oauth/callback"), ("HEAD", "/api/email/oauth/callback"),
 })
+
+# The authority of the request being served, for the audit chokepoint (a sync route runs in a
+# worker thread that inherits this context). None outside a request.
+_REQUEST_AUTHORITY: contextvars.ContextVar[str | None] = contextvars.ContextVar("sb_request_authority", default=None)
+
+
+def request_authority() -> str | None:
+    return _REQUEST_AUTHORITY.get()
+
 
 # Per process, never persisted, never sent anywhere but the in-process bridge.
 _RELAY_SECRET = secrets.token_hex(32)
@@ -238,6 +248,13 @@ class SessionGuard:
             return
         authority = authority_of(scope, scope["app"])
         scope.setdefault("state", {})["sb_authority"] = authority
+        reset = _REQUEST_AUTHORITY.set(authority)
+        try:
+            await self._dispatch(scope, receive, send, authority, path)
+        finally:
+            _REQUEST_AUTHORITY.reset(reset)
+
+    async def _dispatch(self, scope, receive, send, authority, path) -> None:
         method = scope.get("method", "GET").upper()
         if authority is None and (method, path) not in OPEN_ROUTES:
             # LOCKED: the ordinary 423 (lock state is public anyway — /api/account/status),

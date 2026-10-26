@@ -238,11 +238,6 @@ def from_paired_phone(request: Request) -> bool:
     return getattr(request.state, "sb_authority", None) != auth.DESKTOP
 
 
-def via_tag(request: Request) -> dict[str, str]:
-    """Audit tag for a phone-originated action ({} from the Desktop)."""
-    return {"via": "paired phone"} if from_paired_phone(request) else {}
-
-
 def _require_desktop_local(request: Request) -> None:
     """Refuse anything but a Desktop credential (403)."""
     assert request is not None, "request required"

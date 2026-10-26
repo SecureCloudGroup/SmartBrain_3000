@@ -8,6 +8,7 @@ makes a new Desktop-local route (or a quiet removal of one) a deliberate edit, r
 from __future__ import annotations
 
 import inspect
+import re
 from collections.abc import Iterator
 
 import pytest
@@ -47,7 +48,9 @@ DESKTOP_ONLY = frozenset({
     "POST /api/ni/mcp-servers",
     "POST /api/restore",
     "POST /api/update/install",
+    "POST /api/vaults/{vault_id}/export",
     "POST /api/vaults/{vault_id}/key",
+    "POST /api/vaults/{vault_id}/retire",
     "POST /api/vaults/{vault_id}/trust-publisher",
     "POST /api/vaults/{vault_id}/verify-hosted",
     "PUT /api/ni/items/{item_id}/credential",
@@ -64,14 +67,13 @@ PHONE_OK_NI = [
     ("PUT", "/api/ni/items/nope/param"),
     ("POST", "/api/ni/items/nope/brief-summary"),
     ("POST", "/api/ni/findings/nope/resolve"),
-    ("GET", "/api/ni/findings"),
-    ("GET", "/api/ni/measure"),
     ("POST", "/api/ni/items/nope/activate"),            # fixed-choice consent taps (T, 10:46Z)
     ("POST", "/api/ni/items/nope/flow/keep-looking"),
     ("POST", "/api/ni/items/nope/repair-policy"),
 ]
+PHONE_OK_READS = ["/api/ni/findings", "/api/ni/measure"]
 _BODIES = {"repair-policy": {"l1": True}, "refine": {"note": "every hour"}, "param": {"name": "x", "value": "y"},
-           "brief-summary": {"enabled": True}}
+           "brief-summary": {"on": True}}
 
 
 @pytest.fixture()
@@ -93,23 +95,48 @@ def _walk(routes):
             yield route
 
 
-def test_the_desktop_only_set_is_frozen(client: TestClient) -> None:
+def _guard_sources(endpoint, follow: bool = True) -> str:
+    """The endpoint's source plus the module-level helpers it passes ``request`` to (one level)."""
+    src = inspect.getsource(endpoint)
+    module = inspect.getmodule(endpoint)
+    for name in re.findall(r"\b(_\w+)\(\s*request\b", src) if follow else []:
+        helper = getattr(module, name, None)
+        if inspect.isfunction(helper):
+            src += inspect.getsource(helper)
+    return src
+
+
+def _census(client: TestClient, needle: str, follow: bool = True) -> set[str]:
     found = set()
     for route in _walk(client.app.routes):
         endpoint = getattr(route, "endpoint", None)
         if endpoint is None or not getattr(route, "methods", None):
             continue
-        if "_require_desktop_local" in inspect.getsource(endpoint):
+        if needle in _guard_sources(endpoint, follow):
             for method in route.methods - {"HEAD", "OPTIONS"}:
                 found.add(f"{method} {route.path}")
-    assert found == DESKTOP_ONLY
+    return found
+
+
+def test_the_desktop_only_set_is_frozen(client: TestClient) -> None:
+    assert _census(client, "_require_desktop_local(") == DESKTOP_ONLY
+
+
+def test_only_intake_uses_the_inline_phone_check(client: TestClient) -> None:
+    """The one other way to refuse a phone is ``from_paired_phone`` (a partial refusal)."""
+    assert _census(client, "from_paired_phone(", follow=False) == {"POST /api/ni/intake"}
 
 
 @pytest.mark.parametrize(("method", "path"), PHONE_OK_NI)
 def test_a_phone_can_drive_its_cards(client: TestClient, method: str, path: str) -> None:
     body = _BODIES.get(path.rsplit("/", 1)[-1])
     r = client.request(method, path, headers=_PHONE, json=body) if body else client.request(method, path, headers=_PHONE)
-    assert r.status_code != 403, r.text
+    assert r.status_code == 404, r.text
+
+
+@pytest.mark.parametrize("path", PHONE_OK_READS)
+def test_a_phone_can_read_findings_and_measure(client: TestClient, path: str) -> None:
+    assert client.get(path, headers=_PHONE).status_code == 200
 
 
 def test_a_phone_can_ask_for_a_card_but_not_with_a_link(client: TestClient, monkeypatch) -> None:
@@ -134,3 +161,16 @@ def test_a_phone_may_only_answer_the_model_consent_question(client: TestClient) 
     tap = client.post("/api/ni/items/nope/flow/answer", headers=_PHONE,
                       json={"kind": "model_consent", "value": "allow"})
     assert tap.status_code != 403
+
+
+def test_every_user_audit_row_from_a_phone_is_tagged_at_one_chokepoint(client: TestClient) -> None:
+    from smartbrain_3000 import auth
+    audit = client.app.state.audit
+    token = auth._REQUEST_AUTHORITY.set(auth.REMOTE)
+    try:
+        audit.append("user", "ni_flow_cancel", "reviewed", "executed", True, args_summary="{}")
+    finally:
+        auth._REQUEST_AUTHORITY.reset(token)
+    audit.append("user", "ni_flow_cancel", "reviewed", "executed", True, args_summary="{}")
+    rows = [e for e in client.get("/api/audit").json()["entries"] if e["tool"] == "ni_flow_cancel"]
+    assert len(rows) == 2 and sum("paired phone" in str(e) for e in rows) == 1

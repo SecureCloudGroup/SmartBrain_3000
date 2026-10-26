@@ -21,7 +21,7 @@ is true of the broker protocol and still leaves things worth knowing:
   credential is stored by that origin. The broker never sees your traffic — it is
   relayed end-to-end encrypted and your phone pins the Desktop's key — but whoever
   controls that host serves the code doing the pinning. A compromised node (or its
-  operator) could serve modified JavaScript and read the stored credential. Running
+  operator) could serve modified JavaScript and read the stored credential. That same JavaScript can also do what a paired phone may do: ask for Neural Interface cards, allow a cloud model on a card (charged to your key), Activate a card's other sites, start a standing order, and change a card's repair policy. It still cannot enter keys, trust a publisher, back up, pair or revoke devices, or run code: those stay Desktop-only. Running your own node, or using the Desktop only, removes this exposure. Running
   your own node via `SMARTBRAIN_SIGNALING_URL` moves that trust to you; using the
   Desktop only avoids it entirely.
 - **A desktop id is a routing key, not a secret.** It travels in the pairing payload and

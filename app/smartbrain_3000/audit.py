@@ -20,12 +20,14 @@ import uuid
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from . import auth
 from .secrets import MASTER_KEY_BYTES
 
 _NONCE_BYTES = 12
 _LIST_LIMIT = 500  # max audit rows returned (verifiable bound)
 _DECISIONS = ("proposed", "auto", "approved", "denied", "executed", "errored")
 _ACTORS = ("assistant", "user")
+REMOTE_TAG = "paired phone"  # a bridged phone (or a LAN browser with phone authority)
 
 
 class AuditLog:
@@ -54,6 +56,8 @@ class AuditLog:
         assert actor in _ACTORS, "unknown actor"
         assert decision in _DECISIONS, "unknown decision"
         aid = str(uuid.uuid4())
+        if actor == "user" and auth.request_authority() == auth.REMOTE:
+            args_summary = f"{args_summary} [via {REMOTE_TAG}]".strip()  # one chokepoint: no route can forget it
         nonce = os.urandom(_NONCE_BYTES)
         body = {"args_summary": args_summary, "result_summary": result_summary, "error": error}
         ciphertext = self._aes.encrypt(nonce, json.dumps(body).encode("utf-8"), b"audit:" + aid.encode("utf-8"))

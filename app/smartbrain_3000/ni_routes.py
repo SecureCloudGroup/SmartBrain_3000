@@ -776,7 +776,7 @@ def activate_item(request: Request, item_id: str) -> dict:
     user saw the sealed site list and allows every future update to load them. Seals the
     ``_render_ok`` attestation (kept like ``_c2_ok``; any rebuild asks again) and commissions
     the card; it then waits for its YES like every page card. Open to a paired phone
-    as a fixed-choice tap (T, 2026-10-26: no key, no free text; audited "via paired phone"). 404 / 409 when the card isn't waiting for its sites."""
+    as a fixed-choice tap (T, 2026-10-26: no key, no free text; audited with the origin tag). 404 / 409 when the card isn't waiting for its sites."""
     assert request is not None and item_id, "request + item id required"
     store = _store(request)
     if store.get_item(item_id) is None:
@@ -791,7 +791,7 @@ def activate_item(request: Request, item_id: str) -> dict:
     ni_flow.clear_flow_slot(store, item_id)
     request.app.state.audit.append(
         "user", "ni_activate_render", "reviewed", "executed", True,
-        args_summary=tools.summarize({"item_id": item_id, "sites": len(sites), **account.via_tag(request)}),
+        args_summary=tools.summarize({"item_id": item_id, "sites": len(sites)}),
         result_summary=tools.summarize({"state": "commissioning"}),
     )
     return {"state": "commissioning", "sites": sites}
@@ -1129,8 +1129,7 @@ def intake(request: Request, body: IntakeIn) -> dict:
     request.app.state.audit.append(
         "user", "ni_intake", "reviewed", "executed", True,
         args_summary=tools.summarize({"request": text[:200],
-                                       "source_url": source_url,
-                                       **account.via_tag(request)}),
+                                       "source_url": source_url}),
         result_summary=tools.summarize({"id": item_id, "started": bool(started)}),
     )
     return {"id": item_id, "started": bool(started)}
@@ -1416,8 +1415,7 @@ def _answer_model_consent(request: Request, store, item_id: str, stamped: dict,
     request.app.state.audit.append(
         "user", "ni_flow_answer", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id, "kind": "model_consent",
-                                       "answer": value, "model": model if value == "allow" else local,
-                                       **account.via_tag(request)}),
+                                       "answer": value, "model": model if value == "allow" else local}),
         result_summary=tools.summarize({"started": bool(started)}),
     )
     return {"ok": True, "started": bool(started)}
@@ -1495,7 +1493,7 @@ def keep_looking(request: Request, item_id: str) -> dict:
     started = ni_standing.start(store, item_id, record)
     request.app.state.audit.append(
         "user", "ni_keep_looking", "reviewed", "executed", True,
-        args_summary=tools.summarize({"item_id": item_id, **account.via_tag(request)}),
+        args_summary=tools.summarize({"item_id": item_id}),
         result_summary=tools.summarize({"started": bool(started)}),
     )
     return {"id": item_id, "started": bool(started)}
@@ -1677,8 +1675,7 @@ def set_repair_policy(request: Request, item_id: str, body: RepairPolicyIn) -> d
     request.app.state.audit.append(
         "user", "ni_repair_policy_set", "reviewed", "executed", True,
         args_summary=tools.summarize({"item_id": item_id,
-                                       "repair_policy": new_spec["repair_policy"],
-                                       **account.via_tag(request)}),
+                                       "repair_policy": new_spec["repair_policy"]}),
         result_summary=tools.summarize({"repair_policy": new_spec["repair_policy"]}),
     )
     return {"ok": True, "repair_policy": new_spec["repair_policy"]}
