@@ -46,7 +46,7 @@ dependencies = [
     # ni_query.recognize.
     "ms-recognizers-text-suite==1.0.1",
     # US holiday dates for the asked year (MIT, pure Python, needs only python-dateutil); puckling has no 3.12 release.
-    "holidays==0.106",
+    "holidays==0.107",
 ]
 
 [project.optional-dependencies]
