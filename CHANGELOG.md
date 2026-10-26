@@ -11,6 +11,31 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-26
+
+**Upgrading from 0.27.0.** No migration and no change to your cards, sources or settings. This
+release changes what a paired phone (or a browser on a LAN address) may do:
+- A phone can now ask for a Neural Interface card and work the cards it has, and may tap the four
+  fixed-choice consents (allow a cloud model on a card, Activate a card's other sites, Keep looking,
+  the repair policy). Each tap is checked by the Desktop and shown in **Activity** as "from paired
+  phone". A cloud-model allowance or a Keep looking from a phone draws one unit of the daily
+  re-research ceiling (`SMARTBRAIN_NI_RERESEARCH_DAILY`, default 10) and is refused for the day once
+  it is spent.
+- Settings writers that answered a phone before this release no longer do: provider keys, the
+  passphrase change, local-model endpoints, model routing and Neural Interface step models, the
+  web-search provider and the self-improvement switches now refuse anything but the Desktop. If you
+  relied on any of those from a phone, do them on the Mac from now on.
+- Every refusal reads "Finish this on your Mac: it can't be done from a paired phone or a LAN
+  browser."
+- SECURITY.md now states the widened reach of the signaling node: whoever controls that node's
+  code can do what a phone can do (including charging cloud-model allowances to your key, within the
+  daily ceiling), and nothing more. Running your own node via `SMARTBRAIN_SIGNALING_URL` moves that
+  trust to you.
+
+Neural Interface research itself is unchanged, so the held-out safety numbers from 0.27.0 stand.
+
+### Added
+
 - **A paired phone can drive Neural Interface cards.** It can ask for a card (the request text
   only) and work a card it already has: Retry, Cancel, Fix, Refine, Reopen, Stop looking,
   filling a non-secret value, the brief-summary switch, and the findings and measure views. It
@@ -25,12 +50,18 @@ to know when a release changes behavior.
   [Remote access](docs/08-remote-access.md#using-it-on-your-phone) and the trust-model note in
   SECURITY.md: the phone app is served by the signaling node, so whoever controls that node's
   code can now do what a phone can do, and nothing more.
+
+### Security
+
 - **Settings writers now refuse a paired phone or a LAN browser** (they never should have
   answered one): provider keys, the passphrase change, the local-model endpoints (Ollama, MLX,
   Claude Code, voice), model routing and Neural Interface step models, the web-search provider,
   and the self-improvement switches. Settings is a Desktop-only page already; the one
   phone-visible caller was the chat page's "connect the detected local model" button, which now
   reads "Finish this on your Mac".
+
+### Changed
+
 - Internal: Desktop-only is now declared on the route (`dependencies=[DESKTOP_ONLY]`) instead of
   called inside it, and a test partitions every API route into Desktop-only, partial and
   phone-ok, so a new route picks its authority class deliberately. The refusal fires before
