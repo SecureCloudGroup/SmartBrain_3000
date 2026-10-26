@@ -13,7 +13,11 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from test_ni_access import _pick_pause, _stores, client  # noqa: F401  (client is a fixture)
+from test_ni_access import (  # noqa: F401  (client is a fixture)
+    _pick_pause,
+    _stores,
+    client,
+)
 from test_ni_research_tools import _listed
 
 from smartbrain_3000 import netguard, ni_flow, ni_master

@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, Response
 
 from . import (
+    account,
     gateway,
     library_client,
     library_index,
@@ -41,7 +42,6 @@ from . import (
     tools,
     vault_format,
 )
-from .account import _require_desktop_local
 from .browsers import runner as browser_runner
 from .data_routes import _reauthorize
 from .scheduler import _NI_FEED_ID, ScheduleStore, post_ni_carrier_notices
@@ -470,7 +470,7 @@ def _notice_id(ran_at: str) -> int:
     return (stamp - _EPOCH) // timedelta(microseconds=1)
 
 
-@router.get("/api/ni/notices")
+@router.get("/api/ni/notices", dependencies=[account.DESKTOP_ONLY])
 def list_notices(request: Request, limit: int = _DEFAULT_NOTICES) -> list[dict]:
     """Newest NI carrier notices for the launcher's tray notifications (§17).
 
@@ -479,7 +479,6 @@ def list_notices(request: Request, limit: int = _DEFAULT_NOTICES) -> list[dict]:
     launcher treats as "skip", so sealed content never crosses the unlock boundary.
     Bodies are the already-sanitized carrier messages (§12 H1 guard upstream).
     """
-    _require_desktop_local(request)
     _store(request)  # 423 while locked — the notices surface simply goes dark
     state = request.app.state
     schedules = getattr(state, "schedules", None) or ScheduleStore(state.dbx, state.master_key)
@@ -774,10 +773,10 @@ def activate_item(request: Request, item_id: str) -> dict:
     """Round 20 (B3a, R6): the Activate panel of a card whose page loads other sites — the
     user saw the sealed site list and allows every future update to load them. Seals the
     ``_render_ok`` attestation (kept like ``_c2_ok``; any rebuild asks again) and commissions
-    the card; it then waits for its YES like every page card. Desktop-local (a consent for
-    new egress, like the pick), audited. 404 / 409 when the card isn't waiting for its sites."""
+    the card; it then waits for its YES like every page card. Open to a paired phone as a
+    fixed-choice tap (T, 2026-10-26: no key, no free text; the audit row says where it came
+    from). 404 / 409 when the card isn't waiting for its sites."""
     assert request is not None and item_id, "request + item id required"
-    _require_desktop_local(request)
     store = _store(request)
     if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
@@ -803,7 +802,7 @@ class SwitchFeedIn(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
 
-@router.post("/api/ni/items/{item_id}/switch-feed")
+@router.post("/api/ni/items/{item_id}/switch-feed", dependencies=[account.DESKTOP_ONLY])
 def switch_item_feed(request: Request, item_id: str, body: SwitchFeedIn) -> dict:
     """Round 20 (B3a, R12): build this card from the site's data feed the page browser saw
     (one of its sealed ``_feed_candidates`` — nothing else is accepted, nothing was fetched
@@ -811,7 +810,6 @@ def switch_item_feed(request: Request, item_id: str, body: SwitchFeedIn) -> dict
     existing door; the card waits for its YES). Desktop-local, audited; 409 otherwise."""
     assert request is not None and item_id, "request + item id required"
     assert isinstance(body.url, str), "the body carries a URL"
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1045,7 +1043,7 @@ def delete_item(request: Request, item_id: str) -> dict:
     return {"ok": True}
 
 
-@router.put("/api/ni/items/{item_id}/credential")
+@router.put("/api/ni/items/{item_id}/credential", dependencies=[account.DESKTOP_ONLY])
 def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
     """Store a secret parameter value host-bound (Desktop-local; value never travels chat).
 
@@ -1058,7 +1056,6 @@ def put_credential(request: Request, item_id: str, body: CredentialIn) -> dict:
     history shows "credential '<label>' added" when the user filled in a key.
     Value bytes never touch the journal (summary is code-composed metadata).
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1099,11 +1096,15 @@ def intake(request: Request, body: IntakeIn) -> dict:
     (Approve source / Add key / Fill / Activate / Looks right / Retry). No
     chat model anywhere in the path — the operator-ruled manager posture.
 
-    Desktop-local (creation is consent-bearing); audited as a user action.
+    Open to a paired phone as an ask only (no ``source_url``: a pasted link is a consent);
+    the card then stops at its first consent step, where every key or link needs the Mac.
+    Audited as a user action.
     ``source_url`` (optional) is the user's own URL — validated for shape here
     and by netguard at the sampling fetch.
     """
-    _require_desktop_local(request)
+    if (body.source_url or "").strip() and account.from_paired_phone(request):
+        # Partial route class: a pasted link is the consent to fetch it, and that stays on the Mac.
+        raise HTTPException(status_code=403, detail=account.DESKTOP_ONLY_DETAIL)
     store = _store(request)
     text = body.request.strip()
     if not text:
@@ -1139,7 +1140,6 @@ def retry_flow(request: Request, item_id: str) -> dict:
     running flow refuses (409). Deterministic: nothing about the request or
     consent state changes — this is 'try the same thing again', honestly.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1175,9 +1175,8 @@ def retry_flow(request: Request, item_id: str) -> dict:
 @router.post("/api/ni/items/{item_id}/flow/cancel")
 def cancel_item_flow(request: Request, item_id: str) -> dict:
     """Cancel: stop the card's running flow (cooperative; the worker finishes its current fetch and
-    seals nothing). Desktop-local, audited. 404 for an unknown item; 409 unless a flow is
+    seals nothing). Audited. 404 for an unknown item; 409 unless a flow is
     running (not ready, not already ended)."""
-    _require_desktop_local(request)
     store = _store(request)
     if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
@@ -1201,7 +1200,7 @@ class PickSourceIn(BaseModel):
     needs_key: bool = False
 
 
-@router.post("/api/ni/items/{item_id}/flow/pick-source")
+@router.post("/api/ni/items/{item_id}/flow/pick-source", dependencies=[account.DESKTOP_ONLY])
 def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict:
     """P3 (2026-09-17): resume a source-pick pause with a URL the USER pasted
     on the card — their paste is the consent (the same posture the chat
@@ -1212,7 +1211,6 @@ def pick_flow_source(request: Request, item_id: str, body: PickSourceIn) -> dict
     page, a Library source without declared answers) is refused (409) — it never builds a card. The
     same page PASTED by the user is theirs: it builds and waits for their YES (§33).
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1270,11 +1268,10 @@ class AccessIn(BaseModel):
     reuse: bool = False
 
 
-@router.post("/api/ni/items/{item_id}/flow/access")
+@router.post("/api/ni/items/{item_id}/flow/access", dependencies=[account.DESKTOP_ONLY])
 def give_flow_access(request: Request, item_id: str, body: AccessIn) -> dict:
     """Store what the card asked for — the key host-bound under this card, the email sealed —
     then build. Desktop-local (a credential never travels chat); audited without values."""
-    _require_desktop_local(request)
     store = _store(request)
     if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
@@ -1305,9 +1302,8 @@ def give_flow_access(request: Request, item_id: str, body: AccessIn) -> dict:
 def fix_item_flow(request: Request, item_id: str) -> dict:
     """P3: the card's Fix — re-derive this card against its OWN frozen source
     (the shared remap entry: API and web-page sources, params filled, never
-    a new host). Desktop-local, audited. ValueError guidance surfaces as 409.
+    a new host). Audited. ValueError guidance surfaces as 409.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1338,9 +1334,8 @@ def refine_item(request: Request, item_id: str, body: RefineIn) -> dict:
     Deterministic routing (cadence note → interval update; source-change note
     → the source pick pause; anything else → re-sample the item's OWN frozen
     source with the note sealed as part of the goal, judge-verified).
-    Desktop-local, audited; ValueError guidance surfaces as 409.
+    Audited; ValueError guidance surfaces as 409.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1372,9 +1367,13 @@ def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict
     ``supply_date``: the user's date (YYYY-MM-DD) is stamped ``_supplied`` on
     the flow record (their typed answer is the truth — never a model's guess)
     and the worker re-runs the sealed request. 409 unless the record's stamped
-    question matches the answered kind. Desktop-local, audited.
+    question matches the answered kind. Audited.
+
+    Partial route class: a paired phone may answer only ``model_consent`` (a fixed choice,
+    one of T's four taps); every typed answer stays on the Mac.
     """
-    _require_desktop_local(request)
+    if body.kind != "model_consent" and account.from_paired_phone(request):
+        raise HTTPException(status_code=403, detail=account.DESKTOP_ONLY_DETAIL)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1426,7 +1425,6 @@ def reopen_flow_pick(request: Request, item_id: str) -> dict:
     link to the data (the "paste a link" way back a decline promises). 409 for finished cards (Fix owns those) and
     for flows that are not over, or whose card does not offer the action.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1463,12 +1461,11 @@ def _offered(request: Request, item_id: str, action: str) -> tuple[ni.NIStore, d
     return store, ni_flow._flow_read(store, item_id) or {}
 
 
-@router.post("/api/ni/items/{item_id}/flow/use-key")
+@router.post("/api/ni/items/{item_id}/flow/use-key", dependencies=[account.DESKTOP_ONLY])
 def use_key(request: Request, item_id: str) -> dict:
     """Release P3: a declined shell whose search met an address that asked for a key takes the user's own key for
     it. The card asks where the key goes and the key (a same-host key the user already gave is offered, for a tap); the key is
     bound to that host and never sent anywhere else or shown to a model."""
-    _require_desktop_local(request)
     store, record = _offered(request, item_id, "use_key")
     url = ni_master.key_wall_of(record)
     assert url is not None, "use_key is offered only with a sealed key-walled address"
@@ -1487,7 +1484,6 @@ def use_key(request: Request, item_id: str) -> dict:
 def keep_looking(request: Request, item_id: str) -> dict:
     """Release P2: a declined shell becomes a standing order. It looks again now (research allowed, after the
     card's model consent), then on a backoff and whenever you keep a new source, for up to 14 days."""
-    _require_desktop_local(request)
     store, record = _offered(request, item_id, "keep_looking")
     if not ni_standing.lookable(record):  # the card changed since its actions were read
         raise HTTPException(status_code=409, detail="this card does not offer that now")
@@ -1503,7 +1499,6 @@ def keep_looking(request: Request, item_id: str) -> dict:
 @router.post("/api/ni/items/{item_id}/flow/stop-looking")
 def stop_looking(request: Request, item_id: str) -> dict:
     """Release P2: close the card's standing order; it keeps its decline and links."""
-    _require_desktop_local(request)
     store, _record = _offered(request, item_id, "stop_looking")
     ni_standing.stop(store, item_id)
     request.app.state.audit.append(
@@ -1515,16 +1510,14 @@ def stop_looking(request: Request, item_id: str) -> dict:
 
 @router.get("/api/ni/measure")
 def get_measure(request: Request) -> dict:
-    """Release P4: the live measure (desktop-local). How each card was built, whether you kept it, and whether a kept
+    """Release P4: the live measure. How each card was built, whether you kept it, and whether a kept
     card still works seven days on, counted per way in and in total, with the rows (the eval's export)."""
-    _require_desktop_local(request)
     return ni_measure.view(_store(request))
 
 
 @router.get("/api/ni/findings")
 def get_findings(request: Request, limit: int = 50) -> dict:
-    """G1 oversight surface: open watcher findings, newest first (desktop-local)."""
-    _require_desktop_local(request)
+    """G1 oversight surface: open watcher findings, newest first."""
     store = _store(request)
     return {"findings": ni_watch.list_findings(store.conn, limit=limit)}
 
@@ -1532,7 +1525,6 @@ def get_findings(request: Request, limit: int = 50) -> dict:
 @router.post("/api/ni/findings/{finding_id}/resolve")
 def resolve_finding_route(request: Request, finding_id: str) -> dict:
     """Mark one finding resolved from the Health surface. 404 when absent/closed."""
-    _require_desktop_local(request)
     store = _store(request)
     if not ni_watch.resolve_finding(store.conn, finding_id):
         raise HTTPException(status_code=404, detail="finding not found or already resolved")
@@ -1557,7 +1549,7 @@ class ParamIn(BaseModel):
 
 @router.put("/api/ni/items/{item_id}/param")
 def put_param(request: Request, item_id: str, body: ParamIn) -> dict:
-    """Fill a non-secret param value from the card (Desktop-local; audited).
+    """Fill a non-secret param value from the card (audited; a secret value is refused, 409).
 
     The needs_params counterpart of the credential PUT: a recipe- or flow-born
     card whose ``{{param:X}}`` slot code could not derive lands draft with a
@@ -1567,7 +1559,6 @@ def put_param(request: Request, item_id: str, body: ParamIn) -> dict:
     (origin=user), so the A3 rule applies — a param that shapes the effective
     URL strips ``_c2_ok``/``contract`` and the card re-commissions honestly.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1632,14 +1623,15 @@ def _param_label(item: dict, name: str) -> str:
     return label if isinstance(label, str) and label else name
 
 
-# --- Phase 4b D2b: repair-policy setter (desktop-local) ---------------------
+# --- Phase 4b D2b: repair-policy setter ---------------------
 
 class RepairPolicyIn(BaseModel):
     """Partial repair-policy update: either flag may be absent (unchanged).
 
-    Closed shape mirrors ``ni._validate_repair_policy``. The route is desktop-local:
-    an L2 opt-in is a consent-bearing switch (§23) and must never ride the bridged
-    phone response surface. The web UI's toggle lands here; the tool chokepoint's
+    Closed shape mirrors ``ni._validate_repair_policy``. The route is open to a paired
+    phone as a fixed-choice tap (T, 2026-10-26); an L2 opt-in is a consent-bearing switch
+    (§23), so the audit row says ``via`` when it came from a phone. The web UI's toggle
+    lands here; the tool chokepoint's
     ``update_ni_item`` handler is the agent-side equivalent (approval card = consent).
     """
 
@@ -1649,14 +1641,13 @@ class RepairPolicyIn(BaseModel):
 
 @router.post("/api/ni/items/{item_id}/repair-policy")
 def set_repair_policy(request: Request, item_id: str, body: RepairPolicyIn) -> dict:
-    """Set `repair_policy` on the item (desktop-local; audited).
+    """Set `repair_policy` on the item (audited; a paired phone may tap it).
 
     Metadata (the flags landed) is what rides the audit row; the sealed spec is the
     truth. Uses ``update_spec`` so the update strips ``_c2_ok`` / ``contract`` (the
     A3 rule) — a policy flip is a plain user edit and inherits the same posture.
     Refuses when the item is missing (404); pydantic validates the shape.
     """
-    _require_desktop_local(request)
     store = _store(request)
     current = store.get_item(item_id)
     if current is None:
@@ -1705,7 +1696,6 @@ def set_brief_summary(request: Request, item_id: str, body: BriefSummaryIn) -> d
     brief, is not kept yet, or no local model exists: there is never a fallback to a cloud model, and the
     headlines are untouched either way. Off: the stage and the pin are removed. The next refresh writes the
     summary (the card's Refresh)."""
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -1937,14 +1927,13 @@ def library_status(request: Request) -> dict:
     return _library_state(_store(request))
 
 
-@router.post("/api/ni/library/connect")
+@router.post("/api/ni/library/connect", dependencies=[account.DESKTOP_ONLY])
 def library_connect(request: Request, body: LibraryConnectIn) -> dict:
     """First contact: fetch + verify + pin the publisher key (TOFU). One source in v1.
 
     Desktop-local (feeds law: adding a recurring-fetch source is an explicit local act).
     Returns the full library state so the sheet renders in one round trip.
     """
-    _require_desktop_local(request)
     store = _store(request)
     library = _library(store)
     try:
@@ -2002,14 +1991,13 @@ class TrustKeyIn(BaseModel):
     recovery_key: str | None = None
 
 
-@router.post("/api/ni/library/trust-key")
+@router.post("/api/ni/library/trust-key", dependencies=[account.DESKTOP_ONLY])
 def library_trust_key(request: Request, body: TrustKeyIn) -> dict:
     """Re-pin the library to the changed publisher key the user confirmed out-of-band.
 
     Gates exactly like the vault version: Desktop-local + passphrase re-entry + the
     body must name the exact offered fingerprint. Seq floor survives the re-pin.
     """
-    _require_desktop_local(request)
     _reauthorize(request, body)
     store = _store(request)
     library = _library(store)
@@ -2033,7 +2021,7 @@ def library_trust_key(request: Request, body: TrustKeyIn) -> dict:
     return _library_state(store)
 
 
-@router.delete("/api/ni/library")
+@router.delete("/api/ni/library", dependencies=[account.DESKTOP_ONLY])
 def library_disconnect(request: Request) -> dict:
     """Remove the library source pin + stored pack. Installed items are UNTOUCHED.
     Desktop-local, mirroring connect.
@@ -2043,7 +2031,6 @@ def library_disconnect(request: Request) -> dict:
     ``POST /disconnect`` — matches the client contract; installed items survive
     because ``LibraryStore.disconnect`` only drops the two reserved snapshot rows.
     """
-    _require_desktop_local(request)
     store = _store(request)
     library = _library(store)
     if library.source() is None:
@@ -2211,7 +2198,7 @@ def _rebuild_from_template(current_spec: dict, template: dict) -> dict:
 
 # --- export-as-template (§21) --------------------------------------------------------
 
-@router.get("/api/ni/items/{item_id}/export-template")
+@router.get("/api/ni/items/{item_id}/export-template", dependencies=[account.DESKTOP_ONLY])
 def export_template(request: Request, item_id: str) -> dict:
     """Return the §19 template JSON for this item — sanitized per §21.
 
@@ -2219,7 +2206,6 @@ def export_template(request: Request, item_id: str) -> dict:
     SecretStore rows to catch a credential accidentally pasted into a header literal
     or URL query — never a value that could ride a bridged phone response.
     """
-    _require_desktop_local(request)
     store = _store(request)
     item = store.get_item(item_id)
     if item is None:
@@ -2504,11 +2490,10 @@ def list_mcp_servers(request: Request) -> dict:
     return {"servers": _registry(store).list_servers()}
 
 
-@router.post("/api/ni/mcp-servers")
+@router.post("/api/ni/mcp-servers", dependencies=[account.DESKTOP_ONLY])
 def add_mcp_server(request: Request, body: McpServerIn) -> dict:
     """Create one MCP server config. Desktop-local (§22: server config carries
     execution/connection authority)."""
-    _require_desktop_local(request)
     store = _store(request)
     try:
         row = _registry(store).add(_to_body(body))
@@ -2523,10 +2508,9 @@ def add_mcp_server(request: Request, body: McpServerIn) -> dict:
     return row
 
 
-@router.put("/api/ni/mcp-servers/{server_id}")
+@router.put("/api/ni/mcp-servers/{server_id}", dependencies=[account.DESKTOP_ONLY])
 def update_mcp_server(request: Request, server_id: str, body: McpServerIn) -> dict:
     """Replace one MCP server config. Desktop-local."""
-    _require_desktop_local(request)
     store = _store(request)
     registry = _registry(store)
     try:
@@ -2544,11 +2528,10 @@ def update_mcp_server(request: Request, server_id: str, body: McpServerIn) -> di
     return row
 
 
-@router.delete("/api/ni/mcp-servers/{server_id}")
+@router.delete("/api/ni/mcp-servers/{server_id}", dependencies=[account.DESKTOP_ONLY])
 def delete_mcp_server(request: Request, server_id: str) -> dict:
     """Drop one MCP server config. Desktop-local. Refuses when any item still
     references this server (409 with the item count so the sheet can show it)."""
-    _require_desktop_local(request)
     store = _store(request)
     in_use = _count_items_using_mcp_server(store, server_id)
     if in_use:

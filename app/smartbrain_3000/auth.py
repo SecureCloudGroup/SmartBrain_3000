@@ -33,6 +33,7 @@ cookie store) — out of scope per SECURITY.md.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import hmac
 import logging
@@ -68,6 +69,29 @@ OPEN_ROUTES: frozenset[tuple[str, str]] = frozenset({
     # cookie never rides it; the route's own one-shot ``state`` is its defense.
     ("GET", "/api/email/oauth/callback"), ("HEAD", "/api/email/oauth/callback"),
 })
+
+# Where a phone-authority request came from, for the audit chokepoint: a request over the
+# bridge carries the relay credential (``PHONE_VIA``); a browser session opened on a LAN
+# Host has the same authority but is not a phone (``LAN_VIA``). None for the Desktop and
+# outside a request. A sync route runs in a worker thread that inherits this context;
+# a background worker thread does not, which is right: its rows are the app's, not a phone's.
+PHONE_VIA = "paired phone"
+LAN_VIA = "LAN browser"
+_REQUEST_VIA: contextvars.ContextVar[str | None] = contextvars.ContextVar("sb_request_via", default=None)
+
+
+def request_via() -> str | None:
+    """``PHONE_VIA`` / ``LAN_VIA`` while serving a phone-authority request, else None."""
+    return _REQUEST_VIA.get()
+
+
+def via_of(scope: dict, authority: str | None) -> str | None:
+    """The origin label for an already-resolved authority (see ``request_via``)."""
+    if authority != REMOTE:
+        return None
+    relayed = any(k.decode("latin-1").lower() == RELAY_HEADER for k, _v in scope.get("headers") or [])
+    return PHONE_VIA if relayed else LAN_VIA
+
 
 # Per process, never persisted, never sent anywhere but the in-process bridge.
 _RELAY_SECRET = secrets.token_hex(32)
@@ -238,6 +262,13 @@ class SessionGuard:
             return
         authority = authority_of(scope, scope["app"])
         scope.setdefault("state", {})["sb_authority"] = authority
+        token = _REQUEST_VIA.set(via_of(scope, authority))
+        try:
+            await self._dispatch(scope, receive, send, authority, path)
+        finally:
+            _REQUEST_VIA.reset(token)
+
+    async def _dispatch(self, scope, receive, send, authority, path) -> None:
         method = scope.get("method", "GET").upper()
         if authority is None and (method, path) not in OPEN_ROUTES:
             # LOCKED: the ordinary 423 (lock state is public anyway — /api/account/status),

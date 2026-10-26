@@ -21,7 +21,8 @@ from pydantic import BaseModel, Field
 
 from . import gateway, identity, netguard, tools, vault_format, vault_sync
 from . import kb as kbmod
-from .data_routes import _reauthorize, _require_desktop_local
+from .account import DESKTOP_ONLY
+from .data_routes import _reauthorize
 from .vaults import IMPORT, IMPORTED
 
 router = APIRouter()
@@ -338,12 +339,12 @@ def _export_headers(vault_name: str, *, seq: int, mode: str, unchanged: bool,
 
 
 def _do_export(request: Request, vault_id: str, body: ExportIn, *, retired: bool) -> Response:
-    """The shared export path — Desktop-local + re-auth, pack, persist publish state, respond.
+    """The shared export path — re-auth, pack, persist publish state, respond. Both callers are
+    declared Desktop-only on their routes.
 
     ``retired`` forces open mode and stamps ``retired: true`` in the manifest; the on-disk vault
     is marked ``retired_published: true`` so a later normal open publish un-retires it.
     """
-    _require_desktop_local(request)
     _reauthorize(request, body)
     vaults, knowledge, secrets = _vaults(request), _kb(request), _secrets(request)
     vault = _require(vaults, vault_id)
@@ -386,7 +387,7 @@ def _do_export(request: Request, vault_id: str, body: ExportIn, *, retired: bool
     )
 
 
-@router.post("/api/vaults/{vault_id}/export")
+@router.post("/api/vaults/{vault_id}/export", dependencies=[DESKTOP_ONLY])
 def export_vault(request: Request, vault_id: str, body: ExportIn) -> Response:
     """Export a vault as a .sbvault file — SEALED (default; the KEY is fetched separately) or OPEN.
 
@@ -404,7 +405,7 @@ def export_vault(request: Request, vault_id: str, body: ExportIn) -> Response:
     return _do_export(request, vault_id, body, retired=False)
 
 
-@router.post("/api/vaults/{vault_id}/retire")
+@router.post("/api/vaults/{vault_id}/retire", dependencies=[DESKTOP_ONLY])
 def retire_vault(request: Request, vault_id: str, body: ExportIn) -> Response:
     """Retire a public vault: produce a final open export with content INTACT and ``retired: true``.
 
@@ -420,10 +421,9 @@ def retire_vault(request: Request, vault_id: str, body: ExportIn) -> Response:
     return _do_export(request, vault_id, body, retired=True)
 
 
-@router.post("/api/vaults/{vault_id}/key")
+@router.post("/api/vaults/{vault_id}/key", dependencies=[DESKTOP_ONLY])
 def vault_key(request: Request, vault_id: str, body: ExportIn) -> dict:
     """The SBVK1-... key for a vault you exported. Send it to your friend by a DIFFERENT channel."""
-    _require_desktop_local(request)
     _reauthorize(request, body)
     vaults = _vaults(request)
     vault = _require(vaults, vault_id)
@@ -467,7 +467,7 @@ def _synthetic_pin(vault: dict, hosted_url: str, pubkey: str) -> dict:
             "vault_id": vault["id"], "seq": 0}
 
 
-@router.post("/api/vaults/{vault_id}/verify-hosted")
+@router.post("/api/vaults/{vault_id}/verify-hosted", dependencies=[DESKTOP_ONLY])
 def verify_hosted(request: Request, vault_id: str) -> dict:
     """Fetch the vault's ``hosted_url`` and report whether it matches THIS install's record.
 
@@ -486,7 +486,6 @@ def verify_hosted(request: Request, vault_id: str) -> dict:
       * A hosted file signed by a different key → reachable=True, matches=False, ``detail`` says
         the signature isn't yours (never a 500).
     """
-    _require_desktop_local(request)
     vaults = _vaults(request)
     vault = _require(vaults, vault_id)
     hosted_url = (vault.get("hosted_url") or "").strip()
@@ -1003,7 +1002,7 @@ def update_vault_from_source(request: Request, vault_id: str) -> dict:
     return {**result, "seq": chk["remote_seq"]}
 
 
-@router.post("/api/vaults/{vault_id}/trust-publisher")
+@router.post("/api/vaults/{vault_id}/trust-publisher", dependencies=[DESKTOP_ONLY])
 def trust_publisher(request: Request, vault_id: str, body: TrustIn) -> dict:
     """Re-pin a subscription to the NEW key the user confirmed out-of-band; clear the block.
 
@@ -1012,7 +1011,6 @@ def trust_publisher(request: Request, vault_id: str, body: TrustIn) -> dict:
     (Desktop-local + passphrase re-entry), and the body must name the exact key it blesses. The
     seq floor deliberately survives the re-pin: a new key is not a license to roll back.
     """
-    _require_desktop_local(request)
     _reauthorize(request, body)
     vaults, vault, pin = _subscription(request, vault_id)
     offered = (pin.get("blocked") or {}).get("offered_pubkey")

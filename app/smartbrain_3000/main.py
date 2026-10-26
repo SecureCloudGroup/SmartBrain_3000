@@ -543,7 +543,7 @@ def create_app() -> FastAPI:
         assert payload["status"] == "ok", "health payload must report ok"
         return payload
 
-    @app.post("/api/update/install")
+    @app.post("/api/update/install", dependencies=[account.DESKTOP_ONLY])
     def request_install(request: Request) -> dict[str, object]:
         """Ask the desktop launcher to install the update it has staged.
 
@@ -555,7 +555,6 @@ def create_app() -> FastAPI:
         next handshake (within ~30s). It cannot outlive a restart, which is precisely what
         an install is.
         """
-        account._require_desktop_local(request)
         ready = getattr(request.app.state, "update_ready", "")
         if not ready or ready == __version__:
             raise HTTPException(status_code=409, detail="no update is staged to install")

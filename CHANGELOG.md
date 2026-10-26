@@ -11,6 +11,22 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+- **A paired phone can drive Neural Interface cards.** It can ask for a card (the request text
+  only) and work a card it already has: Retry, Cancel, Fix, Refine, Reopen, Stop looking,
+  filling a non-secret value, the brief-summary switch, and the findings and measure views. It
+  can also tap the four fixed-choice consents: allow a cloud model on a card, Activate a card's
+  other sites, Keep looking, and the repair policy. Pasted links, typed answers, keys, trust
+  changes, feeds, MCP settings, backups, pairing and updates stay on the Desktop; a phone that
+  tries one is told "Finish this on your Mac" instead of a bare refusal. Every action a phone
+  takes is recorded in **Activity** with a "from paired phone" note (a browser on a LAN address
+  reads "from LAN browser"); the audit API gains a `via` field. See
+  [Remote access](docs/08-remote-access.md#using-it-on-your-phone) and the trust-model note in
+  SECURITY.md: the phone app is served by the signaling node, so whoever controls that node's
+  code can now do what a phone can do, and nothing more.
+- Internal: Desktop-only is now declared on the route (`dependencies=[DESKTOP_ONLY]`) instead of
+  called inside it, and a test freezes the declared set, so a new route picks its authority class
+  deliberately. The refusal fires before input validation.
+
 ## [0.27.0] - 2026-10-25
 
 **Upgrading from 0.26.** One migration (43) adds a purpose label to the usage log, so **Usage & cost** can show

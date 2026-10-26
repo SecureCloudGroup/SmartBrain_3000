@@ -817,7 +817,7 @@ def test_verify_hosted_is_desktop_local_only_matching_export(alice: TestClient) 
     # remote device must not be able to trigger a read that names it.
     vid, _blob = _publish_and_set_hosted(alice)
     r = alice.post(f"/api/vaults/{vid}/verify-hosted", headers=_PHONE)  # phone authority
-    assert r.status_code == 403 and "Desktop-local" in r.json()["detail"]
+    assert r.status_code == 403 and "on your Mac" in r.json()["detail"]
 
 
 def test_verify_hosted_without_hosted_url_is_a_clean_400(alice: TestClient) -> None:

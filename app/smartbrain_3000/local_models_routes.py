@@ -187,14 +187,13 @@ def put_claudecode(request: Request) -> dict:
     return {"ok": True, "gateway_synced": True, "status": _claudecode_status(store)}
 
 
-@router.post("/api/local-models/claudecode/update")
+@router.post("/api/local-models/claudecode/update", dependencies=[account.DESKTOP_ONLY])
 def update_claudecode(request: Request) -> dict:
     """Run `claude update` (checks and installs) and report the outcome + version.
 
     Desktop-local ONLY (mirrors /api/update/install): this installs software on the
     desktop, and the remote bridge forwards everything under /api — a paired phone
     must not be able to trigger installs."""
-    account._require_desktop_local(request)
     _store(request)  # unlock gate; the update itself touches no secrets
     result = claudecli.update()
     assert "ok" in result, "update must report ok"

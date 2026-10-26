@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from . import feeds as feedsmod
 from . import netguard, tools
-from .data_routes import _require_desktop_local
+from .account import DESKTOP_ONLY
 
 router = APIRouter()
 
@@ -54,14 +54,13 @@ def list_feeds(request: Request) -> dict:
     return {"feeds": _store(request).list_feeds()}
 
 
-@router.post("/api/feeds")
+@router.post("/api/feeds", dependencies=[DESKTOP_ONLY])
 def add_feed(request: Request, body: FeedAddIn) -> dict:
     """Validate, fetch, parse, create the feed's vault, ingest the current items.
 
     Everything or nothing: a URL that doesn't fetch or parse creates no vault and no
     registration — the user gets the reason instead of a broken half-subscription.
     """
-    _require_desktop_local(request)
     url = body.url.strip()
     try:
         netguard.validate_public_url(url)
@@ -104,10 +103,9 @@ def refresh_feed(request: Request, feed_id: str) -> dict:
     return {"items": added}
 
 
-@router.delete("/api/feeds/{feed_id}")
+@router.delete("/api/feeds/{feed_id}", dependencies=[DESKTOP_ONLY])
 def delete_feed(request: Request, feed_id: str, remove_docs: int = 0) -> dict:
     """Unsubscribe. Removing a feed isn't shredding its articles — unless asked."""
-    _require_desktop_local(request)
     store = _store(request)
     feed = store.get(feed_id)
     if feed is None:

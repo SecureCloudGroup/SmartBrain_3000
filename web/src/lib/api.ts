@@ -472,6 +472,8 @@ export interface AuditEntry {
   args_summary: string;
   result_summary: string;
   error: string;
+  /** Where a user action came from: "paired phone", "LAN browser", or "" for the Desktop. */
+  via?: string;
 }
 
 export interface EmailStatus {

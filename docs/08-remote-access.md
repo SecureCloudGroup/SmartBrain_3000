@@ -55,17 +55,28 @@ the locked case too, so you know what to do.
 
 ## Using it on your phone
 
-The phone shows a **trimmed set** of areas meant for use on the go: **Chat**,
+The phone shows a **trimmed set** of areas meant for use on the go: **Chat**, **Neural**,
 **Knowledge**, **Planner**, **Schedules**, **Email**, **Info**, **Activity**, and **Usage**.
 Settings and first-time setup live on the **Desktop**. Adding to your Knowledge — notes,
 uploads, and add-by-URL, plus importing or subscribing to someone else's vault — works from
 the phone too; the desktop is still where it lands.
 
+**Neural Interface cards from the phone.** You can ask for a card in plain words and work
+the cards you have: Retry, Cancel, Fix, Refine, Reopen, Stop looking, fill a value that is
+not a secret, switch the brief summary, and read the findings and the measure. The four
+fixed-choice consents are taps the phone may make too: allow a cloud model on a card,
+Activate a card's other sites, Keep looking, and the repair policy. The Desktop checks each
+one and records it in Activity as "from paired phone". What the phone cannot do is hand over
+anything secret or anything that widens trust: pasting a link, typing an answer, adding a key
+or a feed, trusting a publisher, MCP settings, backups, pairing and updates. Those controls
+tell you to finish on your Mac.
+
 A handful of individual actions are Desktop-only, even inside those areas — anything that
 hands out your data or changes trust. Exporting a vault (sharing it sealed or public),
 trusting a publisher's new key after it rotates, connecting Gmail, and downloading a backup
 or export all stay on the Desktop. On the phone those controls are either not shown or
-replaced with a line pointing you at the Desktop, so nothing fails halfway.
+replaced with a line pointing you at the Desktop, so nothing fails halfway. Where a control
+is shown and refused, the refusal says "Finish this on your Mac".
 
 Voice works on the phone too — the mic, spoken replies, and the pills above the message box.
 The settings behind those pills (the wake word, playback speed, and the **Short / Medium /
@@ -166,7 +177,8 @@ uses a local certificate so your phone trusts the connection.
 
 A browser that reaches the app at a LAN address gets a phone's permissions, not the
 Desktop's: the Desktop-only actions listed above are refused there. It still shows the
-Desktop layout, so those controls appear, and they say so if you try one. On the Desktop
+Desktop layout, so those controls appear, and they say so if you try one. Actions taken
+from it show in Activity as "from LAN browser". On the Desktop
 itself, keep using `https://localhost:33000`. This keeps your phone's browser to a phone's
 permissions; it isn't a barrier against someone on your network who knows your passphrase
 and uses their own tools.

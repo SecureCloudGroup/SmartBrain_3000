@@ -24,7 +24,7 @@ import time
 import uuid
 from collections.abc import Iterator
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from . import auth, db, email_account, gateway, keyvault, stt_local
@@ -221,19 +221,42 @@ def _require_store(request: Request) -> SecretStore:
     return store
 
 
-# Desktop-only actions (backup, export, restore, pairing, the MCP token, installs,
-# passphrase reset, …). R14: the AUTHORITY of the request's credential decides —
-# a browser session on a loopback Host or the local token is ``desktop``; a phone
-# (relayed, or LAN-direct) is ``remote``. The old constant ``X-SB-Local: 1`` header
-# is no longer consulted: any local process could send it, so "Desktop-only" used
-# to mean only "not relayed from a phone". This is the ONE implementation.
+# Route authority classes (R14; phone parity 2026-10-26). The AUTHORITY of the request's
+# credential decides — a browser session on a loopback Host or the local token is
+# ``desktop``; a phone (relayed, or LAN-direct) is ``remote``. The old constant
+# ``X-SB-Local: 1`` header is no longer consulted: any local process could send it, so
+# "Desktop-only" used to mean only "not relayed from a phone".
+#
+# A route is in exactly one class:
+#   * Desktop-only: declared on the route, ``dependencies=[DESKTOP_ONLY]``. Keys, pasted
+#     links, typed answers, trust, backups, pairing, tokens, MCP config, feeds, updates.
+#   * Phone-ok: no declaration. Reads, driving a card the phone already has, and the four
+#     fixed-choice consent taps T approved (allow a cloud model, Activate, Keep looking,
+#     repair policy). The audit chokepoint stamps ``via`` on every user row from a phone.
+#   * Partial (two routes, ``from_paired_phone``): intake refuses a pasted ``source_url``
+#     from a phone; flow/answer accepts only the ``model_consent`` choice from a phone.
+# ``app/tests/test_phone_authority.py`` freezes the first and third sets, so a new route
+# picks its class deliberately. This is the ONE implementation.
+
+
+DESKTOP_ONLY_DETAIL = "Finish this on your Mac: it can't be done from a paired phone or a LAN browser."
+
+
+def from_paired_phone(request: Request) -> bool:
+    """True when the credential is not a Desktop one (a bridged phone or a LAN browser)."""
+    assert request is not None, "request required"
+    return getattr(request.state, "sb_authority", None) != auth.DESKTOP
 
 
 def _require_desktop_local(request: Request) -> None:
-    """Refuse anything but a Desktop credential (403)."""
+    """Refuse anything but a Desktop credential (403). Declared on a route as
+    ``dependencies=[DESKTOP_ONLY]``, never called from a route body or a helper."""
     assert request is not None, "request required"
-    if getattr(request.state, "sb_authority", None) != auth.DESKTOP:
-        raise HTTPException(status_code=403, detail="this endpoint is Desktop-local only")
+    if from_paired_phone(request):
+        raise HTTPException(status_code=403, detail=DESKTOP_ONLY_DETAIL)
+
+
+DESKTOP_ONLY = Depends(_require_desktop_local)
 
 
 def _mint_session(request: Request, response: Response) -> None:
@@ -449,7 +472,7 @@ def change_passphrase(request: Request, body: PassphraseChange) -> dict[str, boo
     return {"ok": True}
 
 
-@router.post("/api/account/passphrase/reset")
+@router.post("/api/account/passphrase/reset", dependencies=[DESKTOP_ONLY])
 def reset_passphrase(request: Request, body: PassphraseReset) -> dict[str, bool]:
     """Set a new passphrase without the current one — the forgot-my-passphrase path
     for a session unlocked via the Recovery Key.
@@ -459,7 +482,6 @@ def reset_passphrase(request: Request, body: PassphraseReset) -> dict[str, bool]
     The key must unwrap to the same master key this session holds. Throttled with
     unlock (see _credential_attempt).
     """
-    _require_desktop_local(request)
     _require_store(request)  # must be unlocked
     master_key = getattr(request.app.state, "master_key", None)
     assert master_key is not None, "unlocked session must hold the master key"
