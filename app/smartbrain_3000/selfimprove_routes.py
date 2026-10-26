@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import selfreview
+from . import account, selfreview
 
 router = APIRouter()
 
@@ -38,7 +38,7 @@ def get_selfimprove(request: Request) -> dict:
             "last_run": selfreview.last_run(conn)}
 
 
-@router.put("/api/selfimprove")
+@router.put("/api/selfimprove", dependencies=[account.DESKTOP_ONLY])
 def put_selfimprove(request: Request, body: SelfImproveIn) -> dict:
     """Update kill-switch and/or cadence. Off is the default; absent/corrupt config reads
     as off. Cadence outside the allowed set → 422 with the allowed values in the message."""
@@ -75,7 +75,7 @@ def get_optimizer(request: Request) -> dict:
                            for s in strategies]}
 
 
-@router.put("/api/selfimprove/optimizer")
+@router.put("/api/selfimprove/optimizer", dependencies=[account.DESKTOP_ONLY])
 def put_optimizer(request: Request, body: OptimizerIn) -> dict:
     """Flip the optimizer kill-switch (default off; absent/corrupt reads as off)."""
     _require_unlocked(request)

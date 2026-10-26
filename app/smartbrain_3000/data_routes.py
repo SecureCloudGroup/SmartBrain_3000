@@ -28,7 +28,7 @@ from . import db, keyvault
 
 # Desktop-only check: ONE implementation, in account (R14 — credential authority,
 # not a header). Re-exported so feed_routes / vault_routes imports keep working.
-from .account import _credential_attempt, _require_desktop_local
+from .account import DESKTOP_ONLY, _credential_attempt
 
 router = APIRouter()
 
@@ -74,14 +74,13 @@ def _reauthorize(request: Request, body: ReauthRequest) -> None:
             raise HTTPException(status_code=401, detail="incorrect passphrase") from None
 
 
-@router.post("/api/export")
+@router.post("/api/export", dependencies=[DESKTOP_ONLY])
 def export_data(request: Request, body: ReauthRequest) -> dict:
     """Return all user data as plaintext JSON (knowledge, chats, tasks, memory).
 
     Desktop-local + unlocked + passphrase re-entry (see ``_reauthorize``): this is
     the single most sensitive read in the app — every authored value, decrypted.
     """
-    _require_desktop_local(request)  # never expose decrypted data to a bridged remote device
     state = _stores(request)
     _reauthorize(request, body)
     knowledge = []
@@ -121,7 +120,7 @@ def _cleanup_backup_temp(tmp: Path) -> None:
                 pass  # best-effort cleanup; a leftover does not corrupt state
 
 
-@router.post("/api/backup")
+@router.post("/api/backup", dependencies=[DESKTOP_ONLY])
 def backup_db(request: Request, body: ReauthRequest) -> FileResponse:
     """Download a complete, portable copy of the encrypted DuckDB as a backup.
 
@@ -135,7 +134,6 @@ def backup_db(request: Request, body: ReauthRequest) -> FileResponse:
     file is streamed from disk via FileResponse and removed after the response
     is sent (or on abort), so the whole DB is never held in memory.
     """
-    _require_desktop_local(request)  # never hand the whole vault file to a bridged remote device
     _stores(request)  # require unlock
     _reauthorize(request, body)
     dbx = request.app.state.dbx
@@ -210,7 +208,7 @@ async def _stream_restore_to_disk(request: Request, dest: Path) -> int:
     return total
 
 
-@router.post("/api/restore")
+@router.post("/api/restore", dependencies=[DESKTOP_ONLY])
 async def restore_db(request: Request) -> dict:
     """Stage an uploaded backup (validated); it is applied at the next startup.
 
@@ -219,7 +217,6 @@ async def restore_db(request: Request) -> dict:
     in bounded chunks (B17) rather than buffered in RAM, then validated, then
     promoted to the staged path.
     """
-    _require_desktop_local(request)  # B8: refuse bridged-in requests
     conn = request.app.state.dbx
     initialized = keyvault.is_initialized(conn)
     unlocked = getattr(request.app.state, "kb", None) is not None

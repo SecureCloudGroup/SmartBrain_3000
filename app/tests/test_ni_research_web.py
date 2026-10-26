@@ -13,7 +13,14 @@ import sys
 
 import pytest
 from test_ni_answers import lib  # noqa: F401  (a fixture)
-from test_ni_research_loop import _ASK, Script, _v2, _wrap, call, reply  # noqa: F401  (_v2: autouse fixture)
+from test_ni_research_loop import (  # noqa: F401  (_v2: autouse fixture)
+    _ASK,
+    Script,
+    _v2,
+    _wrap,
+    call,
+    reply,
+)
 from test_ni_research_tools import CSV, QUAKES, FakeLibrary, Net, _ctx, _draft, _row
 
 from smartbrain_3000 import ni, ni_flow, ni_research_flow

@@ -132,9 +132,9 @@
   // Per-card repair-policy modal (§23). The overflow row on every card opens this —
   // it lazily fetches niItem(id) so the checkboxes reflect the CURRENT spec's
   // repair_policy (the board row deliberately doesn't carry it — this lever is a
-  // detail-view concern, not a first-glance chip). Save posts through the
-  // Desktop-local niRepairPolicy; the WebRTC bridge blocks it from a paired phone
-  // (which surfaces as a 403 the modal paints via describeError).
+  // detail-view concern, not a first-glance chip). Save posts through niRepairPolicy,
+  // one of the fixed-choice taps a paired phone may make (2026-10-26); the server's
+  // refusals (404/409) are painted by describeError.
   let repairFor = $state<NiBoardItem | null>(null);
   let repairDetail = $state<NiItemDetail | null>(null);
   let repairLoading = $state(false);
@@ -744,8 +744,8 @@
       repairFor = null;
       repairDetail = null;
     } catch (err) {
-      // 403 arrives when a paired phone tried the Desktop-local route; describeError
-      // passes the backend's human sentence through verbatim.
+      // describeError passes the backend's human sentence through verbatim (a 409 when
+      // the card changed under the modal).
       repairError = describeError(err);
     } finally {
       repairBusy = false;
@@ -2171,9 +2171,9 @@
     </Modal>
   {/if}
 
-  <!-- Fill-param modal (needs_params, 2026-09-14). Desktop-local like Add key, but
-       a plain text input — these are ordinary spec values (a ticker, a city), never
-       secrets (the server refuses secret params on this route). -->
+  <!-- Fill-param modal (needs_params, 2026-09-14). Unlike Add key it is open to a
+       paired phone: a plain text input for ordinary spec values (a ticker, a city),
+       never secrets (the server refuses secret params on this route). -->
   {#if paramFor}
     <Modal
       open

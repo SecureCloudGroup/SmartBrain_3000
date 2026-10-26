@@ -3,7 +3,10 @@
 Every tool attempt + approval decision is recorded. Hybrid storage mirroring
 the planner: PLAINTEXT metadata columns (ts, actor, tool, tier, decision, ok,
 conversation_id) so the Activity view filters without decrypting; the ENCRYPTED
-body holds {args_summary, result_summary, error} (AAD ``audit:`` + id).
+body holds {args_summary, result_summary, error, via} (AAD ``audit:`` + id); ``via`` names
+where a user action came from ("paired phone" / "LAN browser", else "") and is stamped here,
+at the one chokepoint, from the request being served, so no route can forget it. Rows written
+before the field read back as "".
 
 Append-only by API surface: this class exposes only ``append`` + a bounded
 ``list`` — no update/delete. That is NOT structural tamper-resistance (a holder
@@ -20,6 +23,7 @@ import uuid
 import duckdb
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from . import auth
 from .secrets import MASTER_KEY_BYTES
 
 _NONCE_BYTES = 12
@@ -54,8 +58,9 @@ class AuditLog:
         assert actor in _ACTORS, "unknown actor"
         assert decision in _DECISIONS, "unknown decision"
         aid = str(uuid.uuid4())
+        via = (auth.request_via() or "") if actor == "user" else ""  # the one chokepoint
         nonce = os.urandom(_NONCE_BYTES)
-        body = {"args_summary": args_summary, "result_summary": result_summary, "error": error}
+        body = {"args_summary": args_summary, "result_summary": result_summary, "error": error, "via": via}
         ciphertext = self._aes.encrypt(nonce, json.dumps(body).encode("utf-8"), b"audit:" + aid.encode("utf-8"))
         self._conn.execute(
             "INSERT INTO audit_log (id, actor, tool_name, tier, decision, ok, conversation_id, nonce, ciphertext) "
@@ -89,6 +94,7 @@ class AuditLog:
                     "args_summary": body["args_summary"],
                     "result_summary": body["result_summary"],
                     "error": body["error"],
+                    "via": str(body.get("via") or ""),  # older rows predate the field
                 }
             )
         return out

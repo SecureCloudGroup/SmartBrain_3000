@@ -15,7 +15,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import gateway, ni_models, usage
+from . import account, gateway, ni_models, usage
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def get_routes(request: Request) -> dict:
     return {"routes": routes, "labels": CAPABILITY_LABELS}
 
 
-@router.put("/api/routes")
+@router.put("/api/routes", dependencies=[account.DESKTOP_ONLY])
 def put_routes(request: Request, body: RoutesBody) -> dict:
     """Persist routing for known capabilities only; ignore unknown keys.
 
@@ -213,7 +213,7 @@ def get_step_models(request: Request) -> dict:
     return {"steps": ni_models.describe(request.app.state.dbx)}
 
 
-@router.put("/api/ni/step-models")
+@router.put("/api/ni/step-models", dependencies=[account.DESKTOP_ONLY])
 def put_step_models(request: Request, body: StepModelsBody) -> dict:
     """Save per-step settings (auto | cloud | local). An unknown step or setting, or cloud for a local-only
     step, is a 400 and nothing is saved. Choosing cloud never gives a card consent: each card still asks."""

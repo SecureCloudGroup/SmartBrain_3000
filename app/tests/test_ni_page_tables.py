@@ -17,7 +17,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from test_ni_answers import lib  # noqa: F401  (a fixture)
-from test_ni_research_loop import _ASK, Script, _v2, _wrap, call, reply, text_reply  # noqa: F401  (_v2: autouse fixture)
+from test_ni_research_loop import (  # noqa: F401  (_v2: autouse fixture)
+    _ASK,
+    Script,
+    _v2,
+    _wrap,
+    call,
+    reply,
+    text_reply,
+)
 from test_ni_research_tools import FakeLibrary, _ctx, _row
 
 from smartbrain_3000 import (

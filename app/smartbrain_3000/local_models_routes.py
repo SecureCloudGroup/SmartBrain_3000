@@ -102,7 +102,7 @@ def _claudecode_status(store, force: bool = False) -> dict:
             "plan_window": claudecli.rate_limit_status()}
 
 
-@router.put("/api/local-models/ollama")
+@router.put("/api/local-models/ollama", dependencies=[account.DESKTOP_ONLY])
 def put_ollama(request: Request, body: OllamaConfig) -> dict[str, bool]:
     """Save Ollama's URL and register it in Bifrost (live).
 
@@ -125,7 +125,7 @@ def put_ollama(request: Request, body: OllamaConfig) -> dict[str, bool]:
     return {"ok": True, "gateway_synced": synced}
 
 
-@router.put("/api/local-models/mlx")
+@router.put("/api/local-models/mlx", dependencies=[account.DESKTOP_ONLY])
 def put_mlx(request: Request, body: MLXConfig) -> dict[str, bool]:
     """Save MLX's URL + key and register it in Bifrost (live). See put_ollama for gateway_synced."""
     store = _store(request)
@@ -142,7 +142,7 @@ def put_mlx(request: Request, body: MLXConfig) -> dict[str, bool]:
     return {"ok": True, "gateway_synced": synced}
 
 
-@router.put("/api/local-models/mlxe")
+@router.put("/api/local-models/mlxe", dependencies=[account.DESKTOP_ONLY])
 def put_mlxe(request: Request, body: MLXConfig) -> dict[str, bool]:
     """Save the MLX embeddings server's URL + key and register it in Bifrost (live).
 
@@ -161,7 +161,7 @@ def put_mlxe(request: Request, body: MLXConfig) -> dict[str, bool]:
     return {"ok": True, "gateway_synced": synced}
 
 
-@router.put("/api/local-models/claudecode")
+@router.put("/api/local-models/claudecode", dependencies=[account.DESKTOP_ONLY])
 def put_claudecode(request: Request) -> dict:
     """Enable the Claude Code provider (the user's own `claude` CLI login).
 
@@ -187,14 +187,13 @@ def put_claudecode(request: Request) -> dict:
     return {"ok": True, "gateway_synced": True, "status": _claudecode_status(store)}
 
 
-@router.post("/api/local-models/claudecode/update")
+@router.post("/api/local-models/claudecode/update", dependencies=[account.DESKTOP_ONLY])
 def update_claudecode(request: Request) -> dict:
     """Run `claude update` (checks and installs) and report the outcome + version.
 
     Desktop-local ONLY (mirrors /api/update/install): this installs software on the
     desktop, and the remote bridge forwards everything under /api — a paired phone
     must not be able to trigger installs."""
-    account._require_desktop_local(request)
     _store(request)  # unlock gate; the update itself touches no secrets
     result = claudecli.update()
     assert "ok" in result, "update must report ok"
@@ -225,7 +224,7 @@ class VoiceConfig(BaseModel):
     tts_voice: str = ""
 
 
-@router.put("/api/local-models/voice")
+@router.put("/api/local-models/voice", dependencies=[account.DESKTOP_ONLY])
 def put_voice(request: Request, body: VoiceConfig) -> dict:
     """Save the voice server + models. Not registered in Bifrost — audio endpoints are
     called directly (the gateway doesn't proxy /v1/audio/*). Returns the fresh status
@@ -244,7 +243,7 @@ def put_voice(request: Request, body: VoiceConfig) -> dict:
     return {"ok": True, "status": voice.status(store, probe=True)}
 
 
-@router.delete("/api/local-models/{name}")
+@router.delete("/api/local-models/{name}", dependencies=[account.DESKTOP_ONLY])
 def delete_local(request: Request, name: str) -> dict[str, bool]:
     """Remove a local provider's config and deprovision it from Bifrost."""
     store = _store(request)

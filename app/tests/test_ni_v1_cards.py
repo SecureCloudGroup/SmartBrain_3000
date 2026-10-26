@@ -9,7 +9,11 @@ from __future__ import annotations
 import copy
 
 from test_ni_answers import WEATHER_URL, lib  # noqa: F401  (lib is a fixture)
-from test_ni_auto_pick import OPEN_METEO, _auto_card, client  # noqa: F401  (client is a fixture)
+from test_ni_auto_pick import (  # noqa: F401  (client is a fixture)
+    OPEN_METEO,
+    _auto_card,
+    client,
+)
 
 from smartbrain_3000 import ni as nimod
 from smartbrain_3000 import ni_flow, ni_master, ni_routes

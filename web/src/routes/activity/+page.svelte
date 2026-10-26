@@ -172,6 +172,7 @@
             <Chip kind={tierKind[e.tier] ?? ""}>{e.tier}</Chip>
             <span class="muted">{e.decision}</span>
             <span class="meta">by {e.actor}</span>
+            {#if e.via}<span class="meta">from {e.via}</span>{/if}
             <span class="status" class:ok={e.ok} class:bad={!e.ok}>
               <Icon name={e.ok ? "check" : "x"} size={13} /> {e.ok ? "ok" : "failed"}
             </span>

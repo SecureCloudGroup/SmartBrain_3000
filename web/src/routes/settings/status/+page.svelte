@@ -35,12 +35,12 @@
     try {
       findings = (await api.niFindings()).findings;
     } catch {
-      findings = []; // desktop-local only; remote views just skip the block
+      findings = []; // the block is optional: a locked or faulting store just skips it
     }
     try {
       measure = await api.niMeasure();
     } catch {
-      measure = null; // desktop-local only, like the findings
+      measure = null; // optional, like the findings
     }
   }
 

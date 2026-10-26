@@ -36,17 +36,15 @@ def mcp_info(request: Request) -> dict[str, object]:
     return {"endpoint": "/mcp", "enabled": has_token}
 
 
-@router.get("/api/mcp/token")
+@router.get("/api/mcp/token", dependencies=[account.DESKTOP_ONLY])
 def get_token(request: Request) -> dict[str, str | None]:
     """Return the current MCP access token so the user can copy it (or null)."""
-    account._require_desktop_local(request)  # the raw token is Desktop-local only
     return {"token": _store(request).get(mcp_server.MCP_TOKEN_KEY)}
 
 
-@router.post("/api/mcp/token")
+@router.post("/api/mcp/token", dependencies=[account.DESKTOP_ONLY])
 def new_token(request: Request) -> dict[str, str]:
     """Mint a fresh MCP access token, replacing any existing one."""
-    account._require_desktop_local(request)  # minting returns the raw token in the body -> Desktop-local only
     store = _store(request)
     token = token_lib.token_urlsafe(_TOKEN_BYTES)
     store.put(mcp_server.MCP_TOKEN_KEY, token)
@@ -54,9 +52,8 @@ def new_token(request: Request) -> dict[str, str]:
     return {"token": token}
 
 
-@router.delete("/api/mcp/token")
+@router.delete("/api/mcp/token", dependencies=[account.DESKTOP_ONLY])
 def revoke_token(request: Request) -> dict[str, bool]:
     """Revoke MCP access by deleting the token (disables the MCP server)."""
-    account._require_desktop_local(request)  # Desktop-local only: a bridged phone must not rotate/revoke the token
     _store(request).delete(mcp_server.MCP_TOKEN_KEY)
     return {"ok": True}

@@ -288,3 +288,24 @@ def test_an_order_waits_while_the_library_is_not_there(lib, monkeypatch) -> None
     started = _started(monkeypatch)
     assert ni_standing.run_due(store) is None and started == []
     assert ni_flow._flow_read(store, item_id) == before
+
+
+# --- the phone ceiling (2026-10-26) -----------------------------------------------------------------------------------
+
+def test_keep_looking_from_a_phone_draws_the_daily_ceiling(client, lib, monkeypatch) -> None:  # noqa: F811
+    """A tap from a paired phone starts research with model spend from the signaling node's origin, so it draws
+    one unit of the shared daily ceiling; the Desktop's own tap is not counted (the owner at the desk)."""
+    from smartbrain_3000.auth import relay_headers
+    phone = relay_headers("phone-under-test")
+    store, item_id, _out, _ = _declined(monkeypatch, lib, store=client.app.state.ni)
+    _started(monkeypatch)
+    monkeypatch.setattr(ni, "_clock", lambda: NOW)
+    monkeypatch.setenv(ni_refresh.ENV_DAILY, "1")
+    assert client.post(f"/api/ni/items/{item_id}/flow/keep-looking", headers=phone).json()["started"] is True
+    assert not ni_refresh.budget_left(store.conn, datetime.now(UTC))  # the one unit went to the phone's tap
+    # a second declined card: the phone is refused (429, nothing sealed), the Desktop is not
+    store2, item2, _o, _ = _declined(monkeypatch, lib, store=client.app.state.ni, ask="rain in Lisbon tomorrow")
+    r = client.post(f"/api/ni/items/{item2}/flow/keep-looking", headers=phone)
+    assert r.status_code == 429 and "from your Mac" in r.json()["detail"], r.text
+    assert "_looking" not in (ni_flow._flow_read(store2, item2) or {})
+    assert client.post(f"/api/ni/items/{item2}/flow/keep-looking").json()["started"] is True

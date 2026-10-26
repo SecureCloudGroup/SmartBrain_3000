@@ -21,7 +21,20 @@ is true of the broker protocol and still leaves things worth knowing:
   credential is stored by that origin. The broker never sees your traffic — it is
   relayed end-to-end encrypted and your phone pins the Desktop's key — but whoever
   controls that host serves the code doing the pinning. A compromised node (or its
-  operator) could serve modified JavaScript and read the stored credential. Running
+  operator) could serve modified JavaScript and read the stored credential, and could do
+  anything a paired phone may do, which now includes asking for Neural Interface
+  cards, allowing a cloud model on a card (charged to your key), activating a card's other
+  sites, starting a standing order, and changing a card's repair policy. A cloud-model
+  allowance or a standing order started from a phone draws one unit of the daily
+  re-research ceiling (`SMARTBRAIN_NI_RERESEARCH_DAILY`, default 10), so what that origin
+  can charge to your key in a day is bounded. It cannot enter or change keys (provider keys
+  and card credentials), paste links, type answers, change where model requests go or which
+  model a step uses, change the passphrase, trust a publisher, change feeds, web-search or
+  MCP settings, back up, pair or revoke devices, or install updates: those refuse anything
+  but the Desktop. That list is what refuses the phone outright; the chat, Knowledge,
+  Planner, Schedules, Email and the rest of the Neural Interface card actions work from the
+  phone by design, and the frozen census in `app/tests/test_phone_authority.py` is the record.
+  Every action taken from a phone is recorded in Activity as "from paired phone". Running
   your own node via `SMARTBRAIN_SIGNALING_URL` moves that trust to you; using the
   Desktop only avoids it entirely.
 - **A desktop id is a routing key, not a secret.** It travels in the pairing payload and

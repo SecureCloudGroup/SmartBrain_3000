@@ -765,8 +765,9 @@ Your audit and approvals view. Two parts:
   ![The Always allowed list on the Activity page — a pre-authorized tool with its Stop allowing button](assets/08-always-allowed.png)
 - **History** — the record of every tool the assistant ran or tried to run: which tool, its
   risk tier, what you decided, whether it succeeded, when, and a summary of what it was
-  given. Any error it hit is shown too. Arguments and results are encrypted at rest, and
-  secrets are stripped before anything is recorded.
+  given. Any error it hit is shown too. An action you took from a paired phone (or from a
+  browser on a LAN address) says so: "from paired phone". Arguments and results are
+  encrypted at rest, and secrets are stripped before anything is recorded.
 
 Nothing here can be edited or deleted from inside the app — see
 [Design limits](09-design-limits.md) for what that does and doesn't guarantee.
