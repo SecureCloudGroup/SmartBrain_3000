@@ -66,10 +66,13 @@ the cards you have: Retry, Cancel, Fix, Refine, Reopen, Stop looking, fill a val
 not a secret, switch the brief summary, and read the findings and the measure. The four
 fixed-choice consents are taps the phone may make too: allow a cloud model on a card,
 Activate a card's other sites, Keep looking, and the repair policy. The Desktop checks each
-one and records it in Activity as "from paired phone". What the phone cannot do is hand over
-anything secret or anything that widens trust: pasting a link, typing an answer, adding a key
-or a feed, trusting a publisher, MCP settings, backups, pairing and updates. Those controls
-tell you to finish on your Mac.
+one and records it in Activity as "from paired phone". Allowing a cloud model or starting
+Keep looking from the phone counts against the daily re-research allowance (see
+[Design limits](09-design-limits.md)), so a phone cannot run up your key without end. What
+the phone cannot do is hand over anything secret or anything that widens trust: pasting a
+link, typing an answer, adding a key or a feed, trusting a publisher, changing where model
+requests go or which model a step uses, MCP settings, the passphrase, backups, pairing and
+updates. Those controls tell you to finish on your Mac.
 
 A handful of individual actions are Desktop-only, even inside those areas — anything that
 hands out your data or changes trust. Exporting a vault (sharing it sealed or public),

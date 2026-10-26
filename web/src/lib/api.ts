@@ -1838,7 +1838,8 @@ export const api = {
     }),
   // NI Foreman P1 (2026-09-16): the /ni composer — creation without chat. The
   // request goes straight to the deterministic flow engine; the shell card
-  // appears immediately. Desktop-local (creation is consent-bearing).
+  // appears immediately. Open to a paired phone for the request text; a pasted
+  // sourceUrl is a consent and is refused from a phone (403, "Finish this on your Mac").
   niIntake: (request: string, sourceUrl?: string) =>
     req<{ id: string; started: boolean }>("/api/ni/intake", {
       method: "POST",
@@ -1937,8 +1938,8 @@ export const api = {
     req<{ ok: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/flow/stop-looking`, {
       method: "POST",
     }),
-  // Fill a NON-secret param value (needs_params, 2026-09-14). Desktop-local like the
-  // credential PUT; secrets are refused server-side (they belong to niPutCredential).
+  // Fill a NON-secret param value (needs_params, 2026-09-14). Open to a paired phone,
+  // unlike the credential PUT; secrets are refused server-side (they belong to niPutCredential).
   niPutParam: (id: string, name: string, value: string) =>
     req<{ ok: boolean; needs_params: { name: string; label: string }[] }>(
       `/api/ni/items/${encodeURIComponent(id)}/param`, {

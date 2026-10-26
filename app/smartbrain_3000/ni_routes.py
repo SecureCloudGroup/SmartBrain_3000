@@ -24,6 +24,7 @@ from starlette.responses import JSONResponse, Response
 
 from . import (
     account,
+    auth,
     gateway,
     library_client,
     library_index,
@@ -37,6 +38,7 @@ from . import (
     ni_master,
     ni_mcp,
     ni_measure,
+    ni_refresh,
     ni_standing,
     ni_watch,
     tools,
@@ -1407,6 +1409,8 @@ def _answer_model_consent(request: Request, store, item_id: str, stamped: dict,
     local model the question offered."""
     model = str(stamped.get("model") or "")
     local = str(stamped.get("local") or "")
+    if value == "allow":
+        _charge_phone_spend(request, store)  # the one answer that starts cloud spend
     started = ni_flow.answer_model_consent(store, item_id, stamped, value)
     if started is None:
         raise HTTPException(status_code=400, detail="answer 'allow' or 'local'")
@@ -1442,6 +1446,19 @@ def reopen_flow_pick(request: Request, item_id: str) -> dict:
         result_summary=tools.summarize({"state": "source"}),
     )
     return {"ok": True, "state": "source"}
+
+
+PHONE_SPEND_DETAIL = ("Today's allowance for cloud research started from a phone is spent "
+                      "(the daily re-research ceiling). Allow this one from your Mac, or tomorrow.")
+
+
+def _charge_phone_spend(request: Request, store: ni.NIStore) -> None:
+    """A consent tap that starts cloud spend, made from a phone, draws one unit of the daily
+    re-research ceiling (``SMARTBRAIN_NI_RERESEARCH_DAILY``); 429 when the day's budget is spent.
+    The Desktop's own taps are the owner at the desk and stay uncounted. This bounds what the
+    phone app's origin (the signaling node) can charge to the owner's key (SECURITY.md)."""
+    if auth.request_via() and not ni_refresh.take_budget(store.conn, datetime.now(UTC)):
+        raise HTTPException(status_code=429, detail=PHONE_SPEND_DETAIL)
 
 
 def _offered(request: Request, item_id: str, action: str) -> tuple[ni.NIStore, dict]:
@@ -1487,6 +1504,7 @@ def keep_looking(request: Request, item_id: str) -> dict:
     store, record = _offered(request, item_id, "keep_looking")
     if not ni_standing.lookable(record):  # the card changed since its actions were read
         raise HTTPException(status_code=409, detail="this card does not offer that now")
+    _charge_phone_spend(request, store)  # research with model spend, started from a phone
     started = ni_standing.start(store, item_id, record)
     request.app.state.audit.append(
         "user", "ni_keep_looking", "reviewed", "executed", True,

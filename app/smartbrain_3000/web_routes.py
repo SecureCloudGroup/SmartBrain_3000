@@ -14,7 +14,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import db, search
+from . import account, db, search
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def get_websearch(request: Request) -> dict:
     }
 
 
-@router.put("/api/websearch")
+@router.put("/api/websearch", dependencies=[account.DESKTOP_ONLY])
 def put_websearch(request: Request, body: WebSearchConfig) -> dict:
     """Persist engine choice + SearXNG URL (keys go through /api/secrets)."""
     _require_unlocked(request)

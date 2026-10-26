@@ -131,7 +131,8 @@ number you can check:
 - **Keep looking** researches when you tap it, then again after 1, 2 and 4 days,
   then weekly, and stops after **14 days**. Those later runs and background
   re-research share a ceiling of **10 research runs a day** across all cards (at
-  most one re-research a day per card); the run your tap starts is not counted.
+  most one re-research a day per card); the run your tap starts at the Desktop is not
+  counted, while a tap from a paired phone (Keep looking, or allowing a cloud model) is.
 - **A source you kept, or one SmartBrain checked, is set aside after 3 failed
   reads in a row**, so a dead source stops costing every ask a fetch.
 - **An alert's cooldown is at least 5 minutes** (an hour unless you set one).

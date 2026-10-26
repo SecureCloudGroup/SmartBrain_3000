@@ -228,8 +228,10 @@ def _require_store(request: Request) -> SecretStore:
 # "Desktop-only" used to mean only "not relayed from a phone".
 #
 # A route is in exactly one class:
-#   * Desktop-only: declared on the route, ``dependencies=[DESKTOP_ONLY]``. Keys, pasted
-#     links, typed answers, trust, backups, pairing, tokens, MCP config, feeds, updates.
+#   * Desktop-only: declared on the route, ``dependencies=[DESKTOP_ONLY]``. Keys (provider
+#     keys, card credentials), pasted links, typed answers, trust, backups, pairing, tokens,
+#     MCP config, feeds, updates, the passphrase, and every Settings writer that decides where
+#     requests and spend go (model endpoints, routing, web search, self-improvement).
 #   * Phone-ok: no declaration. Reads, driving a card the phone already has, and the four
 #     fixed-choice consent taps T approved (allow a cloud model, Activate, Keep looking,
 #     repair policy). The audit chokepoint stamps ``via`` on every user row from a phone.
@@ -453,7 +455,7 @@ def account_lock(request: Request) -> dict[str, bool]:
     return {"unlocked": False}
 
 
-@router.post("/api/account/passphrase")
+@router.post("/api/account/passphrase", dependencies=[DESKTOP_ONLY])
 def change_passphrase(request: Request, body: PassphraseChange) -> dict[str, bool]:
     """Change the unlock passphrase (requires unlock + the current passphrase).
 
@@ -508,7 +510,7 @@ def _require_provider_key(key: str) -> None:
         raise HTTPException(status_code=403, detail="this endpoint manages provider keys only")
 
 
-@router.put("/api/secrets/{key}")
+@router.put("/api/secrets/{key}", dependencies=[DESKTOP_ONLY])
 def put_secret(request: Request, key: str, body: SecretValue) -> dict[str, bool]:
     """Store a secret (requires unlock); sync provider keys to Bifrost live.
 
@@ -549,7 +551,7 @@ def list_secrets(request: Request) -> dict[str, list[str]]:
     return {"keys": provider_keys}
 
 
-@router.delete("/api/secrets/{key}")
+@router.delete("/api/secrets/{key}", dependencies=[DESKTOP_ONLY])
 def delete_secret(request: Request, key: str) -> dict[str, bool]:
     """Delete a secret (requires unlock); remove provider keys from Bifrost."""
     assert key, "secret key must be non-empty"

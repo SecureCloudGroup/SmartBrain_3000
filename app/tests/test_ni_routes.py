@@ -1515,6 +1515,30 @@ def test_answer_route_model_consent_allow_and_local(client: TestClient, monkeypa
     assert rec["_use_local"] is True and "_model_consent" not in rec
 
 
+def test_model_consent_allow_from_a_phone_draws_the_daily_ceiling(client: TestClient, monkeypatch) -> None:
+    """2026-10-26: "allow" from a paired phone starts cloud spend from the signaling node's origin, so it draws
+    one unit of the daily re-research ceiling and is refused (429, nothing sealed) once the day's budget is spent.
+    "local" costs nothing and is never counted; the Desktop's own "allow" is not counted either."""
+    from smartbrain_3000 import ni_flow, ni_refresh
+    _unlock(client)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda s, iid, **kw: True)
+    monkeypatch.setenv(ni_refresh.ENV_DAILY, "1")
+    store = client.app.state.ni
+    ids = [client.post("/api/ni/intake", json={"request": f"bitcoin price {n}"}).json()["id"] for n in (1, 2, 3)]
+    for iid in ids:
+        ni_flow._ask_model_consent(store, iid, "openai/gpt-4o", "mlx/qwen-local")
+    assert client.post(f"/api/ni/items/{ids[0]}/flow/answer", headers=_PHONE,
+                       json={"kind": "model_consent", "value": "allow"}).status_code == 200
+    r = client.post(f"/api/ni/items/{ids[1]}/flow/answer", headers=_PHONE,
+                    json={"kind": "model_consent", "value": "allow"})
+    assert r.status_code == 429 and "from your Mac" in r.json()["detail"], r.text
+    assert ni_flow._flow_read(store, ids[1]).get("_question"), "the question is still open: nothing was sealed"
+    assert client.post(f"/api/ni/items/{ids[1]}/flow/answer", headers=_PHONE,
+                       json={"kind": "model_consent", "value": "local"}).status_code == 200  # free
+    assert client.post(f"/api/ni/items/{ids[2]}/flow/answer",
+                       json={"kind": "model_consent", "value": "allow"}).status_code == 200  # the Desktop
+
+
 def test_model_consent_local_refused_when_no_local_model_offered(client: TestClient,
                                                                  monkeypatch) -> None:
     from smartbrain_3000 import ni_flow
