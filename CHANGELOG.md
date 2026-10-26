@@ -23,10 +23,11 @@ release changes what a paired phone (or a browser on a LAN address) may do:
   it is spent.
 - Settings writers that answered a phone before this release no longer do: provider keys, the
   passphrase change, local-model endpoints, model routing and Neural Interface step models, the
-  web-search provider and the self-improvement switches now refuse anything but the Desktop. If you
-  relied on any of those from a phone, do them on the Mac from now on.
-- Every refusal reads "Finish this on your Mac: it can't be done from a paired phone or a LAN
-  browser."
+  web-search provider and the self-improvement switches now refuse anything but the Desktop. The one
+  phone-visible surface was the chat page's "connect the detected local model" button. If you relied
+  on any of those from a phone, do them on the Mac from now on.
+- Every Desktop-only refusal reads "Finish this on your Mac: it can't be done from a paired phone or
+  a LAN browser." (A phone consent refused because the day's ceiling is spent says so instead.)
 - SECURITY.md now states the widened reach of the signaling node: whoever controls that node's
   code can do what a phone can do (including charging cloud-model allowances to your key, within the
   daily ceiling), and nothing more. Running your own node via `SMARTBRAIN_SIGNALING_URL` moves that
