@@ -11,6 +11,13 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-10-27
+
+**Upgrading from 0.27.1.** No migration and no change to your cards, sources or settings. This
+release fixes the Neural Interface on every install: the card's Allow / Use the local model taps,
+date answers and Refine work again. Nothing about research, consent scope or what leaves the device
+changes, so there is no new held-out safety run.
+
 ### Fixed
 - Neural Interface: answering a card's question (Allow a cloud model, Use the local model, a date) and
   Refine failed with "That didn't go through" since 0.26.0 (#510): the web app sent the Content-Type
@@ -18,8 +25,9 @@ to know when a release changes behavior.
 - Neural Interface: a build whose step is set to Local (or Cloud) with no model routed on that side
   said "The request couldn't be understood well enough to build from". The card now says that no
   model is routed for building cards and where to fix it (Settings > Models).
-- Global Library: a library URL that answers HTTP 404 (nothing published there) is reported as such
-  instead of "couldn't reach the library host".
+- Global Library: a library URL that answers HTTP 404 (nothing published there) is reported as such,
+  and any other HTTP status is named ("the library host answered HTTP 403"), instead of "couldn't
+  reach the library host".
 
 ## [0.27.1] - 2026-10-26
 
