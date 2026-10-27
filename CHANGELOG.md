@@ -11,6 +11,16 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- Neural Interface: answering a card's question (Allow a cloud model, Use the local model, a date) and
+  Refine failed with "That didn't go through" since 0.26.0 (#510): the web app sent the Content-Type
+  header twice and the server refused the body. The request helper now owns that header.
+- Neural Interface: a build whose step is set to Local (or Cloud) with no model routed on that side
+  said "The request couldn't be understood well enough to build from". The card now says that no
+  model is routed for building cards and where to fix it (Settings > Models).
+- Global Library: a library URL that answers HTTP 404 (nothing published there) is reported as such
+  instead of "couldn't reach the library host".
+
 ## [0.27.1] - 2026-10-26
 
 **Upgrading from 0.27.0.** No migration and no change to your cards, sources or settings. This

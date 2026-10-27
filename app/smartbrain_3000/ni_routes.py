@@ -1857,6 +1857,10 @@ def _explain_library_refusal(exc: Exception) -> str:
     """Map library errors to a user-facing sentence — never echo raw exception text
     for netguard/library errors that could leak the URL path."""
     if isinstance(exc, netguard.FetchError):
+        if exc.status == 404:  # the host is up; nothing is published at that address (2026-10-27)
+            return "the library host answered 404 — there is no library at that URL"
+        if exc.status is not None:
+            return f"the library host answered HTTP {exc.status}"
         return "couldn't reach the library host — check the URL and try again"
     return str(exc)
 

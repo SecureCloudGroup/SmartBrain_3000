@@ -320,6 +320,8 @@ _REASONS: dict[str, str] = {
     "declined": "You declined the suggested source.",
     "computed-only": "This needs a specific date, written as YYYY-MM-DD.",
     "intent": "The request couldn't be understood well enough to build from.",
+    "model": ("No model is routed for building cards. Settings > Models: the Neural Interface steps, "
+              "or the ni / chat / agent routes."),
     "research": "The research couldn't finish (the model was unavailable) — retry runs it again.",
     # Claims audit 2026-09-21: classes the flow actually writes that the map
     # missed — the card showed the blind sentence for each of these.
