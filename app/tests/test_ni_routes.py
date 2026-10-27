@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_ni_forms_verdict import _ALERTS, _ONE_ALERT, _QUAKES, _TWO_QUAKES
 
-from smartbrain_3000 import ni, ni_flow, ni_library, ni_routes, tools
+from smartbrain_3000 import netguard, ni, ni_flow, ni_library, ni_routes, tools
 from smartbrain_3000.auth import relay_headers
 
 
@@ -1769,3 +1769,21 @@ def test_refine_refuses_while_a_flow_is_running(client: TestClient,
     r = client.post(f"/api/ni/items/{iid}/refine",
                     json={"note": "should be in Fahrenheit degrees."})
     assert r.status_code == 409 and "busy building" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("exc,expected", [
+    (netguard.FetchError("upstream returned HTTP 404", status=404),
+     "the library host answered 404 — there is no library at that URL"),
+    (netguard.FetchError("upstream returned HTTP 503", status=503),
+     "the library host answered HTTP 503 — try again later"),
+    (netguard.FetchError("could not connect: ConnectError"),
+     "couldn't reach the library host — check the URL and try again"),
+    (ni_library.LibraryError("a library source is already connected"),
+     "a library source is already connected"),
+])
+def test_library_refusal_tells_a_404_from_a_dead_host(exc, expected) -> None:
+    """Live 2026-10-26: the default library URL answered 404 (nothing published there) and the dialog said
+    "couldn't reach the library host", sending the user to check a URL that was fine. A clean HTTP answer
+    names its status; the path never travels (the URL belongs to the user, the sentence to the log)."""
+    assert ni_routes._explain_library_refusal(exc) == expected
+    assert "/ni/" not in expected

@@ -3709,8 +3709,9 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
     do_fetch = fetcher if fetcher is not None else default_fetcher
     resolved_model = ni_route_model if ni_route_model else _resolve_flow_model(store)
     if not resolved_model:
-        return _fail(store, item_id, "intent", "no model routed for building cards (Settings > Models: "
-                                               "Neural Interface steps, or the ni / chat / agent routes)")
+        # its own class (2026-10-27): the card said "couldn't be understood" for a missing model
+        return _fail(store, item_id, "model", "no model routed for building cards (Settings > Models: "
+                                              "Neural Interface steps, or the ni / chat / agent routes)")
     if not ni_route_model and not _gateway_mod.is_local(resolved_model):
         # Ruling 2 (2026-09-24): building reads the user's words and samples of the
         # source, so a model off this computer needs THIS card's consent.

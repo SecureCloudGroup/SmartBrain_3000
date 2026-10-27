@@ -74,10 +74,13 @@ export class ApiError extends Error {
 
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   await remoteReady; // off-LAN, ensure the /api->WebRTC fetch override is installed first
-  const res = await fetch(path, {
-    ...opts,
-    headers: { "content-type": "application/json", ...(opts.headers ?? {}) },
-  });
+  // One Content-Type, owned here. A caller's own header value wins, but it is set, never appended:
+  // a plain-object spread with the same name in a different case keeps both keys, and fetch then
+  // sends "application/json, application/json", which FastAPI no longer parses as JSON (a 422 on
+  // every card answer and Refine, 2026-10-26).
+  const headers = new Headers(opts.headers ?? {});
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  const res = await fetch(path, { ...opts, headers });
   const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
     const detail = (data && (data as { detail?: string }).detail) || `request failed (${res.status})`;
@@ -1893,13 +1896,11 @@ export const api = {
   niRefine: (id: string, note: string) =>
     req<{ ok: boolean; kind: string }>(`/api/ni/items/${encodeURIComponent(id)}/refine`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ note }),
     }),
   niFlowAnswer: (id: string, kind: string, value: string) =>
     req<{ ok: boolean; started: boolean }>(`/api/ni/items/${encodeURIComponent(id)}/flow/answer`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, value }),
     }),
   niFindings: () =>

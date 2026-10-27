@@ -112,6 +112,26 @@ def test_build_forced_side_is_honoured_exactly(tmp_path, monkeypatch) -> None:
     assert ni_flow._resolve_flow_model(store) is None
 
 
+def test_build_with_nothing_routed_fails_as_model_not_intent(tmp_path, monkeypatch) -> None:
+    """Live 2026-10-26: the build step forced to Local on an install whose ni / chat / agent routes are all
+    Claude Code. The flow stops before any model call and the card must say so (class ``model``), not call the
+    request hard to understand (class ``intent``)."""
+    from smartbrain_3000 import ni, ni_master
+
+    monkeypatch.setattr(gateway, "load_routes",
+                        lambda c: {"ni": "claudecode/opus", "chat": "claudecode/sonnet", "agent": "claudecode/sonnet"})
+    conn = _conn(tmp_path)
+    ni_models.save(conn, {"build": "local"})
+    store = ni.NIStore(conn, b"\x00" * 32)
+    item_id = ni_flow.create_shell_item(store, "show me the price of NVDA every 15 minutes")
+    calls: list[str] = []
+    result = ni_flow.run_flow(store, item_id, gateway_call=lambda m, p: calls.append(m) or "{}",
+                              fetcher=lambda url: {})
+    assert result["state"] == "failed" and calls == []
+    assert ni_master.error_class_of(result["error"]) == "model"
+    assert ni_master.reason_for("failed", result["error"]).startswith("No model is routed for building cards")
+
+
 def test_saving_auto_leaves_research_off_switch_alone(tmp_path, monkeypatch) -> None:
     """The page sends every step on Save: auto entries are unset, so an older ``ni_research=off`` stays off."""
     conn = _conn(tmp_path)

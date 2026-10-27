@@ -54,11 +54,22 @@ def test_ledger_truncates_oversize_fields() -> None:
     ("computed-only requires an explicit YYYY-MM-DD date in the request",
      "computed-only"),
     ("stale: worker died", "stale"),
+    ("model: no model routed for building cards (Settings > Models)", "model"),
     (None, "none"),
     ("", "none"),
 ])
 def test_error_class_of(error, klass) -> None:
     assert ni_master.error_class_of(error) == klass
+
+
+def test_missing_build_model_reads_as_its_own_sentence() -> None:
+    """Live 2026-10-26: build forced to Local with no local model routed failed as ``intent`` and the card
+    said "couldn't be understood", hiding the one-minute fix. The class is ``model`` and the sentence names
+    where the fix is; the request was never the problem."""
+    reason = ni_master.reason_for("failed", "model: no model routed for building cards (Settings > Models)")
+    assert reason.startswith("No model is routed for building cards") and "Settings > Models" in reason
+    assert "understood" not in reason
+    assert ni_master.choose_move(state="failed", error_class="model", shell=True)["reopen"] == ["retry"]
 
 
 # --- the no-dead-end law (property over the whole input space) --------------
