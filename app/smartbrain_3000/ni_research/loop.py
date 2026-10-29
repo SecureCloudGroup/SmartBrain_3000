@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -155,8 +156,45 @@ def _too_deep(text: str, cap: int = MAX_JSON_DEPTH) -> bool:
     return False
 
 
+# the gateway's text tool protocol (``claudecli._tool_instructions``, local models): a fenced JSON object naming
+# the tool and its arguments, the same spellings ``agent._extract_text_tool_calls`` accepts
+_TEXT_CALL_FENCE = re.compile(r"```(?:json|tool_call|tool)?\s*(\{.*?\})\s*```", re.DOTALL)
+_TEXT_CALLEE_KEYS = ("name", "tool", "function", "tool_call")
+_TEXT_ARGS_KEYS = ("arguments", "parameters", "args")
+MAX_TEXT_CALLS = 8
+
+
+def _text_calls(content: object) -> list[dict]:
+    """Tool calls a model wrote as TEXT (the Claude Code route, a local runtime that prints the call): each fenced
+    JSON object that names a research tool (``schemas.TOOL_NAMES``) becomes a call; strict JSON, bounded, the
+    depth cap applied before decoding. Anything else in the text is the reply, not a call."""
+    assert isinstance(_TEXT_CALLEE_KEYS, tuple) and MAX_TEXT_CALLS > 0, "the protocol's shape"
+    if not isinstance(content, str) or not any(f'"{k}"' in content for k in _TEXT_CALLEE_KEYS):
+        return []
+    blocks = _TEXT_CALL_FENCE.findall(content)
+    if not blocks and content.strip().startswith("{"):
+        blocks = [content.strip()]
+    out = []
+    for i, raw in enumerate(blocks[:MAX_TEXT_CALLS]):  # bounded
+        if _too_deep(raw):
+            continue
+        try:
+            obj = json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        name = next((obj[k] for k in _TEXT_CALLEE_KEYS if isinstance(obj.get(k), str)), None)
+        if name not in schemas.TOOL_NAMES:
+            continue
+        args = next((obj[k] for k in _TEXT_ARGS_KEYS if k in obj), None)
+        out.append({"id": f"text_{i}", "name": name, "args": args if isinstance(args, dict) else None, "text": True})
+    return out
+
+
 def _calls(msg: dict) -> list[dict]:
-    """The assistant's tool calls as ``{id, name, args}`` (``args`` None when the arguments are not a JSON object)."""
+    """The assistant's tool calls as ``{id, name, args}`` (``args`` None when the arguments are not a JSON object):
+    the structured ``tool_calls``, else the ones written as text (``_text_calls``)."""
     assert isinstance(msg, dict), "a message"
     assert MAX_CALLS_PER_TURN > 0, "a call cap"
     out = []
@@ -171,14 +209,19 @@ def _calls(msg: dict) -> list[dict]:
             args = None
         out.append({"id": str(tc.get("id") or f"call_{i}")[:64], "name": str(fn.get("name") or ""),
                     "args": args if isinstance(args, dict) else None})
-    return out
+    return out or _text_calls(msg.get("content"))
 
 
 def _echo(msg: dict, calls: list[dict]) -> dict:
-    """The assistant turn as it goes back to the model: text and the calls it made, nothing else."""
+    """The assistant turn as it goes back to the model: text and the calls it made, nothing else. A call read from
+    the text is lifted out of it (the transport renders the calls again, in its own shape), so no route sees the
+    same call twice."""
     assert isinstance(msg, dict), "a message"
     assert isinstance(calls, list), "calls required"
-    return {"role": "assistant", "content": str(msg.get("content") or ""),
+    content = str(msg.get("content") or "")
+    if any(c.get("text") for c in calls):
+        content = _TEXT_CALL_FENCE.sub("", content).strip()
+    return {"role": "assistant", "content": content,
             "tool_calls": [{"id": c["id"], "type": "function",
                             "function": {"name": c["name"], "arguments": json.dumps(c["args"] or {}, sort_keys=True)}}
                            for c in calls]}

@@ -65,6 +65,7 @@ _DISPATCH = {"fetch_sample": ("url", tools.fetch_sample), "library_search": ("qu
              "web_search": ("query", tools.web_search)}
 
 
+TOOL_NAMES = frozenset(_DISPATCH)   # the only names a tool call may carry (a text-protocol call is matched on these)
 _MEMO_TOOLS = frozenset({"web_search", "library_search", "resolve_entity", "try_recipe"})   # deterministic on the ctx
 
 

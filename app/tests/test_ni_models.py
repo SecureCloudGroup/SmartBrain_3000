@@ -62,29 +62,79 @@ def test_summary_never_resolves_to_cloud(tmp_path) -> None:
 
 def test_override_per_step(tmp_path) -> None:
     conn = _conn(tmp_path)
-    assert ni_models.save(conn, {"build": "local", "refresh": "cloud"})["build"] == "local"
+    assert ni_models.save(conn, {"build": "local", "refresh": "cloud"}, _BOTH)["build"] == "local"
     assert ni_models.choose(conn, "build", _BOTH).model == "mlx/qwen-local"
     assert ni_models.choose(conn, "refresh", _BOTH).model == "anthropic/claude-sonnet"
-    # a forced side with nothing routed there is None, never the other side
+    # a forced side with nothing routed there (the route changed after the choice was saved) is None, never
+    # the other side
     assert ni_models.choose(conn, "build", {"ni": "anthropic/claude-sonnet"}).model is None
     with pytest.raises(ValueError):
-        ni_models.save(conn, {"verify": "local"})
+        ni_models.save(conn, {"verify": "local"}, _BOTH)
     with pytest.raises(ValueError):
-        ni_models.save(conn, {"build": "fast"})
+        ni_models.save(conn, {"build": "fast"}, _BOTH)
 
 
-def test_cloud_model_is_anthropic_only(tmp_path) -> None:
+def test_save_refuses_a_side_nothing_is_routed_on(tmp_path) -> None:
+    """#561 review note (2026-10-27): Settings refuses a choice routing cannot serve, so a step is never saved
+    into a state where it silently has no model; nothing is stored on the refusal."""
     conn = _conn(tmp_path)
-    assert ni_models.cloud_model(conn, {"ni": "openai/gpt-4o", "chat": "claudecode/sonnet"}) is None
+    with pytest.raises(ValueError, match="no cloud model is routed"):
+        ni_models.save(conn, {"research": "cloud"}, {"chat": "mlx/qwen-local"})
+    with pytest.raises(ValueError, match="no local model is routed"):
+        ni_models.save(conn, {"build": "local"}, {"ni": "claudecode/opus", "chat": "claudecode/sonnet"})
+    assert ni_models.stored(conn) == {}
+    assert ni_models.save(conn, {"research": "cloud"}, {"ni": "claudecode/opus"})["research"] == "cloud"
+    assert ni_models.save(conn, {"research": "auto"}, {})["research"] == "auto"   # auto never needs a route
+
+
+def test_cloud_model_is_anthropic_or_claude_code(tmp_path) -> None:
+    """2026-10-29 (the NVDA card): the Claude Code route is a cloud model for every step, as it already was for a
+    build through the older route order, under the same per-card consent. Deliberately replaces
+    ``test_cloud_model_is_anthropic_only`` (the #533 deferral). Any other provider, and a local model, never."""
+    conn = _conn(tmp_path)
+    assert ni_models.cloud_model(conn, {"ni": "openai/gpt-4o", "chat": "claudecode/sonnet"}) == "claudecode/sonnet"
+    assert ni_models.cloud_model(conn, {"ni": "claudecode/opus", "chat": "anthropic/claude-sonnet"}) == "claudecode/opus"
+    assert ni_models.cloud_model(conn, {"ni": "openai/gpt-4o", "chat": "mlx/qwen-local"}) is None
     db.meta_set(conn, "ni_research_model", "anthropic/claude-opus")
     assert ni_models.cloud_model(conn, _BOTH) == "anthropic/claude-opus"
+
+
+_T_ROUTES = {"ni": "claudecode/opus", "chat": "claudecode/sonnet", "agent": "claudecode/sonnet"}   # T's install
+
+
+def test_every_step_reads_one_rule_on_claude_code_routes(tmp_path) -> None:
+    """T's configuration (2026-10-29): every step resolves to the same cloud model with no step silently left
+    without one, and the Settings view says what the flow runs."""
+    conn = _conn(tmp_path)
+    picks = {s: ni_models.choose(conn, s, _T_ROUTES) for s in ni_models.STEPS}
+    assert {s: (c.where, c.model) for s, c in picks.items()} == {
+        "build": ("cloud", "claudecode/opus"), "research": ("cloud", "claudecode/opus"),
+        "refresh": ("cloud", "claudecode/opus"), "summary": (None, None)}
+    assert not any(c.fallback for c in picks.values())
+
+
+def test_auto_falls_back_to_the_older_route_order_for_every_step(tmp_path) -> None:
+    """``auto`` with neither side routed: the older order (an explicit ni route of any provider, then a local
+    chat / agent model, then chat / agent) for the one-time AND the repeated steps; summary stays local-only."""
+    conn = _conn(tmp_path)
+    other = {"ni": "openai/gpt-4o", "chat": "openai/gpt-4o-mini"}
+    for step in ("build", "research", "refresh"):
+        c = ni_models.choose(conn, step, other)
+        assert (c.where, c.model, c.fallback) == ("cloud", "openai/gpt-4o", True), step
+    assert ni_models.choose(conn, "summary", other).model is None
+    # a one-time step takes the explicit ni route before a local chat model (P0, 2026-09-16); a repeated step
+    # takes the local model first
+    mixed = {"ni": "openai/gpt-4o", "chat": "mlx/qwen-local"}
+    assert ni_models.choose(conn, "build", mixed).model == "openai/gpt-4o"
+    assert ni_models.choose(conn, "refresh", mixed).model == "mlx/qwen-local"
+    assert ni_models.choose(conn, "build", {}).model is None
 
 
 def test_research_reads_its_step_and_keeps_the_older_switch(tmp_path, monkeypatch) -> None:
     conn = _conn(tmp_path)
     db.meta_set(conn, "ni_research", "off")
     assert policy.setting(conn) == "off"           # the older switch, step unset
-    ni_models.save(conn, {"research": "local"})
+    ni_models.save(conn, {"research": "local"}, _BOTH)
     assert policy.setting(conn) == "local"         # the step wins over the older meta
     monkeypatch.setenv("SMARTBRAIN_NI_RESEARCH", "cloud")
     assert policy.setting(conn) == "cloud"         # the env still wins over everything
@@ -95,20 +145,22 @@ def test_build_model_follows_the_step(tmp_path, monkeypatch) -> None:
     store = type("S", (), {"conn": conn})()
     monkeypatch.setattr(gateway, "load_routes", lambda c: dict(_BOTH))
     assert ni_flow._resolve_flow_model(store) == "anthropic/claude-sonnet"
-    ni_models.save(conn, {"build": "local"})
+    ni_models.save(conn, {"build": "local"}, _BOTH)
     assert ni_flow._resolve_flow_model(store) == "mlx/qwen-local"
 
 
 def test_build_forced_side_is_honoured_exactly(tmp_path, monkeypatch) -> None:
-    """build=cloud with no Anthropic route stops (None), never the older order's openai or local pick; auto keeps it."""
+    """build=cloud with no cloud route stops (None), never the older order's openai or local pick; auto keeps it.
+    The forced side is written to the store directly: Settings refuses to save it (``save``), but a route can
+    change after the choice was saved."""
     conn = _conn(tmp_path)
     store = type("S", (), {"conn": conn})()
     monkeypatch.setattr(gateway, "load_routes", lambda c: {"ni": "openai/gpt-4o", "chat": "mlx/qwen-local"})
-    assert ni_flow._resolve_flow_model(store) == "openai/gpt-4o"   # auto, no Anthropic route: P0 order
-    ni_models.save(conn, {"build": "cloud"})
+    assert ni_flow._resolve_flow_model(store) == "openai/gpt-4o"   # auto, no cloud route: P0 order
+    db.meta_set(conn, "ni_step_models", '{"build": "cloud"}')
     assert ni_flow._resolve_flow_model(store) is None
     monkeypatch.setattr(gateway, "load_routes", lambda c: {"chat": "anthropic/claude-sonnet"})
-    ni_models.save(conn, {"build": "local"})
+    db.meta_set(conn, "ni_step_models", '{"build": "local"}')
     assert ni_flow._resolve_flow_model(store) is None
 
 
@@ -121,7 +173,7 @@ def test_build_with_nothing_routed_fails_as_model_not_intent(tmp_path, monkeypat
     monkeypatch.setattr(gateway, "load_routes",
                         lambda c: {"ni": "claudecode/opus", "chat": "claudecode/sonnet", "agent": "claudecode/sonnet"})
     conn = _conn(tmp_path)
-    ni_models.save(conn, {"build": "local"})
+    db.meta_set(conn, "ni_step_models", '{"build": "local"}')   # saved while a local model was routed, since removed
     store = ni.NIStore(conn, b"\x00" * 32)
     item_id = ni_flow.create_shell_item(store, "show me the price of NVDA every 15 minutes")
     calls: list[str] = []

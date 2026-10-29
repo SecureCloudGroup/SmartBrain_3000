@@ -1,9 +1,10 @@
 """Which model runs the research (plan 6.3, decision D1, tiered). Pure choice; the flow acts on it.
 
-(a) cloud: an Anthropic route is configured AND this card has research consent.
-(b) the Claude Code CLI route is DEFERRED. TODO(T): check the CLI terms for automated research before adding a
-    tier here; today ``claudecode/*`` is never chosen for research (``cloud_route`` skips it).
-(c) closed-world local: code ranks Library rows, the local model only picks one and fills the recipe.
+(a) cloud: a cloud route (``anthropic/*`` or ``claudecode/*``, ``ni_models.cloud_model``) is configured AND this
+    card has research consent. The Claude Code route is a cloud tier like any other (2026-10-29): a build already
+    ran on it under the same per-card consent, so research runs on it under that consent too; its tool calls ride
+    the gateway's text protocol (``loop._text_calls``).
+(b) closed-world local: code ranks Library rows, the local model only picks one and fills the recipe.
 
 Open web (S5b): the cloud tier may also search the web and read public pages, unless the kill switch (env
 ``SMARTBRAIN_NI_RESEARCH_WEB`` or meta ``ni_research_web`` set to ``off``) limits research to the Library. The
@@ -59,8 +60,8 @@ def web_enabled(conn) -> bool:
 
 
 def cloud_route(conn) -> str | None:
-    """The Anthropic route research would use: ``ni_models.cloud_model`` (env or meta ``ni_research_model``, else
-    the first ``anthropic/*`` on the ni / chat / agent routes). Never a CLI route and never a local one."""
+    """The cloud route research would use: ``ni_models.cloud_model`` (env or meta ``ni_research_model``, else
+    the first ``anthropic/*`` or ``claudecode/*`` on the ni / chat / agent routes). Never a local one."""
     assert _ENV_MODEL, "the env name"
     assert conn is not None, "conn required"
     return ni_models.cloud_model(conn)
