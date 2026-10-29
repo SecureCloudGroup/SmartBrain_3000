@@ -1,0 +1,39 @@
+{
+  "id": "daily-high-low",
+  "title": "Today's high and low",
+  "goal": "show today's forecast high and low temperature at a place, from Open-Meteo (no key needed)",
+  "category": "weather",
+  "tags": ["weather", "open-meteo", "forecast"],
+  "spec_template": {
+    "version": 1,
+    "title": "Today's high and low",
+    "goal": "show today's forecast high and low temperature at a place",
+    "params": {
+      "latitude": {"label": "Latitude (e.g. 32.78)", "kind": "string", "value": ""},
+      "longitude": {"label": "Longitude (e.g. -79.93)", "kind": "string", "value": ""}
+    },
+    "source": {
+      "type": "http_json",
+      "url": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&temperature_unit=fahrenheit&timezone=auto"
+    },
+    "pipeline": [
+      {"op": "extract", "paths": {"high": "daily.temperature_2m_max[0]", "low": "daily.temperature_2m_min[0]"}},
+      {"op": "transform", "apply": [{"field": "high", "fn": "number"}, {"field": "low", "fn": "number"}]}
+    ],
+    "scene": {
+      "type": "stack", "dir": "v", "gap": "sm",
+      "children": [
+        {"type": "text", "value": "Today", "role": "title", "tone": "default", "size": "md"},
+        {"type": "stack", "dir": "h", "gap": "md", "children": [
+          {"type": "number", "value": {"$bind": "high"}, "format": "plain", "unit": "°F high", "tone": "default", "size": "lg"},
+          {"type": "number", "value": {"$bind": "low"}, "format": "plain", "unit": "°F low", "tone": "default", "size": "lg"}
+        ]}
+      ]
+    },
+    "display": {"size": "small"},
+    "interval_minutes": 60,
+    "model": null
+  },
+  "preview_payload": {"high": 78.1, "low": 61.4},
+  "notes": "Open-Meteo's free daily forecast; enter the latitude and longitude of the place you care about."
+}

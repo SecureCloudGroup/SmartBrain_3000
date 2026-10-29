@@ -13,6 +13,30 @@ Two scripts:
   against every `*.json` in a directory; exits nonzero on any failure. Pin
   `smartbrain_3000` in the registry repo and run this in CI on every PR.
 
+## The official pack
+
+The pack the app prefills (`https://smartbrain.securecloudgroup.com/ni/library.json`) is
+`landing/ni/library.json`, built from `tools/ni-library/templates/*.json`:
+
+- `pack_id`: `31e84594-00e2-40e0-94a5-69e43917b092` (never changes; a new id reads as "a different pack" to every subscriber)
+- publisher fingerprint: `SB-K4NV-IZGP-UEDI-TQXY`
+- the publisher data dir and its master key live on the operator's machine only, beside the
+  checkout (`../sb_ni_publisher_data/`, master key in `master.key`, mode 0600) — never in the repo
+
+Republish = edit or add a template, bump `--seq` by one, rebuild, commit the new
+`landing/ni/library.json`. The VPS serves whatever the latest `v*` tag carries
+(`deploy/vps-sync-web.sh`), so the file goes live with the next release:
+
+```
+SB_PUBLISHER_MASTER_KEY="$(cat ../sb_ni_publisher_data/master.key)" \
+PYTHONPATH=app python3 tools/ni-library/build.py \
+    --templates tools/ni-library/templates \
+    --pack-id  31e84594-00e2-40e0-94a5-69e43917b092 \
+    --seq      <previous seq + 1> \
+    --publisher-data-dir ../sb_ni_publisher_data \
+    --out      landing/ni/library.json
+```
+
 ## build.py
 
 Offline signing (the one supported publish path in v1):
