@@ -1,0 +1,36 @@
+{
+  "id": "current-temperature",
+  "title": "Current temperature",
+  "goal": "show the current temperature at a place, from Open-Meteo (no key needed)",
+  "category": "weather",
+  "tags": ["weather", "open-meteo", "temperature"],
+  "spec_template": {
+    "version": 1,
+    "title": "Temperature",
+    "goal": "show the current temperature at a place",
+    "params": {
+      "latitude": {"label": "Latitude (e.g. 32.78)", "kind": "string", "value": ""},
+      "longitude": {"label": "Longitude (e.g. -79.93)", "kind": "string", "value": ""}
+    },
+    "source": {
+      "type": "http_json",
+      "url": "https://api.open-meteo.com/v1/forecast?latitude={{param:latitude}}&longitude={{param:longitude}}&current=temperature_2m&temperature_unit=fahrenheit&timezone=auto"
+    },
+    "pipeline": [
+      {"op": "extract", "paths": {"temperature": "current.temperature_2m"}},
+      {"op": "transform", "apply": [{"field": "temperature", "fn": "number"}]}
+    ],
+    "scene": {
+      "type": "stack", "dir": "v", "gap": "sm",
+      "children": [
+        {"type": "text", "value": "Temperature", "role": "title", "tone": "default", "size": "md"},
+        {"type": "number", "value": {"$bind": "temperature"}, "format": "plain", "unit": "°F", "tone": "default", "size": "lg"}
+      ]
+    },
+    "display": {"size": "small"},
+    "interval_minutes": 30,
+    "model": null
+  },
+  "preview_payload": {"temperature": 70.2},
+  "notes": "Open-Meteo's free forecast endpoint; enter the latitude and longitude of the place you care about."
+}
