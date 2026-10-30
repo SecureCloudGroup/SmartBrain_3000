@@ -11,6 +11,22 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- Neural Interface: cards built, researched and refreshed on a Claude Code route again. Since 0.27.0 the
+  research and refresh steps accepted only an Anthropic (API key) route, so an install whose ni / chat /
+  agent routes are all Claude Code built a card but could never research a source for it: every ask the
+  Library had no ready-made source for ended as "No source I can read answers this", and the Settings
+  page said "No model is routed" for every step, builds included. One rule now resolves every step's
+  model (an Anthropic or Claude Code model is the cloud model; the older route order is the fallback for
+  Automatic), the flow and the Settings page read that same rule, and the research loop reads the tool
+  calls the Claude Code route writes as text. Nothing about consent changes: a cloud model still asks on
+  each card before anything leaves this computer, and the daily ceilings are unchanged.
+- Neural Interface: an ask that could not be researched says why. When research is turned off, or no
+  cloud or local model is routed for it, the declined card now says so and points at Settings and the
+  paste box, instead of claiming that no source answers the ask.
+- Settings: **Neural Interface steps** refuses to save Cloud or Local for a step when nothing is routed on
+  that side (the step would silently have no model), and says which route to set.
+
 ## [0.27.2] - 2026-10-27
 
 **Upgrading from 0.27.1.** No migration and no change to your cards, sources or settings. This

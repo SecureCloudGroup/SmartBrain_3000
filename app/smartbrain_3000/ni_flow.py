@@ -3864,34 +3864,16 @@ def warn_retired_flow_flag() -> None:
 
 
 def _resolve_flow_model(store: ni.NIStore) -> str | None:
-    """The model a build runs on: the ``build`` step's choice (``ni_models``). ``cloud`` / ``local``: that side's
-    model, None when none is routed (the build stops and says so). ``auto``: the cloud model when one is routed, else
-    the older route order (C1, audit 2026-09-13), so an install without an Anthropic route keeps building as before:
-
-      1. an EXPLICIT ``ni`` route — the operator's word, even when it is a cloud model (P0, 2026-09-16);
-      2. else a LOCAL ``chat`` / ``agent`` model (§29 local-preferred);
-      3. else whatever ``chat`` / ``agent`` is.
-
-    A cloud answer still needs the card's consent (``run_flow``).
+    """The model a build runs on: the ``build`` step's choice, THE one rule in ``ni_models.choose`` (a forced side
+    is honoured exactly and nothing routed there stops the build; ``auto`` is the cloud model, else the older route
+    order, so an install without an Anthropic route keeps building as before). The Settings page reads the same
+    function, so what it shows is what runs. A cloud answer still needs the card's consent (``run_flow``).
     """
     assert store is not None, "store required"
     routes: dict = {}
     if hasattr(_gateway_mod, "load_routes"):
         routes = _gateway_mod.load_routes(store.conn)
-    choice = ni_models.choose(store.conn, "build", routes, _gateway_mod)
-    if choice.setting != "auto":  # a forced side is honoured exactly: nothing routed there stops the build
-        return choice.model
-    if choice.cloud:
-        return choice.cloud
-    ni_model = _gateway_mod.resolve_model("ni", routes)
-    chat_model = _gateway_mod.resolve_model("chat", routes)
-    agent_model = _gateway_mod.resolve_model("agent", routes)
-    if ni_model:
-        return ni_model
-    for candidate in (chat_model, agent_model):  # bounded to 2 (P10 #2)
-        if candidate and _gateway_mod.is_local(candidate):
-            return candidate
-    return chat_model or agent_model
+    return ni_models.choose(store.conn, "build", routes, _gateway_mod).model
 
 
 def _run_intent(store: ni.NIStore, item_id: str, request: str,
@@ -4018,6 +4000,18 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
 _AUTO_ROWS = 5  # v2: how deep locate looks, so fall-through has rows to fall to
 
 
+def _research_off_line(store: ni.NIStore, item_id: str) -> str:
+    """The honest line for an ask that ends without research: why no run could look for a source (the Library
+    missing, research off, no model routed), and the two ways on. "" when research could have run (it declined
+    or was not consented: the run's own words stand)."""
+    assert store is not None and item_id, "args required"
+    from . import ni_research_flow  # local: the researcher imports this module
+    why = ni_research_flow.research_blocker(store, item_id, _flow_read(store, item_id) or {})
+    if not why:
+        return ""
+    return f"I can't look for a source: {why}. Fix that and retry, or paste a link."
+
+
 def _row_needs_access(row: dict) -> bool:
     """True when a Library row asks for the user's key or contact email (never sent before Keep)."""
     assert isinstance(row, dict), "row required"
@@ -4062,8 +4056,10 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
         if found is not None:
             return found
         # research is off, unconsented or has no model route (a run that declined came back above as the declined
-        # card, one that faulted as the failed card): nothing here answers this ask. The honest end is the declined card, with the Library's pages as links.
-        return _end(store, item_id, "no_source_research_off", "",
+        # card, one that faulted as the failed card): nothing here answers this ask. The honest end is the declined
+        # card, with the Library's pages as links and the line naming WHY no search ran (2026-10-29, the NVDA card:
+        # "no source answers this" was said for a missing model), so the user can route one or paste a link.
+        return _end(store, item_id, "no_source_research_off", _research_off_line(store, item_id),
                     links=[{"title": r.get("title"), "url": r.get("page")} for r in rows if r.get("answers") is False])
     ordered = [r for r in buildable if not _row_needs_access(r)] + [r for r in buildable if _row_needs_access(r)]
     assert len(ordered) == len(buildable), "a partition loses no row"
@@ -4113,7 +4109,9 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
         rec = _flow_read(store, item_id) or rec
         if rec.get("state") == "source" and not rec.get("_cancel") and not _buildable(rec.get("_ranked_library")):
             # every row failed and the researcher did not answer: the declined card, with the pages the pick held
-            return _end(store, item_id, "no_source_rows_exhausted", "None of the sources I tried could answer this.")
+            # (and why no search for another source ran, when that is the reason)
+            return _end(store, item_id, "no_source_rows_exhausted",
+                        "None of the sources I tried could answer this. " + _research_off_line(store, item_id))
     rec = {**rec, "_auto_picked": None}  # a stop that is not a decline is not an auto build
     _flow_write(store, item_id, rec)
     return rec

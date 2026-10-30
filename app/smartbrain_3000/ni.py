@@ -8776,31 +8776,23 @@ def _first_local_model(gateway_mod, routes: dict) -> str | None:
 def _card_model(spec: dict, gateway_mod, routes: dict, store: NIStore, item_id: str) -> str | None:
     """The model a model-source card refreshes on.
 
-    An item-level ``spec.model`` wins. Else the ``refresh`` step's setting (``ni_models``): ``local``, or ``auto``
-    with a local model routed, refreshes on the local model. ``cloud`` refreshes on the step's cloud model (the one
-    Settings names); so does ``auto`` with no local model when a cloud model is routed. With neither, the build
-    path's older order: the ``ni`` route, then a LOCAL chat / agent model, then whatever chat / agent is.
-    A model off this computer needs this card's consent
-    (``spec._model_consent``); without it, or when the owner chose local (flow ``_use_local``),
-    the card refreshes on the first local model, and only with none does it raise. Unlike the
-    build path, an unconsented cloud ``ni`` route falls back to local here rather than asking.
+    An item-level ``spec.model`` wins. Else the ``refresh`` step's choice, THE one rule in ``ni_models.choose``:
+    ``local``, or ``auto`` with a local model routed, refreshes on the local model; ``cloud`` on the step's cloud
+    model (the one Settings names); ``auto`` with neither side falls back to the older route order (the ``ni``
+    route, a LOCAL chat / agent model, whatever chat / agent is). A forced side with nothing routed raises
+    ``model_unrouted``. A model off this computer needs this card's consent (``spec._model_consent``); without it,
+    or when the owner chose local (flow ``_use_local``), the card refreshes on the first local model, and only
+    with none does it raise. Unlike the build path, an unconsented cloud route falls back to local here rather
+    than asking.
     """
     assert isinstance(spec, dict) and isinstance(routes, dict), "spec + routes required"
     assert store is not None, "store required"
     if spec.get("model"):
         return spec["model"]
-    resolve = gateway_mod.resolve_model
     choice = ni_models.choose(store.conn, "refresh", routes, gateway_mod)
-    if choice.setting == "local" or (choice.setting == "auto" and choice.local):
-        if not choice.local:
-            raise NIError("model_unrouted", "no local model routed")
-        return choice.local
-    if choice.setting == "cloud" and not choice.cloud:
-        raise NIError("model_unrouted", "no cloud model routed")
-    model = choice.cloud or resolve("ni", routes)   # the cloud model Settings names; the ni route only without one
-    if not model:
-        chat, agent = resolve("chat", routes), resolve("agent", routes)
-        model = next((c for c in (chat, agent) if c and gateway_mod.is_local(c)), chat or agent)
+    if choice.setting != "auto" and not choice.model:
+        raise NIError("model_unrouted", f"no {choice.setting} model routed")
+    model = choice.model
     if not model or gateway_mod.is_local(model):
         return model
     local = _first_local_model(gateway_mod, routes)

@@ -197,11 +197,13 @@ step of a card's life:
 | **Refreshing a model-answered card** | A card whose answer comes from a model, on every refresh. | Local model when one is routed, else cloud |
 | **Brief summaries** | The optional summary on a brief card, on every refresh. | Always local |
 
-The cloud model is the first Anthropic model on the Neural Interface, Chat and Agent routes, in
-that order, and the local model is the first local one in the same order. On Automatic, the
+The cloud model is the first Anthropic or Claude Code model on the Neural Interface, Chat and Agent
+routes, in that order, and the local model is the first local one in the same order. On Automatic, the
 step's own default wins over the **Neural Interface** routing slot: with an Anthropic model routed, cards
-build on it even if that slot names a local model. Choose **Local** for the step to keep building
-on this computer. Picking cloud for a step never
+build on it even if that slot names a local model. With neither a cloud nor a local model routed, a step
+on Automatic falls back to the Neural Interface route whatever its provider, then to Chat and Agent.
+Choose **Local** for the step to keep building on this computer. Cloud or Local can only be saved when
+a model is routed on that side; the page shows the model each step runs on now. Picking cloud for a step never
 skips a card's own question: each card still asks before anything leaves this computer. **Usage
 & cost** shows each step's calls and the model they ran on.
 

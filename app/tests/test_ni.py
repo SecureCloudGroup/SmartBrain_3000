@@ -4957,11 +4957,13 @@ class _RoutedGateway:
 
 
 def _model_fetch(gw: _RoutedGateway, *, spec_extra: dict | None = None, use_local: bool = False,
-                 steps: dict | None = None) -> None:
+                 steps: dict | None = None, stored: str | None = None) -> None:
     store, _conn, _key = _store()
     if steps:
         from smartbrain_3000 import ni_models
-        ni_models.save(store.conn, steps)
+        ni_models.save(store.conn, steps, gw.routes, gw)   # Settings checks the side against these routes
+    if stored:
+        dbmod.meta_set(store.conn, "ni_step_models", stored)   # written past Settings' check (routes changed since)
     spec = {**_fetching_scene_spec(), **(spec_extra or {})}
     iid = store.add_item(spec, _fetching_preview())
     if use_local:
@@ -5000,8 +5002,10 @@ def test_fetch_model_refresh_cloud_uses_the_step_cloud_model_not_the_ni_route() 
     _model_fetch(gw, spec_extra={"_model_consent": "anthropic/claude"}, steps={"refresh": "cloud"})
     assert gw.used == ["anthropic/claude"]
     gw = _RoutedGateway({"ni": "openai/gpt", "agent": "ollama/small"})
-    with pytest.raises(nimod.NIError) as err:
+    with pytest.raises(ValueError, match="no cloud model is routed"):   # Settings refuses the choice up front
         _model_fetch(gw, spec_extra={"_model_consent": "openai/gpt"}, steps={"refresh": "cloud"})
+    with pytest.raises(nimod.NIError) as err:   # a choice saved earlier, the cloud route since removed
+        _model_fetch(gw, spec_extra={"_model_consent": "openai/gpt"}, stored='{"refresh": "cloud"}')
     assert err.value.kind == "model_unrouted" and gw.used == []
 
 

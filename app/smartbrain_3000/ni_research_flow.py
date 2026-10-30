@@ -22,7 +22,16 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from . import gateway, ni, ni_compare, ni_flow, ni_models, ni_recipe, ni_refresh
+from . import (
+    claudecli,
+    gateway,
+    ni,
+    ni_compare,
+    ni_flow,
+    ni_models,
+    ni_recipe,
+    ni_refresh,
+)
 from .ni_research import loop, policy, tools
 from .ni_research.ctx import ResearchCtx, normal_url, one_line
 
@@ -194,6 +203,11 @@ def _chat_for(store: ni.NIStore, model: str, local: bool) -> Callable[[list, lis
     if local:
         return lambda messages, tools_: gateway.chat_recorded(
             store.conn, ni_models.PURPOSES["research"], messages, model, timeout=ni_flow._FLOW_MODEL_TIMEOUT_S, temperature=0.0)
+    if claudecli.is_claudecode(model):
+        # the Claude Code route honours neither max_tokens nor temperature (it refuses them loudly); its tool
+        # offers and calls ride the text protocol, which ``loop._text_calls`` reads back
+        return lambda messages, tools_: gateway.chat_with_tools_recorded(
+            store.conn, ni_models.PURPOSES["research"], messages, model, tools_, timeout=RESEARCH_TIMEOUT_S)
     return lambda messages, tools_: gateway.chat_with_tools_recorded(
         store.conn, ni_models.PURPOSES["research"], messages, model, tools_, timeout=RESEARCH_TIMEOUT_S, max_tokens=RESEARCH_MAX_TOKENS)
 
@@ -235,7 +249,23 @@ def can_research(store: ni.NIStore, item_id: str, record: dict) -> bool:
     """Could a run of this card research now: the Library is there and the tier is not off (an ``ask`` plan asks
     for model consent first, which is the user's to give)?"""
     assert store is not None and item_id, "args required"
-    return ni_flow._resolve_library() is not None and plan_for(store, item_id, record).mode != "off"
+    return research_blocker(store, item_id, record) is None
+
+
+def research_blocker(store: ni.NIStore, item_id: str, record: dict) -> str | None:
+    """Why no run of this card could research now, in the user's words (the card's honest line names it, never
+    "no source answers this" for a missing model): the Library is not installed, research is turned off, or no
+    model is routed for it. None when a run could research (``can_research``)."""
+    assert store is not None and item_id, "args required"
+    if ni_flow._resolve_library() is None:
+        return "the SmartBrain Library isn't installed"
+    if plan_for(store, item_id, record).mode != "off":
+        return None
+    setting_ = policy.setting(store.conn)
+    if setting_ == "off":
+        return "research is turned off (Settings > Models)"
+    side = {"cloud": "no cloud model", "local": "no local model"}.get(setting_, "no cloud or local model")
+    return f"{side} is routed for research (Settings > Models)"
 
 
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links: list | None = None) -> dict | None:

@@ -264,13 +264,81 @@ def test_the_tier_choice_table() -> None:
     assert policy.choose("off", cloud, local, cloud, False).mode == "off"
 
 
-def test_the_cli_route_is_never_a_research_tier(monkeypatch) -> None:
+def test_the_cli_route_is_a_research_tier(monkeypatch) -> None:
+    """2026-10-29 (the NVDA card): the Claude Code route researches like any cloud route, under the card's consent.
+    Deliberately replaces ``test_the_cli_route_is_never_a_research_tier`` (the #533 deferral)."""
     store = _store()
     monkeypatch.setattr(gateway, "load_routes", lambda conn: {"ni": "claudecode/sonnet", "chat": "claudecode/x"})
     monkeypatch.delenv("SMARTBRAIN_NI_RESEARCH_MODEL", raising=False)
-    assert policy.cloud_route(store.conn) is None
+    assert policy.cloud_route(store.conn) == "claudecode/sonnet"
     monkeypatch.setattr(gateway, "load_routes", lambda conn: {"chat": "anthropic/claude-sonnet-5-5"})
     assert policy.cloud_route(store.conn) == "anthropic/claude-sonnet-5-5"
+    monkeypatch.setattr(gateway, "load_routes", lambda conn: {"chat": "openai/gpt-4o", "agent": "mlx/local"})
+    assert policy.cloud_route(store.conn) is None   # Automatic, neither side: the older order's chat model is local here
+    monkeypatch.setattr(gateway, "load_routes", lambda conn: {"ni": "openai/gpt-4o"})
+    assert policy.cloud_route(store.conn) == "openai/gpt-4o"   # the older order's model, as Settings reports it
+    monkeypatch.setattr(gateway, "load_routes", lambda conn: {"chat": "mlx/local"})
+    assert policy.cloud_route(store.conn) is None
+
+
+def text_call(name: str, prose: str = "", **args) -> dict:
+    """A reply the Claude Code route gives: the tool call as a fenced JSON block in the text (``claudecli``)."""
+    body = (prose + "\n" if prose else "") + "```json\n" + json.dumps({"name": name, "arguments": args}) + "\n```"
+    return text_reply(body)
+
+
+def test_a_text_protocol_run_ends_at_propose_card_like_a_structured_one(monkeypatch) -> None:
+    """The Claude Code route returns tool calls as fenced JSON text; the loop reads them, runs each in code, and
+    echoes the call back without the fenced text (the transport renders the call itself)."""
+    ctx, net = listed(monkeypatch)
+    script = Script(text_call("library_search", "Let me look.", query="earthquakes"), text_call("fetch_sample", url=URL),
+                    text_call("try_recipe", draft_spec=DRAFT), text_call("propose_card", draft_spec=DRAFT))
+    out = loop.run_research(ctx, script)
+    assert out.status == "proposed" and out.reasons == []
+    assert [t["tool"] for t in ctx.trace] == ["library_search", "fetch_sample", "try_recipe", "propose_card"]
+    assert [c["url"] for c in net.calls] == [URL]
+    echoed = [m for m in script.seen[1]["messages"] if m["role"] == "assistant"][-1]
+    assert echoed["content"] == "Let me look." and "```" not in echoed["content"]
+    assert echoed["tool_calls"][0]["function"]["name"] == "library_search"
+
+
+def test_text_calls_take_only_research_tools_and_strict_json() -> None:
+    assert loop._text_calls('```json\n{"name": "fetch_sample", "arguments": {"url": "https://a.example/x"}}\n```') == [
+        {"id": "text_0", "name": "fetch_sample", "args": {"url": "https://a.example/x"}, "text": True}]
+    assert loop._text_calls('{"tool": "library_search", "parameters": {"query": "q"}}')[0]["name"] == "library_search"
+    assert loop._text_calls('```json\n{"name": "run_shell", "arguments": {"cmd": "rm"}}\n```') == []   # not a research tool
+    assert loop._text_calls('```json\n{"name": "fetch_sample", "arguments": "x"}\n```')[0]["args"] is None   # invalid_args
+    assert loop._text_calls('```json\n{"name": "fetch_sample", "arguments": {bad}\n```') == []
+    assert loop._text_calls("plain prose with no call") == [] and loop._text_calls(None) == []
+    assert loop._text_calls("```json\n" + "[" * 100 + "```") == []
+    assert loop._calls({"content": "x", "tool_calls": [{"id": "s", "function": {"name": "fetch_sample", "arguments": "{}"}}]})[0]["id"] == "s"
+
+
+def test_text_call_scan_is_bounded_on_a_flood_of_unclosed_fences() -> None:
+    """#565 review: 20,000 unclosed fences in 380 KB took 22 s with a DOTALL ``.*?`` fence; now one pass."""
+    import time
+    flood = ('```json\n{"name": "fetch_sample", "arguments": {"url": "https://a.example/x"' * 20000)
+    started = time.monotonic()
+    assert loop._text_calls(flood) == []
+    assert time.monotonic() - started < 1.0
+    tail = "x" * loop.MAX_TEXT_SCAN + '```json\n{"name": "fetch_sample", "arguments": {"url": "https://a.example/x"}}\n```'
+    assert loop._text_calls(tail) == [], "a call past the scan budget is not read"
+
+
+def test_the_cli_research_seam_sends_no_max_tokens_or_temperature(monkeypatch) -> None:
+    seen: list[dict] = []
+    monkeypatch.setattr(ni_research_flow, "_CHAT", None)   # the gateway path, not an installed seam
+    monkeypatch.setattr(gateway, "chat_with_tools_recorded", lambda conn, purpose, messages, model, tools_, **kw:
+                        seen.append({"model": model, **kw}) or text_reply("hi"))
+    monkeypatch.setattr(gateway, "chat_recorded", lambda conn, purpose, messages, model, **kw:
+                        seen.append({"model": model, **kw}) or text_reply("hi"))
+    store = _store()
+    ni_research_flow._chat_for(store, "claudecode/opus", False)([{"role": "user", "content": "x"}], [{"x": 1}])
+    ni_research_flow._chat_for(store, "anthropic/claude-sonnet-5-5", False)([{"role": "user", "content": "x"}], [{"x": 1}])
+    ni_research_flow._chat_for(store, "mlx/local", True)([{"role": "user", "content": "x"}], None)
+    assert seen[0] == {"model": "claudecode/opus", "timeout": ni_research_flow.RESEARCH_TIMEOUT_S}
+    assert seen[1]["max_tokens"] == ni_research_flow.RESEARCH_MAX_TOKENS
+    assert seen[2]["temperature"] == 0.0
 
 
 # --- the v2 flow ----------------------------------------------------------------------------------------------
