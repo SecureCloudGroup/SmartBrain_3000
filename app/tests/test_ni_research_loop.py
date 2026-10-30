@@ -274,6 +274,10 @@ def test_the_cli_route_is_a_research_tier(monkeypatch) -> None:
     monkeypatch.setattr(gateway, "load_routes", lambda conn: {"chat": "anthropic/claude-sonnet-5-5"})
     assert policy.cloud_route(store.conn) == "anthropic/claude-sonnet-5-5"
     monkeypatch.setattr(gateway, "load_routes", lambda conn: {"chat": "openai/gpt-4o", "agent": "mlx/local"})
+    assert policy.cloud_route(store.conn) is None   # Automatic, neither side: the older order's chat model is local here
+    monkeypatch.setattr(gateway, "load_routes", lambda conn: {"ni": "openai/gpt-4o"})
+    assert policy.cloud_route(store.conn) == "openai/gpt-4o"   # the older order's model, as Settings reports it
+    monkeypatch.setattr(gateway, "load_routes", lambda conn: {"chat": "mlx/local"})
     assert policy.cloud_route(store.conn) is None
 
 
@@ -308,6 +312,17 @@ def test_text_calls_take_only_research_tools_and_strict_json() -> None:
     assert loop._text_calls("plain prose with no call") == [] and loop._text_calls(None) == []
     assert loop._text_calls("```json\n" + "[" * 100 + "```") == []
     assert loop._calls({"content": "x", "tool_calls": [{"id": "s", "function": {"name": "fetch_sample", "arguments": "{}"}}]})[0]["id"] == "s"
+
+
+def test_text_call_scan_is_bounded_on_a_flood_of_unclosed_fences() -> None:
+    """#565 review: 20,000 unclosed fences in 380 KB took 22 s with a DOTALL ``.*?`` fence; now one pass."""
+    import time
+    flood = ('```json\n{"name": "fetch_sample", "arguments": {"url": "https://a.example/x"' * 20000)
+    started = time.monotonic()
+    assert loop._text_calls(flood) == []
+    assert time.monotonic() - started < 1.0
+    tail = "x" * loop.MAX_TEXT_SCAN + '```json\n{"name": "fetch_sample", "arguments": {"url": "https://a.example/x"}}\n```'
+    assert loop._text_calls(tail) == [], "a call past the scan budget is not read"
 
 
 def test_the_cli_research_seam_sends_no_max_tokens_or_temperature(monkeypatch) -> None:

@@ -158,10 +158,13 @@ def _too_deep(text: str, cap: int = MAX_JSON_DEPTH) -> bool:
 
 # the gateway's text tool protocol (``claudecli._tool_instructions``, local models): a fenced JSON object naming
 # the tool and its arguments, the same spellings ``agent._extract_text_tool_calls`` accepts
-_TEXT_CALL_FENCE = re.compile(r"```(?:json|tool_call|tool)?\s*(\{.*?\})\s*```", re.DOTALL)
+# a fence never spans another fence (``[^`]``): an unclosed one is scanned once, not to the end of the text for
+# every opener (#565 review: 20,000 unclosed fences in 380 KB took 22 s with ``.*?``)
+_TEXT_CALL_FENCE = re.compile(r"```(?:json|tool_call|tool)?\s*(\{[^`]*\})\s*```")
 _TEXT_CALLEE_KEYS = ("name", "tool", "function", "tool_call")
 _TEXT_ARGS_KEYS = ("arguments", "parameters", "args")
 MAX_TEXT_CALLS = 8
+MAX_TEXT_SCAN = 65536   # bytes of a reply the call scan reads: a call sits at the top of a reply, never past this
 
 
 def _text_calls(content: object) -> list[dict]:
@@ -169,7 +172,10 @@ def _text_calls(content: object) -> list[dict]:
     JSON object that names a research tool (``schemas.TOOL_NAMES``) becomes a call; strict JSON, bounded, the
     depth cap applied before decoding. Anything else in the text is the reply, not a call."""
     assert isinstance(_TEXT_CALLEE_KEYS, tuple) and MAX_TEXT_CALLS > 0, "the protocol's shape"
-    if not isinstance(content, str) or not any(f'"{k}"' in content for k in _TEXT_CALLEE_KEYS):
+    if not isinstance(content, str):
+        return []
+    content = content[:MAX_TEXT_SCAN]
+    if not any(f'"{k}"' in content for k in _TEXT_CALLEE_KEYS):
         return []
     blocks = _TEXT_CALL_FENCE.findall(content)
     if not blocks and content.strip().startswith("{"):
@@ -220,7 +226,7 @@ def _echo(msg: dict, calls: list[dict]) -> dict:
     assert isinstance(calls, list), "calls required"
     content = str(msg.get("content") or "")
     if any(c.get("text") for c in calls):
-        content = _TEXT_CALL_FENCE.sub("", content).strip()
+        content = _TEXT_CALL_FENCE.sub("", content[:MAX_TEXT_SCAN]).strip()
     return {"role": "assistant", "content": content,
             "tool_calls": [{"id": c["id"], "type": "function",
                             "function": {"name": c["name"], "arguments": json.dumps(c["args"] or {}, sort_keys=True)}}

@@ -166,16 +166,33 @@ def test_no_route_at_all_fails_honestly_before_any_call(monkeypatch) -> None:
     assert ni_master.reason_for("failed", out["error"]).startswith("No model is routed for building cards")
 
 
-def test_a_provider_no_side_takes_builds_through_the_older_order_and_the_decline_names_the_missing_model(monkeypatch) -> None:
-    """A build still runs on an explicit ni route of any provider (the older order), but research takes only an
-    Anthropic, Claude Code or local model: the ask ends declined and its line says so, never "no source answers
-    this"; the paste box stays one tap away."""
-    research = _Research([])
+def test_a_provider_no_side_takes_builds_and_researches_through_the_older_order(monkeypatch) -> None:
+    """Automatic with neither side routed: the older order's model (an explicit ni route of any provider) runs the
+    build AND the research, under the one consent, exactly as the Settings page reports (#565 review)."""
+    research = _Research(_stalls())
     store, item_id, out, built = _drive(monkeypatch, OTHER_CLOUD, research)
-    assert set(built) == {"openai/gpt-4o"} and research.models == []
-    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"
+    assert set(built) == {"openai/gpt-4o"} and research.models == ["openai/gpt-4o"] * 4
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up"
+    assert ni_flow._model_consent_of(store, item_id, out) == "openai/gpt-4o"
+
+
+def test_research_with_no_model_on_its_side_declines_naming_the_missing_model(monkeypatch) -> None:
+    """The build runs, research cannot (its step was saved as Local while a local model was routed, since
+    removed): the ask ends declined and its line says so, never "no source answers this"; the paste box stays
+    one tap away."""
+    research = _Research([])
+    monkeypatch.setattr(gateway, "load_routes", lambda conn: dict(OTHER_CLOUD))
+    monkeypatch.setattr(gateway, "chat_with_tools_recorded", research.tools)
+    store = _store()
+    dbmod.meta_set(store.conn, "ni_step_models", '{"research": "local"}')
+    item_id = ni_flow.create_shell_item(store, ASK)
+    ni_flow._flow_write(store, item_id, {**ni_flow._make_record(ASK, "intent"), "_looking": LOOKING,
+                                         "_model_consent": "openai/gpt-4o", "_model_consent_web": True})
+    out = ni_flow.run_flow(store, item_id, gateway_call=_intent, fetcher=lambda url: {})
+    assert out["state"] == "declined" and research.models == []
+    assert out["_decline_card"]["reason"] == "no_answering_source"
     line = out["_decline_card"]["line"]
-    assert line.startswith("I can't look for a source: no cloud or local model is routed for research")
+    assert line.startswith("I can't look for a source: no local model is routed for research")
     assert "paste a link" in line and out["_decline_card"]["look"] is False
     assert "pick_source" in ni_flow.board_flow_field(store, item_id, read_only=True)["reopen"]
 

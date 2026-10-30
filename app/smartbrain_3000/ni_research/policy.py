@@ -60,11 +60,16 @@ def web_enabled(conn) -> bool:
 
 
 def cloud_route(conn) -> str | None:
-    """The cloud route research would use: ``ni_models.cloud_model`` (env or meta ``ni_research_model``, else
-    the first ``anthropic/*`` or ``claudecode/*`` on the ni / chat / agent routes). Never a local one."""
+    """The cloud route research would use, from the one rule every step reads (``ni_models.choose``): the cloud
+    model (env or meta ``ni_research_model``, else the first ``anthropic/*`` or ``claudecode/*`` on the ni / chat /
+    agent routes), or on Automatic with neither side routed the older order's model when it is not local (so the
+    Settings page and the run agree, #565 review). Never a local one: that is the local tier's."""
     assert _ENV_MODEL, "the env name"
     assert conn is not None, "conn required"
-    return ni_models.cloud_model(conn)
+    choice = ni_models.choose(conn, "research")
+    if choice.fallback and choice.model and not ni_models.gateway.is_local(choice.model):
+        return choice.model
+    return choice.cloud
 
 
 def choose(setting_: str, cloud: str | None, local: str | None, consent: str | None, use_local: bool,
