@@ -11,6 +11,17 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.27.3] - 2026-10-30
+
+**Upgrading from 0.27.2.** No migration and no change to your cards, sources or settings. This release
+makes the Neural Interface build cards again on two paths that 0.25.0 and 0.27.0 had closed: a Claude
+Code route now runs every step (research included), and Library sources that don't describe their
+answers build through the same checked, held-for-Keep path a pasted link uses. What leaves this
+computer is unchanged in kind: a cloud model still asks on each card before it is used, SmartBrain
+samples only the Library source's own address, and a source that needs your key sends nothing until you
+give or tap the key. The research consent wording and the daily ceilings are the same, so there is no
+new held-out safety run; the 0.27.0 numbers stand.
+
 ### Fixed
 - Neural Interface: cards built, researched and refreshed on a Claude Code route again. Since 0.27.0 the
   research and refresh steps accepted only an Anthropic (API key) route, so an install whose ni / chat /
