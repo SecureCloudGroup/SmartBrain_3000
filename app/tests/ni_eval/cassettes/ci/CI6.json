@@ -26,13 +26,45 @@
   }
  ],
  "meta": {
-  "built_by_hand": "research ask: Library row declares no answers; four scripted tool turns",
+  "built_by_hand": "research ask: the Library row declares no answers, so the auto-pick tries it by mapping first (2026-10-30) and the model cannot map it (eight replies: two outer rounds, each with the mapping stage's own retry); the row is dropped and research lands the recipe in four scripted tool turns",
   "model": "scripted",
   "research": "cloud"
  },
  "model": [
   {
    "reply": "{\"kind\": \"external_data\", \"subject\": \"earthquakes\", \"cadence_minutes\": 60, \"wants\": [\"magnitude\", \"place\"], \"threshold\": null, \"display_hint\": \"value\"}",
+   "sha": null
+  },
+  {
+   "reply": "I can't map any of these paths to the asked fields.",
+   "sha": null
+  },
+  {
+   "reply": "I can't map any of these paths to the asked fields.",
+   "sha": null
+  },
+  {
+   "reply": "I can't map any of these paths to the asked fields.",
+   "sha": null
+  },
+  {
+   "reply": "I can't map any of these paths to the asked fields.",
+   "sha": null
+  },
+  {
+   "reply": "I can't map any of these paths to the asked fields.",
+   "sha": null
+  },
+  {
+   "reply": "I can't map any of these paths to the asked fields.",
+   "sha": null
+  },
+  {
+   "reply": "I can't map any of these paths to the asked fields.",
+   "sha": null
+  },
+  {
+   "reply": "I can't map any of these paths to the asked fields.",
    "sha": null
   }
  ],

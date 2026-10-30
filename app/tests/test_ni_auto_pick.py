@@ -155,7 +155,7 @@ def test_exhausting_every_row_never_searches_the_web_and_stops_honestly(lib, mon
 
 def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) -> None:  # noqa: F811
     store, fetched = _store(), []
-    wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is a link
+    wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL, format="html")])  # a web page is a link (a data row builds)
     search = _Search()
     item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), search=search)
     assert fetched == [] and out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"
@@ -215,16 +215,29 @@ def test_security_auto_fetch_only_reaches_library_rows_through_the_flow_fetcher(
     assert len(fetched) == 2  # the page browser is guarded by the autouse fixture
 
 
-class _NoSecrets:
-    """A secret store that fails the test on any touch."""
+class _ReadOnlySecrets:
+    """A secret store the auto-pick may only READ (to offer a same-host key for the user's tap, #566 review):
+    any write before Keep fails the test."""
+
+    def __init__(self) -> None:
+        self.reads: list[str] = []
+
+    def list_keys(self) -> list[str]:
+        self.reads.append("list_keys")
+        return []
+
+    def get(self, key: str) -> str | None:
+        self.reads.append(key)
+        return None
 
     def __getattr__(self, name: str):
-        raise AssertionError(f"a secret was touched before Keep: {name}")
+        raise AssertionError(f"a secret was written before Keep: {name}")
 
 
-def test_security_a_row_that_needs_a_key_is_never_fetched_and_no_secret_is_read(lib, monkeypatch) -> None:  # noqa: F811
+def test_security_a_row_that_needs_a_key_is_never_fetched_and_no_secret_is_stored(lib, monkeypatch) -> None:  # noqa: F811
     store, fetched = _store(), []
-    ni_flow.set_secrets_provider(lambda: _NoSecrets())
+    secrets = _ReadOnlySecrets()
+    ni_flow.set_secrets_provider(lambda: secrets)
     monkeypatch.setattr(ni_flow, "_fetch_with_access",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("keyed fetch before Keep")))
     try:
@@ -233,7 +246,9 @@ def test_security_a_row_that_needs_a_key_is_never_fetched_and_no_secret_is_read(
     finally:
         ni_flow.set_secrets_provider(None)
     assert fetched == [] and out["state"] == "awaiting_access"  # pauses for access exactly as a tap does
-    assert out["source_url"] == _RATES_URL and (ni_flow._flow_read(store, item_id) or {})["_access"]["key"]
+    access = (ni_flow._flow_read(store, item_id) or {})["_access"]
+    assert out["source_url"] == _RATES_URL and access["key"] and not access.get("reuse")  # no key of theirs to offer
+    assert all(r == "list_keys" or r.startswith(f"ni:{item_id}:") for r in secrets.reads), secrets.reads
     # a contact-email row is the same: nothing is sent until the user gives it
     wrap = _Wrap(lib, [_row("fx-rates", _RATES_URL, needs_contact=True)])
     _item2, out2 = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), request="SEC filings for Apple")

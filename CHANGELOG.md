@@ -26,6 +26,15 @@ to know when a release changes behavior.
   paste box, instead of claiming that no source answers the ask.
 - Settings: **Neural Interface steps** refuses to save Cloud or Local for a step when nothing is routed on
   that side (the step would silently have no model), and says which route to set.
+- Neural Interface: cards build again from Library sources that don't describe their answers, including
+  stock and company quotes. Since 0.25.0 such a source was offered only as a link, and in the current
+  Library that is 97% of the sources (every quote source among them): "NVDA stock price every 30 minutes"
+  could not build without a pasted address. A data source (JSON, CSV, a feed, XML, text) without declared
+  answers now builds the way a pasted link does: SmartBrain samples it, maps the reading, runs the same
+  checks as every other build and holds the card for your Keep. Sources that describe their answers are
+  still tried first; web pages are still links. A source that needs your key asks for it on the card before
+  anything is fetched, as it did before 0.25.0, and offers a key you gave another card for the same site.
+  Research treats a keyed Library source as one you can bring your key to ("Use my key") instead of skipping it.
 
 ## [0.27.2] - 2026-10-27
 

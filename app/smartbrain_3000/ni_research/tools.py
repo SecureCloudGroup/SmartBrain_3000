@@ -84,6 +84,13 @@ def fetch_sample(ctx: ResearchCtx, url: str) -> dict:
         return _done(ctx, "fetch_sample", url, error("provenance", why))
     info = ctx.urls.get(normal_url(url)) or {}
     if info.get("blocked"):
+        if info.get("keyed") and url.startswith("https://"):
+            # a keyed Library row is a key wall like any other (P3): the run reads no key, the card offers
+            # Use my key after it (2026-10-30: it used to be refused outright, so no keyed row ever built)
+            if url not in ctx.key_walls and len(ctx.key_walls) < MAX_KEY_WALLS:
+                ctx.key_walls.append(url)
+            return _done(ctx, "fetch_sample", url,
+                         error("needs_key", "the source asks for a key; the user can add theirs after this run"))
         return _done(ctx, "fetch_sample", url, error("needs_access", "this source needs a key or contact email"))
     out = ctx.spend_fetch()
     if out is not None:
@@ -231,7 +238,7 @@ def library_search(ctx: ResearchCtx, query: str) -> dict:
         blocked = bool(row.get("needs_key") or row.get("needs_contact"))
         ctx.record(row["url"], "library", format=row.get("format"), scope=row.get("scope"),
                    title=one_line(row.get("title") or "", 120), blocked=blocked, query=query.strip(),
-                   page=row.get("page"))
+                   page=row.get("page"), keyed=bool(row.get("needs_key")) and not row.get("needs_contact"))
         found.append({"title": one_line(row.get("title") or "", 120), "provider": one_line(row.get("provider") or "", 80),
                       "url": row["url"], "format": row.get("format"), "scope": row.get("scope"),
                       "tier": row.get("tier"), "needs_access": blocked})
