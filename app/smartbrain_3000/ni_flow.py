@@ -4320,14 +4320,26 @@ def _human_page(record: dict | None, api_urls: set[str]) -> str:
     return ""
 
 
+# the Library formats a row builds from without declared answers: data a program reads, which the mapping path
+# samples and the checks judge; a web page (``html``) is still offered as a link only
+_MAPPING_FORMATS = frozenset({"json", "csv", "feed", "xml", "text"})
+
+
 def _mark_links(lib: object, rows: list[dict]) -> list[dict]:
-    """Ruling 2026-10-05 ("Library cards; web as links"): a row whose source declares its answers builds
-    a card (``answers: True``); any other row is offered only as a link to the page about it (``page``;
-    a row with no such page is dropped). The rows that build come first."""
-    built, links = [], []
+    """Which pick rows build and which are links. A row whose source declares its answers builds from them
+    (``answers: True``); a DATA row without declared answers builds through the sampled mapping path
+    (``answers: None``: the model maps the sample, the build checks judge it, the card is held for Keep), as every
+    Library row did before 0.25.0 (2026-10-30, the NVDA card: the 2026-10-05 ruling made 97% of the pack
+    link-only, every keyed quote row among them, and the checks that ruling lacked exist now); a web page, or a
+    row with no readable format, is offered only as a link to the page about it (``answers: False``, ``page``;
+    one with no such page is dropped). Declared rows first, then mapping rows, then links."""
+    declared, mapping, links = [], [], []
     for row in rows:  # bounded: locate's few rows
         if _library_answers(row["source_id"]):
-            built.append({**row, "answers": True})
+            declared.append({**row, "answers": True})
+            continue
+        if str(row.get("format") or "json") in _MAPPING_FORMATS:
+            mapping.append({**row, "answers": None})
             continue
         try:
             record = lib.get(row["source_id"])
@@ -4338,7 +4350,7 @@ def _mark_links(lib: object, rows: list[dict]) -> list[dict]:
         page = _human_page(record, api)
         if page:
             links.append({**row, "answers": False, "page": page})
-    return built + links
+    return declared + mapping + links
 
 
 def _library_rows(cands: list[dict]) -> list[dict]:
@@ -5694,9 +5706,10 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
     # whose answers don't fit this response, moves on (next source, else the links); never the mapping.
     answered = None if remap else _try_answers_build(store, item_id, request, intent, url, sample,
                                                       call_model, fetch_now, do_fetch)
-    if answered is None and picked:
-        why = ("didn't fit its declared answers" if _library_answers(str(live.get("_library_source") or ""))
-               else "doesn't declare its answers")
+    if answered is None and picked and _library_answers(str(live.get("_library_source") or "")):
+        # a source that declares its answers builds only from them; one without goes on to the mapping below
+        # (2026-10-30: the sampled mapping with its checks, held for Keep, as before the 2026-10-05 ruling)
+        why = "didn't fit its declared answers"
         moved = _move_on(store, item_id, pick_url, why)
         return moved if moved is not None else _end(
             store, item_id, "source_cant_answer", f"{live.get('_library_provider') or 'the source'} {why}")
@@ -5752,8 +5765,8 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                         fetch_now=fetch_now, fit=fit, query=answered.get("query"),
                         # v2: a source SmartBrain picked itself is held for the user's Keep (``auto``)
                         path="auto" if live.get("_auto_picked") else "declared")
-    # The model mapping path below now serves only a link the user pasted (held for their YES, §33)
-    # and a Fix / remap of an existing card — a tapped Library row never reaches it (above).
+    # The model mapping path below: a link the user pasted (held for their YES, §33), a Fix / remap of an
+    # existing card, and a Library row without declared answers (tapped or auto-picked; held for Keep).
     def misfit(stage: str, message: str) -> dict:
         # a source the mapping can't read for this ask hands over to the next row of the pick, as a
         # refusal does (live 2026-10-04: one web row's mapping error ended "pollen count in Atlanta"

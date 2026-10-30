@@ -148,12 +148,17 @@ def test_the_previewed_endpoint_and_library_rows_are_legal_origins(monkeypatch) 
     assert len(net.calls) == 1
 
 
-def test_a_keyed_library_row_is_not_fetched(monkeypatch) -> None:
+def test_a_keyed_library_row_is_not_fetched_but_is_a_key_wall(monkeypatch) -> None:
+    """The run reads no key (nothing is sent); a keyed row is remembered as a key wall so the card can offer
+    Use my key after the run (2026-10-30: it used to be refused outright, so no keyed Library row ever built)."""
     net = Net(monkeypatch, {})
-    ctx = _ctx(FakeLibrary([_row("https://keyed.example.org/a", needs_key={"param": "k"})]))
-    assert tools.library_search(ctx, "q")["candidates"][0]["needs_access"] is True
-    assert tools.fetch_sample(ctx, "https://keyed.example.org/a")["error"] == "needs_access"
-    assert net.calls == []
+    ctx = _ctx(FakeLibrary([_row("https://keyed.example.org/a", needs_key={"param": "k"}),
+                            _row("https://contact.example.org/b", needs_contact=True)]))
+    found = tools.library_search(ctx, "q")["candidates"]
+    assert [c["needs_access"] for c in found] == [True, True]
+    assert tools.fetch_sample(ctx, "https://keyed.example.org/a")["error"] == "needs_key"
+    assert tools.fetch_sample(ctx, "https://contact.example.org/b")["error"] == "needs_access"
+    assert ctx.key_walls == ["https://keyed.example.org/a"] and net.calls == []
 
 
 # --- budgets ----------------------------------------------------------------------------------------------

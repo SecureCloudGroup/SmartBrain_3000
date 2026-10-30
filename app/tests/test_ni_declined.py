@@ -125,7 +125,7 @@ def _drive_no_ready_source(lib_fixture, monkeypatch):
 
 
 def _drive_no_source_research_off(lib_fixture, monkeypatch):
-    wrap = _Wrap(lib_fixture, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is only a link
+    wrap = _Wrap(lib_fixture, [_row("no-answers", _QUAKE_URL, format="html")])  # a web page is only a link
     return _run(_store(), wrap, monkeypatch, _fetcher([], {}), looking=True)[1]
 
 
@@ -150,7 +150,9 @@ def _drive_compare_refused_at_build(lib_fixture, monkeypatch):
 
 def _drive_source_cant_answer(lib_fixture, monkeypatch):
     store = _store()
-    item_id = _picked(store, lib_fixture, monkeypatch, source="no-answers")  # a source that declares no answers
+    item_id = _picked(store, lib_fixture, monkeypatch)  # a tapped source whose declared answers don't fit the response
+    monkeypatch.setattr(ni_flow, "build_from_answers",
+                        lambda *a, **k: (_ for _ in ()).throw(ValueError("a cell is missing from every row")))
     return ni_flow._sample_and_map(store, item_id, "NYC weather", {"kind": "external_data", "wants": ["temp"]},
                                    WEATHER_URL, _model, lambda _u: {"current": {"temperature_2m": 70}})
 

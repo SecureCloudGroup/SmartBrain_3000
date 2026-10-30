@@ -401,9 +401,11 @@ How a card comes to life:
    While it works the card shows its progress, with a **Cancel** button. Sources
    that work without a key come first; one that needs a free key from its
    provider (or, for the SEC and BLS, your contact email) is tried last and the
-   card asks you for it before anything is fetched. Only a Library source that
-   describes its answers (which of its values answer which questions) builds a
-   card. When nothing ready answers, the card says so at once — *"No ready
+   card asks you for it before anything is fetched. A Library source that
+   describes its answers (which of its values answer which questions) builds the
+   card from them; a data source that doesn't is sampled and mapped the way a
+   pasted link is, checked the same way, and held until you tap Keep. A web page
+   is only ever a link. When nothing ready answers, the card says so at once — *"No ready
    source answers this yet"* — and offers **Keep looking**. Keep looking lets a
    cloud model you allow research a source (see the privacy page for what that
    sends): now, then again over the next two weeks, less often each time, and

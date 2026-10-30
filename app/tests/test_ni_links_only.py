@@ -1,9 +1,11 @@
-"""Operator ruling 2026-10-05 — "Library cards; web as links."
+"""Which pick rows build and which are links (ruling 2026-10-05, narrowed 2026-10-30).
 
-Cards are built only from SmartBrain Library sources that DECLARE their answers. Web search results and
-Library sources without declared answers (harvested datasets) are offered as LINKS — named for what they
-are, nothing read off them, never built from (the pick route refuses them, the flow never builds them).
-A link the user PASTES still builds a page card that waits for their YES (§33).
+A Library source that DECLARES its answers builds from them. A DATA source without declared answers builds through
+the sampled mapping path with its checks, held for the user's Keep (2026-10-30, the NVDA card: the 2026-10-05 rule
+had made 97% of the pack link-only). Web search results and Library rows that are web pages, or have no readable
+format, are offered as LINKS — named for what they are, nothing read off them, never built from (the pick route
+refuses them, the flow never builds them). A link the user PASTES still builds a page card that waits for their
+YES (§33).
 """
 
 from __future__ import annotations
@@ -51,9 +53,9 @@ def _record(sid: str, *, answers: list | None = None, docs: str = "", home: str 
             "provider": {"name": "Provider", "url": home}}
 
 
-def _cand(sid: str, url: str) -> dict:
+def _cand(sid: str, url: str, fmt: str = "json") -> dict:
     return {"source_id": sid, "title": f"{sid} name", "host": url.split("/")[2], "url": url,
-            "provider": "Provider", "authority": "official", "label": "", "choice": False}
+            "provider": "Provider", "authority": "official", "label": "", "choice": False, "format": fmt}
 
 
 class _Lib:
@@ -89,8 +91,9 @@ def _wire(monkeypatch, lib_double: _Lib | None, search: _Search | None) -> None:
                         lambda url, **kw: (_ for _ in ()).throw(RuntimeError("no fetch")))
 
 
-def _dataset_lib() -> _Lib:
-    return _Lib([_cand("harvested-gauges", _DATASET_API)],
+def _dataset_lib(fmt: str = "html") -> _Lib:
+    """One harvested dataset row: a web page by default (a link), or a data row (``json``: builds by mapping)."""
+    return _Lib([_cand("harvested-gauges", _DATASET_API, fmt)],
                 {"harvested-gauges": _record("harvested-gauges", docs=_DATASET_PAGE, home="https://data.example.gov",
                                              template=_DATASET_API)})
 
@@ -120,31 +123,48 @@ def _auto(store: nimod.NIStore, monkeypatch, request: str = "river level in Bois
 
 # --- the rows: which build, which are links --------------------------------------------------------
 
-def test_a_library_source_without_declared_answers_is_a_link_to_its_page(monkeypatch) -> None:
+def test_rows_build_from_declared_answers_or_the_mapping_and_pages_are_links(monkeypatch) -> None:
     lib_double = _Lib([], {
         "with": _record("with", answers=[_ANSWER]),
+        "data": _record("data", docs=_DATASET_PAGE, template=_DATASET_API),
+        "feed": _record("feed", docs=_DATASET_PAGE, template=_DATASET_API),
         "docs": _record("docs", docs=_DATASET_PAGE, template=_DATASET_API),
         "api-docs": _record("api-docs", docs=_DATASET_API, home="https://data.example.gov", template=_DATASET_API),
         "spec": _record("spec", docs="https://api.example.org/openapi.json", home="https://example.org"),
         "terms": _record("terms", docs="https://example.org/terms_of_service/", home="https://example.org"),
         "none": _record("none", docs="https://x.example.org/gtfs.zip", home="https://x.example.org/gtfs.zip",
                         template="https://x.example.org/gtfs.zip")})
-    rows = [{"source_id": sid, "url": _DATASET_API, "url_template": _DATASET_API}
-            for sid in ("docs", "with", "api-docs", "spec", "terms", "none")]
+    fmt = {"data": "json", "feed": "feed", "with": "json"}   # every other row is a web page
+    rows = [{"source_id": sid, "url": _DATASET_API, "url_template": _DATASET_API, "format": fmt.get(sid, "html")}
+            for sid in ("docs", "data", "with", "api-docs", "feed", "spec", "terms", "none")]
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: lib_double)
     out = ni_flow._mark_links(lib_double, rows)
-    # the rows that build come first; a page is a person's page — never the API, a spec file or a terms page
+    # declared rows first, then data rows the mapping builds (no page needed), then pages: a person's page —
+    # never the API, a spec file or a terms page
     assert [(r["source_id"], r["answers"], r.get("page")) for r in out] == [
         ("with", True, None),
+        ("data", None, None),
+        ("feed", None, None),
         ("docs", False, _DATASET_PAGE),
         ("api-docs", False, "https://data.example.gov"),
         ("spec", False, "https://example.org"),
         ("terms", False, "https://example.org")]  # "none" has no page a person reads: left off
+    assert ni_flow._buildable(out) == out[:3]
+    assert ni_flow.link_row_for({"_ranked_library": out}, _DATASET_API)["source_id"] == "docs"
+
+
+def test_an_undeclared_data_row_is_tried_by_the_mapping_before_any_decline(monkeypatch) -> None:
+    """2026-10-30: a data row without declared answers is sealed as a row to try (``answers: None``), keyless first;
+    the auto-pick then samples it (``_auto_continue``) instead of listing its page and declining."""
+    _wire(monkeypatch, _dataset_lib("json"), _Search(_WEB))
+    monkeypatch.setattr(ni_flow, "_auto_continue", lambda store, item_id, *a: ni_flow._flow_read(store, item_id))
+    _item_id, out = _auto(_store(), monkeypatch)
+    assert out["state"] == "source" and [(r["answers"], r["url"]) for r in out["_ranked_library"]] == [(None, _DATASET_API)]
 
 
 def test_no_answering_source_declines_with_the_datasets_page_as_a_link_and_never_searches(monkeypatch) -> None:
     search = _Search(_WEB)
-    _wire(monkeypatch, _dataset_lib(), search)
+    _wire(monkeypatch, _dataset_lib(), search)   # a web page: a link, never read
     _item_id, out = _auto(_store(), monkeypatch)
     assert out["state"] == "declined" and search.queries == []  # research off: the web is never searched
     assert out["_decline_card"]["links"] == [
@@ -154,8 +174,8 @@ def test_no_answering_source_declines_with_the_datasets_page_as_a_link_and_never
 
 def test_two_datasets_of_one_provider_list_its_page_once(monkeypatch) -> None:
     home = "https://www.example-agency.gov"
-    lib_double = _Lib([_cand("a", "https://api.example-agency.gov/a.json"),
-                       _cand("b", "https://api.example-agency.gov/b.json")],
+    lib_double = _Lib([_cand("a", "https://api.example-agency.gov/a.json", "html"),
+                       _cand("b", "https://api.example-agency.gov/b.json", "html")],
                       {"a": _record("a", docs="https://example-agency.gov/terms", home=home),
                        "b": _record("b", docs="https://example-agency.gov/legal", home=home)})
     _wire(monkeypatch, lib_double, None)
@@ -171,7 +191,7 @@ def test_a_declared_source_is_tried_first_and_the_web_is_never_searched(monkeypa
     monkeypatch.setattr(ni_flow, "_auto_continue", lambda store, item_id, *a: ni_flow._flow_read(store, item_id))
     _item_id, out = _auto(_store(), monkeypatch)
     assert search.queries == []
-    assert [(r["answers"], r["url"]) for r in out["_ranked_library"]] == [(True, _DECLARED_URL), (False, _DATASET_API)]
+    assert [(r["answers"], r["url"]) for r in out["_ranked_library"]] == [(True, _DECLARED_URL), (None, _DATASET_API)]
 
 
 def test_nothing_found_declines_honestly_and_offers_paste_a_link(monkeypatch) -> None:
@@ -193,7 +213,7 @@ def _never(*_a, **_k):
 
 
 def test_the_flow_never_builds_from_a_link_row(monkeypatch) -> None:
-    _wire(monkeypatch, _dataset_lib(), _Search(_WEB))
+    _wire(monkeypatch, _dataset_lib(), _Search(_WEB))   # the dataset is a web page here: a link
     store = _store()
     item_id = _parked(store, web=_WEB)
     for url in (_WEB[0]["url"], _DATASET_PAGE, _DATASET_API):  # a web page, a dataset's page, its address
@@ -204,12 +224,21 @@ def test_the_flow_never_builds_from_a_link_row(monkeypatch) -> None:
     assert store.get_item(item_id)["spec"].get("_shell") is True  # nothing was built
 
 
-def test_a_tapped_library_row_without_declared_answers_never_reaches_the_mapping(lib, monkeypatch) -> None:  # noqa: F811
+def test_a_tapped_library_row_without_declared_answers_builds_through_the_mapping_held_for_keep(lib, monkeypatch) -> None:  # noqa: F811
+    """2026-10-30 (the NVDA card): a tapped data row the Library has not described builds the way a pasted link
+    does — the model maps the sample, the checks judge the build, and the card waits for the user's Keep."""
     store = _store()
-    item_id = _picked(store, lib, monkeypatch, source="no-answers")  # sealed as a legacy tap would be
-    out = ni_flow._sample_and_map(store, item_id, "NYC weather", {"kind": "external_data", "wants": ["temp"]},
-                                  WEATHER_URL, _never, lambda _u: {"current": {"temperature_2m": 70}})
-    assert out["state"] == "declined", out
+    item_id = _picked(store, lib, monkeypatch, source="no-answers")  # sealed as a tap seals it
+    replies = ['{"temp": "current.temperature_2m"}']
+    model = lambda prompt: replies.pop(0) if replies else '{"serves": true, "gaps": [], "wrong": []}'
+    out = ni_flow._sample_and_map(store, item_id, "NYC weather", {"kind": "external_data", "wants": ["temp"],
+                                                                  "subject": "NYC weather", "display_hint": "value",
+                                                                  "cadence_minutes": 15},
+                                  WEATHER_URL, model, lambda _u: {"current": {"temperature_2m": 70}})
+    assert out["state"] == "ready", out
+    item = store.get_item(item_id)
+    assert item["spec"]["_built_from"]["path"] == "mapping" and nimod.awaits_yes(item), "held for the user's Keep"
+    assert item["spec"]["source"]["url"] == WEATHER_URL
 
 
 def test_declared_answers_that_dont_fit_move_on_never_mapping(lib, monkeypatch) -> None:  # noqa: F811
@@ -242,7 +271,7 @@ def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
 
 
 def _route_pause(client: TestClient, monkeypatch) -> tuple[str, list[dict]]:
-    lib_double = _Lib([_cand("harvested-gauges", _DATASET_API), _cand("gauge-api", _DECLARED_URL)],
+    lib_double = _Lib([_cand("harvested-gauges", _DATASET_API, "html"), _cand("gauge-api", _DECLARED_URL)],
                       {**_dataset_lib().records, "gauge-api": _record("gauge-api", answers=[_ANSWER])})
     _wire(monkeypatch, lib_double, None)
     store = client.app.state.ni

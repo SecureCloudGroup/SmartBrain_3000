@@ -360,7 +360,8 @@ LOOKING = {"since": "2026-10-24T00:00:00+00:00", "runs": 1, "next_at": None}   #
 
 
 def _flow(monkeypatch, library, store=None, intent=None, ask=_ASK, seam=None, looking=True, **seam_kw):
-    """Run the v2 external flow where the Library has only a source that declares no answers (nothing buildable).
+    """Run the v2 external flow where the Library has only a source that declares no answers: the auto-pick tries
+    it by mapping (2026-10-30) and its sample fetch fails here, so the ask goes on to research.
     ``looking``: the card is a standing order (Keep looking, release P2), so research runs; without it the ask ends
     at once as the ``no_ready_source`` decline."""
     store = store or _store()
@@ -374,7 +375,7 @@ def _flow(monkeypatch, library, store=None, intent=None, ask=_ASK, seam=None, lo
     ni_flow._flow_write(store, item_id, {**ni_flow._make_record(ask, "intent"), **({"_looking": LOOKING} if looking else {})})
     out = ni_flow._run_external_flow(store, item_id, ask, {**_INTENT, **(intent or {})}, None,
                                      lambda p: '{"serves": true, "gaps": [], "wrong": []}',
-                                     lambda u: (_ for _ in ()).throw(AssertionError("the auto-pick fetched")))
+                                     lambda u: (_ for _ in ()).throw(RuntimeError("no network for the auto-pick's sample")))
     return store, item_id, out, net
 
 

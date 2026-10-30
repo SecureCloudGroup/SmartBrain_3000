@@ -155,7 +155,7 @@ def test_exhausting_every_row_never_searches_the_web_and_stops_honestly(lib, mon
 
 def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) -> None:  # noqa: F811
     store, fetched = _store(), []
-    wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is a link
+    wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL, format="html")])  # a web page is a link (a data row builds)
     search = _Search()
     item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), search=search)
     assert fetched == [] and out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"
