@@ -321,8 +321,9 @@ def test_a_keyed_undeclared_row_asks_for_the_key_then_builds(monkeypatch) -> Non
 
 
 def test_a_key_the_user_gave_another_card_for_the_host_is_offered_for_one_tap(monkeypatch) -> None:
-    """T's orphaned Alpha Vantage key: a key given to an earlier Library card for the same host is never read
-    before the card asks (no silent copy on an auto pick), but the card offers it, and one tap builds."""
+    """T's orphaned Alpha Vantage key: a key given to an earlier Library card for the same host is never copied
+    on a row the user did not tap (#549 review B1), but the paused card offers it ("use the key you gave for
+    www.alphavantage.co"), and that one tap stores it under this card and builds."""
     store = _store()
     secrets = SecretStore(store.conn, gen_master_key())
     ni.put_credential(secrets, "an-older-card", "api_key", "av-older-key", "www.alphavantage.co")
@@ -331,12 +332,23 @@ def test_a_key_the_user_gave_another_card_for_the_host_is_offered_for_one_tap(mo
     store2, item_id, fetched = _consented(monkeypatch, library, secrets)
     out = ni_flow.run_flow(store2, item_id, gateway_call=_model, fetcher=_fetcher(fetched, {ALPHA: QUOTE}))
     assert out["state"] == "awaiting_access" and out["source_url"] == ALPHA and fetched == []
-    assert ni_flow.missing_access(store2, item_id, secrets) == [], "a Library row's same-host key is reused on the ask"
-    assert json.loads(secrets.get(f"ni:{item_id}:api_key"))["host"] == "www.alphavantage.co"
+    card = ni_flow.board_flow_field(store2, item_id, read_only=True)
+    assert card["access"]["host"] == "www.alphavantage.co" and card["access"]["key"]["reuse"] is True, card["access"]
+    assert secrets.get(f"ni:{item_id}:api_key") is None, "nothing is copied under the card before the user's tap"
+    assert ni_flow.give_access(store2, item_id, secrets, key=None, email=None, reuse=True) == []
+    assert json.loads(secrets.get(f"ni:{item_id}:api_key")) == {"value": "av-older-key", "host": "www.alphavantage.co"}
     out = ni_flow.run_flow(store2, item_id, gateway_call=_model, fetcher=_fetcher(fetched, {ALPHA: QUOTE}),
                            source_url=ALPHA)
     _held_auto_card(store2, item_id, out, ALPHA)
     assert fetched == [ALPHA]
+
+
+def test_a_keyed_row_with_no_key_of_the_users_anywhere_offers_no_reuse(monkeypatch) -> None:
+    store, item_id, fetched = _consented(monkeypatch, _StockLibrary("keyed"))
+    out = ni_flow.run_flow(store, item_id, gateway_call=_model, fetcher=_fetcher(fetched, {}))
+    assert out["state"] == "awaiting_access" and fetched == []
+    card = ni_flow.board_flow_field(store, item_id, read_only=True)
+    assert card["access"]["key"]["reuse"] is False and card["access"]["key"]["place"] is False
 
 
 def test_a_page_row_stays_a_link_and_the_decline_lists_it(monkeypatch) -> None:

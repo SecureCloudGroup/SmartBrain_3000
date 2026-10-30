@@ -3648,7 +3648,8 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
     if known_url and not record.get("_remap") and record.get("_pasted") != known_url \
             and link_row_for(record, known_url) is not None:
         # Ruling 2026-10-05 ("Library cards; web as links"): a page offered as a link never builds a
-        # card — whoever asks (the pick route refuses it too; the live harness never taps one).
+        # card — whoever asks (the pick route refuses it too; the live harness never taps one). Data rows
+        # without declared answers are no longer links (2026-10-30): they build through the mapping.
         return _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
                            note=f"paused: {_host_hint(known_url)} is offered as a link — SmartBrain "
                                 "can't keep a live card from it yet")
@@ -3982,9 +3983,10 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
     """External-data branch: locate → sampling → mapping → assembly → handoff.
 
     A ``known_url`` (the user named or pasted it) is the consent: sample it
-    directly. Otherwise the auto-pick tries the SmartBrain Library sources that
-    declare their answers, then research, then ends on the declined card with
-    the pages that may help as links and the paste box one tap away.
+    directly. Otherwise the auto-pick tries the SmartBrain Library data sources
+    (declared answers first, then the mapping for the undeclared; keyed rows ask
+    for the key), then research, then ends on the declined card with the pages
+    that may help as links and the paste box one tap away.
     """
     assert isinstance(intent, dict), "intent required"
     if known_url:
@@ -4087,11 +4089,15 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
         seal_library_pick(store, item_id, url, row)
         done = int((rec.get("_try") or {}).get("n") or 0)
         mark = {"n": done + 1, "of": done + len(rows), "host": str(row.get("host") or "")[:120]}
-        access = seal_access(store, item_id, url, row)
-        if access is not None:  # keyed rows are last: ask on the card, send nothing
-            _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark)
-            return pause_for_access(store, item_id, url,
-                                    [k for k, on in (("key", access["key"]), ("contact", access["contact"])) if on])
+        if seal_access(store, item_id, url, row) is not None:
+            # keyed rows are last: the card asks, as a tap does (``apply_pick``), and sends nothing before the user
+            # answers. A same-host key given to another card is OFFERED for one tap, never copied on a row the
+            # user did not pick (#549 review B1; #566 review); the card's own key (given, then a NO moved on to
+            # another row of the same host) lets the build go on.
+            missing = missing_access(store, item_id, _resolve_secrets_store(), copy=False)
+            if missing:
+                _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark)
+                return pause_for_access(store, item_id, url, missing)
         _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark, _pick_url=url,
                     note=f"trying {mark['host']} ({mark['n']} of {mark['of']})")
         _audit_auto_pick(item_id, mark["host"], mark)  # the Library fetch the user did not tap for
@@ -4934,11 +4940,13 @@ def seal_access(store: ni.NIStore, item_id: str, url: str, row: dict) -> dict | 
     return access
 
 
-def missing_access(store: ni.NIStore, item_id: str, secrets_store) -> list[str]:
+def missing_access(store: ni.NIStore, item_id: str, secrets_store, *, copy: bool = True) -> list[str]:
     """What the sealed ``_access`` still lacks: "key" and/or "contact". A Library row's key this user already gave
-    another Library card for the SAME host is reused silently (copied under this card): there the host is the
-    provider. Any other same-host key (P3: an address the user or research named, on either side) is only offered,
-    as ``_access.reuse``, for the user's tap (``give_access(reuse=True)``): tenants share hosts (#549 review B1)."""
+    another Library card for the SAME host is reused silently (copied under this card) when the user's own tap
+    picked the row: there the host is the provider. Any other same-host key (P3: an address the user or research
+    named, on either side) is only offered, as ``_access.reuse``, for the user's tap (``give_access(reuse=True)``):
+    tenants share hosts (#549 review B1). ``copy=False`` (the auto-pick, 2026-10-30): no key is copied on a row
+    the user did not tap; the same-host key is offered the same way, and nothing is sent before the tap."""
     access = (_flow_read(store, item_id) or {}).get("_access")
     if not isinstance(access, dict):
         return []
@@ -4946,7 +4954,7 @@ def missing_access(store: ni.NIStore, item_id: str, secrets_store) -> list[str]:
     if access.get("key"):
         placed = access["key"].get("in") is not None
         have = placed and secrets_store is not None and bool(secrets_store.get(f"ni:{item_id}:{KEY_PARAM}"))
-        if not have and secrets_store is not None and placed and not access.get("named"):
+        if copy and not have and secrets_store is not None and placed and not access.get("named"):
             reuse = ni.find_reusable_credential(secrets_store, KEY_PARAM, access["host"])
             if reuse is not None:
                 ni.put_credential(secrets_store, item_id, KEY_PARAM, reuse, access["host"])
@@ -5370,15 +5378,17 @@ def _page_wrong_outlet(url: str, request: str, intent: dict) -> str:
 
 
 def _buildable(rows: list | None) -> list[dict]:
-    """The pick rows a tap builds a card from: Library rows whose source declares its answers (ruling
-    2026-10-05). A row sealed before the ruling carries no mark and counts — the build itself still moves
-    on from a source without declared answers (``_sample_and_map``)."""
+    """The pick rows a tap or the auto-pick builds a card from: Library data rows, whether their source declares
+    its answers (``answers: True``) or not (``None``: the mapping builds it, 2026-10-30). Only rows marked
+    ``False`` by ``_mark_links`` (web pages, no readable format) are left out. A row sealed before the 2026-10-05
+    ruling carries no mark and counts."""
     return [r for r in rows or [] if isinstance(r, dict) and r.get("answers") is not False]
 
 
 def link_row_for(record: dict, url: str) -> dict | None:
-    """The pick row offered only as a LINK (a web page, or a Library source without declared answers) that
-    ``url`` names — its address or its page — else None. A tap on one never builds (ruling 2026-10-05)."""
+    """The pick row offered only as a LINK (a web page, or a Library source with no readable data format) that
+    ``url`` names — its address or its page — else None. A tap on one never builds (ruling 2026-10-05, narrowed
+    2026-10-30: a data source without declared answers builds through the mapping instead)."""
     for row in record.get("_ranked_search") or []:  # bounded: ≤3 sealed rows
         if isinstance(row, dict) and row.get("url") == url:
             return row
@@ -5645,7 +5655,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         web_page = _is_web_page(exc)  # any format: the body (or header) said HTML where data was sealed
         if (not_json or web_page) and picked:
             # C12: a Library row promised its data; a page back is a broken contract, never a page
-            # card (ruling 2026-10-05: a tapped Library row builds only from its declared answers)
+            # card (ruling 2026-10-05: a Library data row builds from its data, declared or mapped, never a page)
             why = "returned a web page, not its data" if web_page else "did not return its data"
             moved = _move_on(store, item_id, pick_url, why)
             return moved if moved is not None else \

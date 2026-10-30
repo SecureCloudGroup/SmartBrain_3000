@@ -45,7 +45,7 @@ def _usable(row: dict) -> bool:
     """A Library row a compare can read: declared answers, no key or contact email, no helper lookup, no clock
     parameter (each address must be exact), a readable format."""
     assert isinstance(row, dict), "row required"
-    return (row.get("answers") is not False and not ni_flow._row_needs_access(row) and not row.get("lookup")
+    return (row.get("answers") is True and not ni_flow._row_needs_access(row) and not row.get("lookup")
             and not row.get("clock_params") and row.get("format", "json") in _FORMATS)
 
 
