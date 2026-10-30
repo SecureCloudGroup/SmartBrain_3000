@@ -17,17 +17,17 @@ to know when a release changes behavior.
 Library gains its first two sources (weather, below). This release makes the Neural Interface build
 cards again on two paths that 0.25.0 and 0.27.0 had closed: a Claude Code route now runs every step
 (research included), and Library sources that don't describe their answers build through the same
-checked, held-for-Keep path a pasted link uses. What leaves this computer is unchanged in kind: a cloud
-model still asks on each card before it is used, SmartBrain samples only the Library source's own
-address, and a source that needs your key sends nothing until you give or tap the key. The research
-consent wording and the daily ceilings are the same, so there is no new held-out safety run; the 0.27.0
-numbers stand.
+checked, held-for-Keep path a pasted link uses. What leaves this computer is unchanged in kind: a
+cloud model still asks on each card before it is used, SmartBrain samples only the Library source's
+own address, and a source that needs your key sends nothing until you give or tap the key. The
+research consent wording and the daily ceilings are the same, so there is no new held-out safety
+run; the 0.27.0 numbers stand.
 
 ### Added
-- Global Library: the first signed pack is published with this release (two Open-Meteo weather sources,
-  the current temperature and today's high and low at a place you give by latitude and longitude, no key
-  needed). It reaches installs that subscribe to the Global Library address; nothing is fetched until a
-  card is made from one of its sources.
+- Global Library: the first signed pack is published with this release (two Open-Meteo weather
+  sources, the current temperature and today's high and low at a place you give by latitude and
+  longitude, no key needed). It reaches installs that subscribe to the Global Library address;
+  nothing is fetched until a card is made from one of its sources.
 
 ### Fixed
 - Neural Interface: cards built, researched and refreshed on a Claude Code route again. Since 0.27.0 the
