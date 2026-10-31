@@ -11,6 +11,7 @@ import copy
 import os
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from types import SimpleNamespace
@@ -254,6 +255,7 @@ def test_a_render_that_finds_the_slot_taken_mid_run_is_a_409_with_the_busy_code(
                           "code": "render_busy"}  # top-level code beside detail (auth.py's no_session shape)
     item = store.get_item(item_id)
     assert item["consecutive_failures"] == 0 and store.list_runs(item_id) == []
+    assert item["last_checked"] is None and item["last_status"] in (None, ""), "no run: as due as it was"
 
 
 def test_a_manual_run_on_an_unavailable_engine_keeps_its_shape_and_gains_the_code(client) -> None:
@@ -464,7 +466,15 @@ def test_the_startup_sweep_ends_a_stray_engine_by_its_executable_path(tmp_path) 
     engine_dir = tmp_path / "browsers" / "obscura" / "9.9.9"
     engine_dir.mkdir(parents=True)
     stray_exe = engine_dir / "obscura"
-    shutil.copy2(os.path.realpath(shutil.which("sleep")), stray_exe)
+    # copy, not copy2: macOS marks /bin/sleep ``restricted`` and refuses that flag on the copy (EPERM), so on T's
+    # Mac this test stopped in its setup and the sweep went untested on the platform it runs on (2026-10-31)
+    shutil.copy(os.path.realpath(shutil.which("sleep")), stray_exe)
+    if sys.platform == "darwin":
+        # ...and macOS SIGKILLs a system binary started from anywhere but its own place (exit 137 on T's Mac), so
+        # the stray was gone before the sweep looked. An ad-hoc signature makes the copy an ordinary program.
+        if shutil.which("codesign") is None:
+            pytest.skip("codesign is not on PATH: a copied system binary can't run on this Mac")
+        subprocess.run(["codesign", "-f", "-s", "-", str(stray_exe)], check=True, capture_output=True, timeout=30)
     stray = subprocess.Popen([str(stray_exe), "30"])
     bystander = subprocess.Popen([shutil.which("sleep"), "30"])
     try:
@@ -472,6 +482,7 @@ def test_the_startup_sweep_ends_a_stray_engine_by_its_executable_path(tmp_path) 
             if stray.pid in proc.stray_engines(str(tmp_path / "browsers")):
                 break
             time.sleep(0.02)
+        assert stray.poll() is None, f"the stray engine runs before the sweep (it exited {stray.returncode})"
         assert proc.sweep_strays(str(tmp_path / "browsers")) == 1
         assert stray.wait(timeout=5) == -9
         assert bystander.poll() is None

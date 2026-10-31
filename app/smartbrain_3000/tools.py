@@ -1556,9 +1556,14 @@ def _derive_ni_paths(ctx: ToolContext, args: dict) -> dict:
 
     Deterministic replacement for "the model imagines a path against a response
     shape it has never seen". The sample is walked depth ≤ 6; each leaf yields
-    ``{path, type, example}`` in §4.1 grammar; keys that violate the grammar
-    (spaces, dots, special chars) are reported in ``unaddressable`` so the model
-    knows to pick a different source. Cap 60 candidates, numeric / short-string
+    ``{path, type, example}`` in §4.1 grammar. A key the plain grammar can't spell
+    (a space, a dot, a leading digit, a date: Alpha Vantage's ``"Global Quote"`` /
+    ``"05. price"``) is written as the quoted key the engine resolves
+    (``["Global Quote"]["05. price"]``, ``ni.quote_path_key``), so a source whose
+    field names are sentences still offers its leaves (T's Mac, 2026-10-30: every
+    Alpha Vantage body yielded zero candidates and the row dropped in 0.2 s). Only
+    a key no spelling can carry (a ``"``, a control character, a denied name) is
+    reported in ``unaddressable``. Cap 60 candidates, numeric / short-string
     leaves come first (they are the useful ones for scene binding).
 
     Sample may be a JSON object / list OR a JSON STRING supplied through the
@@ -1674,13 +1679,21 @@ def _walk(node: object, path: str, *, depth: int, out: list, dead: list) -> bool
 
 def _walk_dict(current: dict, cur_path: str, cur_depth: int,
                stack: list, dead: list) -> None:
-    """Enqueue every key of ``current``; report keys outside the §4.1 key grammar."""
+    """Enqueue every key of ``current``: a plain §4.1 key joins with a dot, any other key is
+    written quoted (``["05. price"]``, the spelling ``ni.parse_path`` resolves); a key no
+    spelling can carry is reported in ``dead``."""
     for key, value in current.items():  # bounded by JSON input size (≤32KB)
-        if not (isinstance(key, str) and ni._KEY_RE.match(key)
-                and key not in ni._DENIED_PATH_KEYS):
+        if not isinstance(key, str) or key in ni._DENIED_PATH_KEYS:
             dead.append(f"{cur_path}.{key}" if cur_path else str(key))
             continue
-        new_path = f"{cur_path}.{key}" if cur_path else key
+        if ni._KEY_RE.match(key):
+            new_path = f"{cur_path}.{key}" if cur_path else key
+        else:
+            try:
+                new_path = cur_path + ni.quote_path_key(key)
+            except ValueError:  # a quote mark or a control character in the key: no spelling
+                dead.append(f"{cur_path}.{key}" if cur_path else str(key))
+                continue
         stack.append((value, new_path, cur_depth + 1))
 
 

@@ -53,6 +53,7 @@ from . import (
     pagegraph,
 )
 from . import ni_fetch as _ni_fetch
+from . import ni_message as _ni_message
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import resolve_lookup
@@ -208,6 +209,15 @@ _DISPLAY_LIST = "list"
 # Regex for list exemplar generalization: ``hits[0].title`` → (``hits``,
 # ``item.title``). Only the FIRST list index is expanded to a repeat root.
 _LIST_EXEMPLAR_RE = re.compile(r"^(.*?)\[0\]\.(.+)$")
+
+
+def _list_exemplar(path: str) -> bool:
+    """A path a list card can repeat over: ``hits[0].title``. A row field spelled with a quoted key
+    (``rows[0].a["b c"]``) is not one yet: the row reader follows plain keys only, so such a pick
+    degrades to the value card instead of a list of empty cells."""
+    assert isinstance(path, str), "path must be a string"
+    match = _LIST_EXEMPLAR_RE.match(path)
+    return bool(match) and '"' not in match.group(2)
 
 # Cadence defaults per §29 intent stage.
 _DEFAULT_CADENCE = 15
@@ -381,15 +391,51 @@ _SHELL_SCENE: dict = {
 }
 
 
+# how many model calls one build may spend, across every row it tries: a healthy row maps in two to four
+# (the mapping, the judge, the fit); a row whose body the mapping cannot read spends up to six before it moves on
+# (T's Mac, 2026-10-30: five calls on a provider's rate-limit sentence), and nothing else stopped a build from
+# spending that on every row of the pick. The row that hits the cap moves on with the reason; the rows left
+# would each need the model, so the build then fails honestly and a retry runs with a fresh budget.
+_BUILD_MODEL_CALLS = 24
+_BUDGET_WHY = "the build's model budget for this ask is spent"
+
+
+class ModelBudgetSpent(ValueError):
+    """Raised by a model call past the build's budget (``ModelBudget``). A ValueError, so every stage that
+    retries or falls through on a model fault (the mapping, the judge, the query planner) handles it as one."""
+
+
+class ModelBudget:
+    """The count of model calls one build has spent against ``_BUILD_MODEL_CALLS``."""
+
+    def __init__(self, cap: int | None = None) -> None:
+        self.cap = cap if cap is not None else _BUILD_MODEL_CALLS  # read at build time, so a test can lower it
+        assert isinstance(self.cap, int) and self.cap > 0, "a positive cap"
+        self.spent = 0
+
+    @property
+    def exhausted(self) -> bool:
+        return self.spent >= self.cap
+
+    def spend(self) -> None:
+        """Count one call; raise ``ModelBudgetSpent`` when the budget is gone (the call is never made)."""
+        if self.exhausted:
+            raise ModelBudgetSpent(f"{_BUDGET_WHY} ({self.cap} calls)")
+        self.spent += 1
+        assert self.spent <= self.cap, "never past the cap"
+
+
 @dataclass(frozen=True)
 class FlowModel:
     """The flow's consented, routed model (``run_flow``): the prompt-string stages (intent, mapping, PRESENT,
     FIT) call it with a prompt; ``chat`` takes role/content messages as the query layer measured them
     (Round 20, Q3b: its call goes through ``chat`` end to end — one user turn of the flattened prompt lost 3
-    of 60 rows live and ran 2.7x slower, §36). ``chat`` None: the prompt seam only (a caller's own model)."""
+    of 60 rows live and ran 2.7x slower, §36). ``chat`` None: the prompt seam only (a caller's own model).
+    ``budget``: the build's model-call budget both transports draw on (None: unbounded, a caller's own model)."""
 
     prompt: Callable[[str], str]
     chat: Callable[[list], str] | None = None
+    budget: ModelBudget | None = None
 
     def __call__(self, prompt: str) -> str:
         assert isinstance(prompt, str), "prompt required"
@@ -825,8 +871,10 @@ def _clip_strings(node: object, depth: int = 0) -> object:
     return node
 
 
-def derive_paths(sample: object) -> list[dict]:
-    """POC-parity: wrap a bare-list root, downsample, then call tools.walker.
+def derive_report(sample: object) -> dict:
+    """The walker's whole report over a sample: ``paths`` (the candidates), ``unaddressable`` (keys no
+    path can spell) and ``truncated``. POC-parity: wrap a bare-list root, downsample, then call
+    tools.walker.
 
     Late import of ``tools`` avoids the ``ni_flow → tools → ni_flow`` cycle at
     module import time — this function is only ever called from inside a flow
@@ -840,7 +888,44 @@ def derive_paths(sample: object) -> list[dict]:
         obj = downsample(obj, list_keep=1)
     result = _sbtools._derive_ni_paths(None, {"sample": obj, "want": "dashboard fields"})
     assert isinstance(result, dict) and "paths" in result, "walker must return {paths, ...}"
-    return list(result["paths"])
+    return {"paths": list(result["paths"]), "unaddressable": list(result.get("unaddressable") or []),
+            "truncated": bool(result.get("truncated"))}
+
+
+def derive_paths(sample: object) -> list[dict]:
+    """The candidate paths of a sample (``derive_report``'s ``paths``)."""
+    return derive_report(sample)["paths"]
+
+
+# a quoted key that is a calendar day (``["2026-10-30"]``): a path through it reads one day's value for ever
+_DATE_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$")
+_DATED_WHY = "files its values under the day's date, which SmartBrain can't follow from day to day yet"
+
+
+def _dated_path(path: str) -> bool:
+    """True when a step of ``path`` is a date key: Alpha Vantage's ``["Time Series (Daily)"]["2026-10-30"]
+    ["4. close"]`` is today's close today and still 2026-10-30's close tomorrow; a card bound to it goes stale
+    silently, so such a pick is refused with the reason, never built."""
+    assert isinstance(path, str), "path must be a string"
+    try:
+        steps = ni.parse_path(path)
+    except ValueError:
+        return False
+    return any(step[0] == "key" and _DATE_KEY_RE.match(str(step[1])) for step in steps)
+
+
+def _undated(cands: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split the candidates into the ones a card can follow and the ones filed under a date."""
+    assert isinstance(cands, list), "candidates required"
+    dated = [c for c in cands if isinstance(c, dict) and _dated_path(str(c.get("path") or ""))]
+    kept = [c for c in cands if c not in dated]
+    assert len(kept) + len(dated) == len(cands), "a split loses no candidate"
+    return kept, dated
+
+
+# The provider-message rule lives in ``ni_message`` (one rule for the build and the politeness layer); the flow
+# and its tests reach it here.
+provider_message = _ni_message.provider_message
 
 
 # ---- stage 4: mapping (M#2, type-filtered menu) --------------------------
@@ -894,19 +979,20 @@ def _is_quantity_want(slug: str) -> bool:
     return any(w in _QUANTITY_WORDS for w in words) and not dated and not _is_text_want(slug)
 
 
-_NUMERIC_TEXT_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_NUMERIC_TEXT_RE = _ni_message.NUMERIC_TEXT_RE
+_SENTENCE_WORDS = 6
 
 
-def _numeric_text(example: object) -> bool:
-    """A sampled string that is really a number ("6.904", "-3", "42") — many APIs and every
-    CSV send numbers as text. Leading zeros ("02134", an id or ZIP) stay text."""
+def _sentence_example(example: object) -> bool:
+    """A sampled string that reads as a sentence (six words or more): a provider's note or a description,
+    never a value a card shows for a want."""
     raw = example
     if isinstance(raw, str) and raw.startswith('"') and raw.endswith('"'):
         raw = raw[1:-1]  # the walker's examples are JSON-encoded
-    if not isinstance(raw, str) or not _NUMERIC_TEXT_RE.fullmatch(raw.strip()):
-        return False
-    digits = raw.strip().lstrip("-")
-    return not (len(digits) > 1 and digits[0] == "0" and digits[1] != ".")
+    return isinstance(raw, str) and len(raw.split()) >= _SENTENCE_WORDS
+
+
+_numeric_text = _ni_message.numeric_text  # one rule with the provider-message reading
 
 
 def _slugify_field_name(raw: str) -> str:
@@ -927,15 +1013,34 @@ def _slugify_field_name(raw: str) -> str:
     return keep[:60]
 
 
+# a key numbered the way Alpha Vantage numbers its fields: ``05. price``, ``1. open``
+_NUMBERED_KEY_RE = re.compile(r"^\d{1,3}[.)]\s+")
+
+
+def _path_tail_key(path: str) -> str:
+    """The last key of a derive path as the source spells it: ``features[0].properties.time`` → ``time``,
+    ``["Global Quote"]["05. price"]`` → ``05. price``, ``rows[0]`` → ``rows``. A string the grammar can't
+    parse falls back to its last dotted piece."""
+    assert isinstance(path, str), "path must be a string"
+    try:
+        steps = ni.parse_path(path)
+    except ValueError:
+        return re.sub(r"\[\d+\]$", "", path.rsplit(".", 1)[-1])
+    for step in reversed(steps):  # bounded by the path's depth
+        if step[0] == "key":
+            return str(step[1])
+    return ""
+
+
 def _path_tail_slug(path: str) -> str:
     """Last key of a derive path, slug-normalized for name comparison.
 
-    ``features[0].properties.time`` → ``time``; ``wind-speed`` → ``wind_speed``.
+    ``features[0].properties.time`` → ``time``; ``wind-speed`` → ``wind_speed``; ``["05. price"]`` → ``price``;
+    ``["07. latest trading day"]`` → ``latest_trading_day``.
     """
     assert isinstance(path, str), "path must be a string"
-    tail = path.rsplit(".", 1)[-1]
-    tail = re.sub(r"\[\d+\]$", "", tail)
-    return tail.lower().replace("-", "_")
+    tail = _NUMBERED_KEY_RE.sub("", _path_tail_key(path)).strip().lower()
+    return re.sub(r"[^a-z0-9]+", "_", tail).strip("_")
 
 
 def _names_match(field: str, tail: str) -> bool:
@@ -969,6 +1074,8 @@ def reconcile_field_types(fields: dict, candidates: list[dict]) -> dict:
         if not isinstance(cand, dict):
             continue
         ctype = cand.get("type")
+        if ctype == "string" and _sentence_example(cand.get("example")):
+            continue  # a sentence (a provider's note, a description) is never the evidence that a want is text
         if ctype in tails and isinstance(cand.get("path"), str):
             tails[ctype].add(_path_tail_slug(cand["path"]))
             if ctype == "string" and _numeric_text(cand.get("example")):
@@ -1135,11 +1242,14 @@ def _verify_mapping(reply: dict, offered: dict, fields: dict) -> None:
 # ---- stage 5: assembly (scenes + pipeline + typed verify) ----------------
 
 def _generalize_list_path(exemplar: str) -> tuple[str, str]:
-    """``hits[0].title`` → (``hits``, ``item.title``)."""
+    """``hits[0].title`` → (``hits``, ``item.title``). A row field spelled with a quoted key is refused
+    (``_list_exemplar``): the row reader follows plain keys only."""
     assert isinstance(exemplar, str), "exemplar required"
     match = _LIST_EXEMPLAR_RE.match(exemplar)
     if not match:
         raise ValueError(f"not a list exemplar path: {exemplar!r}")
+    if '"' in match.group(2):
+        raise ValueError(f"list rows can't follow a quoted key yet: {exemplar!r}")
     return match.group(1), "item." + match.group(2)
 
 
@@ -1259,8 +1369,8 @@ def _column_label(path: str) -> str:
     """A mapped column's header from its source key: ``teamName`` / ``points_total`` read as
     "team name" / "points total" (the user never named these; a raw key is not a header)."""
     assert isinstance(path, str) and path, "path required"
-    tail = path.rsplit(".", 1)[-1]
-    return " ".join(re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", tail).replace("_", " ").lower().split())
+    tail = _NUMBERED_KEY_RE.sub("", _path_tail_key(path)) or path.rsplit(".", 1)[-1]
+    return " ".join(re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", tail).replace("_", " ").replace("-", " ").lower().split())
 
 
 def assemble_from_mapping(mapping: dict, fields: dict, klass: str,
@@ -3722,15 +3832,19 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
         elif _model_consent_of(store, item_id, record) != resolved_model:
             return _ask_model_consent(store, item_id, resolved_model, local, research=True)
 
+    budget = ModelBudget()  # one build's model calls, across every row it tries
+
     def call_prompt(prompt: str) -> str:
         assert isinstance(prompt, str), "prompt required"
         assert isinstance(resolved_model, str) and resolved_model, "a resolved model"
+        budget.spend()
         return call(resolved_model, prompt)
 
     def default_chat(messages: list) -> str:
         """The query layer's turn as measured: system + user messages through the gateway (§36)."""
         assert isinstance(messages, list) and messages, "messages required"
         assert isinstance(resolved_model, str) and resolved_model, "a resolved model"
+        budget.spend()
         temp = None if _claudecli_mod.is_claudecode(resolved_model) else 0.0
         data = _gateway_mod.chat(_cache_system(list(messages)), resolved_model, timeout=_FLOW_MODEL_TIMEOUT_S,
                                  temperature=temp)
@@ -3738,7 +3852,7 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
         return _gateway_mod.completion_text(data)
 
     # a caller's own prompt seam (``gateway_call``) has no messages transport: the query layer then flattens
-    call_model = FlowModel(prompt=call_prompt, chat=default_chat if gateway_call is None else None)
+    call_model = FlowModel(prompt=call_prompt, chat=default_chat if gateway_call is None else None, budget=budget)
 
     # H2 (audit 2026-09-13): a remap flow enters at ``sampling`` and re-uses the
     # item's own frozen source — never re-enter intent/source, never re-locate
@@ -3992,8 +4106,10 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
     if known_url:
         out = _sample_and_map(store, item_id, request, intent, known_url,
                               call_model, do_fetch)
-        if out.get("_auto_picked") and out.get("state") == "source" \
-                and out.get("error") == AWAITING_SOURCE_PICK and _buildable(out.get("_ranked_library")):
+        if out.get("_auto_picked") and out.get("state") == "source" and out.get("error") == AWAITING_SOURCE_PICK:
+            # a resumed auto-pick (the user gave the key) whose row moved on goes on as the loop would: the next
+            # row, else research, else the honest decline. Until 2026-10-31 this went on only while a row was
+            # left, so a last row that moved on left the card in a pick with nothing to tap.
             return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
         return out
     return _auto_pick(store, item_id, request, intent, call_model, do_fetch)
@@ -4067,7 +4183,7 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     assert len(ordered) == len(buildable), "a partition loses no row"
     ordered += [r for r in rows if r not in buildable]  # the link rows ride behind, for the honest stop
     _transition(store, item_id, "source", note="finding the best SmartBrain Library source",
-                _ranked_library=ordered, _ranked_search=None, _auto_picked=True, _try=None)
+                _ranked_library=ordered, _ranked_search=None, _auto_picked=True, _try=None, _waited=None)
     return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
 
 
@@ -4105,6 +4221,14 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
         if out.get("state") != "source":
             return out
     rec = _flow_read(store, item_id) or rec
+    waited = [w for w in rec.get("_waited") or [] if isinstance(w, dict) and w.get("host")]
+    if rec.get("state") == "source" and not rec.get("_cancel") and not _buildable(rec.get("_ranked_library")) \
+            and waited:
+        # a host asked SmartBrain to wait and nothing else built: the source may answer in a minute, so the build
+        # ends with a retry, never a decline nor research past a source that is only busy (2026-10-31)
+        first = waited[0]
+        return _fail(store, item_id, "waited", f"{first['host']} asked SmartBrain to wait"
+                     + (f": {first['said']}" if first.get("said") else " (its rate limit)"))
     if rec.get("state") == "source" and not rec.get("_cancel") and not _buildable(rec.get("_ranked_library")):
         from . import (
             ni_research_flow,  # every row failed: research before the honest stop (v2 only)
@@ -4210,9 +4334,11 @@ def _fetch_with_access(url: str, fmt: str | None, access: dict, item_id: str, po
         raise ni.NIError("secret_missing", "the key store is locked")
     source = {"type": "http_json", "url": url, **_access_source(access, item_id)}
     full_url, headers = ni.http_request_parts(source, item_id, secrets_store)
-    if fmt is None:
-        return _ni_fetch.sniff_fetch(full_url, headers=headers or None, allow_redirects=False, port=port)
-    return _ni_fetch.fetch_parsed(full_url, fmt, headers=headers or None, allow_redirects=False, port=port)
+    # the body never hands the key on (a provider that names it in a sentence: the build keeps a source's words)
+    with _netguard_mod.scrubbing(ni.request_secrets(source, full_url, headers)):
+        if fmt is None:
+            return _ni_fetch.sniff_fetch(full_url, headers=headers or None, allow_redirects=False, port=port)
+        return _ni_fetch.fetch_parsed(full_url, fmt, headers=headers or None, allow_redirects=False, port=port)
 
 
 # the shared fetch-and-parse path (``ni_fetch``, P33); these names stay for the flow's callers and tests
@@ -4953,11 +5079,17 @@ def missing_access(store: ni.NIStore, item_id: str, secrets_store, *, copy: bool
     missing = []
     if access.get("key"):
         placed = access["key"].get("in") is not None
-        have = placed and secrets_store is not None and bool(secrets_store.get(f"ni:{item_id}:{KEY_PARAM}"))
-        if copy and not have and secrets_store is not None and placed and not access.get("named"):
-            reuse = ni.find_reusable_credential(secrets_store, KEY_PARAM, access["host"])
+        # the card's own key counts only when it is bound to THIS row's host: a key the user gave for another row of
+        # the same card (T's Mac, 2026-10-30: the Alpha Vantage key sat on the card while the Finnhub row was tried)
+        # is not this host's key, and the loader refuses it at fetch time — so the card asks, instead of dropping
+        # the row with no fetch
+        # (and a row with no host has no key to count: no stored key, no host, is not a match: review of #569)
+        host = _access_host(access)
+        have = placed and host is not None and _card_key_host(secrets_store, item_id) == host
+        if copy and not have and secrets_store is not None and placed and host and not access.get("named"):
+            reuse = ni.find_reusable_credential(secrets_store, KEY_PARAM, host)
             if reuse is not None:
-                ni.put_credential(secrets_store, item_id, KEY_PARAM, reuse, access["host"])
+                ni.put_credential(secrets_store, item_id, KEY_PARAM, reuse, host)
                 _try_journal(store, item_id, "param_changed",
                              f"reused your existing {access['host']} key for this card")
                 have = True
@@ -4973,10 +5105,41 @@ def missing_access(store: ni.NIStore, item_id: str, secrets_store, *, copy: bool
     return missing
 
 
+def _card_key_host(secrets_store, item_id: str) -> str | None:
+    """The host this card's own stored key is bound to (``ni.put_credential``'s body), or None when the card
+    holds no key or its row can't be read."""
+    assert isinstance(item_id, str) and item_id, "item id required"
+    if secrets_store is None:
+        return None
+    try:
+        raw = secrets_store.get(f"ni:{item_id}:{KEY_PARAM}")
+        body = json.loads(raw) if raw else None
+    except Exception:  # a locked store, a row an older version wrote: no key to count on
+        return None
+    host = body.get("host") if isinstance(body, dict) else None
+    return str(host) if isinstance(host, str) and host else None
+
+
+def _access_host(access: dict) -> str | None:
+    """The sealed access's host as a stored key spells it (``ni._normalize_host``), or None when it has none."""
+    assert isinstance(access, dict), "a sealed access"
+    host = str(access.get("host") or "").strip()
+    return ni._normalize_host(host) if host else None
+
+
+def _patch_access(store: ni.NIStore, item_id: str, **fields: object) -> None:
+    """Rewrite the named fields of the card's sealed ``_access`` (a no-op when none is sealed)."""
+    record = _flow_read(store, item_id) or {}
+    access = record.get("_access")
+    if isinstance(access, dict):
+        record["_access"] = {**access, **fields}
+        _flow_write(store, item_id, record)
+
+
 def _reused_key(store: ni.NIStore, item_id: str, access: dict, secrets_store) -> tuple[str, dict] | None:
     """The same-host key the user gave another card and where it goes, for the user's own tap; None when there is
     none, the card's key was refused, or the lookup faults (a fault asks for the key, never fails the card)."""
-    if secrets_store is None or access.get("refused"):
+    if secrets_store is None or access.get("refused") or _access_host(access) is None:
         return None
     try:
         value = ni.find_reusable_credential(secrets_store, KEY_PARAM, access["host"], named_too=True)
@@ -5129,6 +5292,8 @@ def give_access(store: ni.NIStore, item_id: str, secrets_store, *,
                           str(access["key"].get("prefix") or "") + value, access["host"],
                           named=bool(access.get("named")))
         _try_journal(store, item_id, "param_changed", f"key for {access['host']} added")
+        if access.get("refused"):  # the refusal was of the old key; the new one stands on its own
+            _patch_access(store, item_id, refused=False)
     if email is not None and access.get("contact"):
         ni.set_contact_email(secrets_store, email)
     return missing_access(store, item_id, secrets_store)
@@ -5666,6 +5831,20 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             # that starts serving HTML still fails honestly.
             return _build_page_card(store, item_id, request, intent, url,
                                      call_model, remap=remap)
+        said = ni_polite.waited_words(exc)
+        if said is not None:
+            # the host asked SmartBrain to wait: a 429 / 503, or a 200 that says "slow down" (``ni_polite``: Alpha
+            # Vantage's "1 request per second", T's Mac 2026-10-31, read as "No ready source answers this yet").
+            # Not a verdict on the source: every row of that host goes for this build (one wall for every tenant),
+            # with the host's words, and a build that ends with no card after it ends with a retry (``_waited``).
+            # A pasted link, a Fix or a remap has no other row: it ends with the retry at once.
+            why = "asked SmartBrain to wait" + (f": {said}" if said else " (its rate limit)")
+            if not remap and (_flow_read(store, item_id) or {}).get("_auto_picked"):
+                _note_waited(store, item_id, url, said)
+                moved = _repick_without(store, item_id, pick_url, why=why, host_wide=True)
+                if moved is not None:
+                    return moved
+            return _fail(store, item_id, "waited", f"{_host_hint(url) or 'the source'} {why}")
         if not remap and getattr(exc, "status", None) in (401, 403, 429):  # Library or web row
             # FETCH-F6 (2026-10-04): a 429 / challenge / rate_limited signal is host-wide (every tenant
             # of this host sees the same wall); a plain 401 / 403 drops only this URL — a multi-tenant
@@ -5702,6 +5881,16 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             if moved is not None:
                 return moved
         return _fail(store, item_id, "fetch", f"sample fetch failed: {type(exc).__name__}")
+    message = provider_message(sample)
+    if message is not None:
+        # the source answered with a sentence, not its data (a spent quota, a demo key, a bad symbol): say so and
+        # move on at once — never a model call over a sentence (T's Mac, 2026-10-30: five calls, then the judge)
+        why = f"answered with a message instead of data: {message}"
+        if remap:
+            return _fail(store, item_id, "fetch", f"the source {why}")
+        moved = _move_on(store, item_id, pick_url, why)
+        return moved if moved is not None else _end(
+            store, item_id, "source_cant_answer", f"{live.get('_library_provider') or _host_hint(url) or 'the source'} {why}")
     # S8 (plan D4): a headline ask ("latest news on X", "a brief on Y") over a feed or a list of items lands the
     # brief card - code extracts the headlines, no model. A source whose Library row declares its answers keeps
     # them, except a feed (the brief is the better card for one); a source without them builds the brief
@@ -5777,19 +5966,35 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                         path="auto" if live.get("_auto_picked") else "declared")
     # The model mapping path below: a link the user pasted (held for their YES, §33), a Fix / remap of an
     # existing card, and a Library row without declared answers (tapped or auto-picked; held for Keep).
-    def misfit(stage: str, message: str) -> dict:
+    budget = getattr(call_model, "budget", None)
+
+    def misfit(stage: str, message: str, why: str = "couldn't be read for this ask") -> dict:
         # a source the mapping can't read for this ask hands over to the next row of the pick, as a
         # refusal does (live 2026-10-04: one web row's mapping error ended "pollen count in Atlanta"
-        # FAILED with two rows left); a pasted link or a Fix still fails honestly
-        moved = None if remap else _move_on(store, item_id, pick_url, "couldn't be read for this ask")
-        return moved if moved is not None else _fail(store, item_id, stage, message)
+        # FAILED with two rows left), with the real reason on the record (``why``: what the data was,
+        # not "couldn't be read"); a pasted link or a Fix still fails honestly
+        if budget is not None and budget.exhausted:
+            # the rows left would each need the model too: an honest stop with its own class and line (not a
+            # move-on to the next row), and a retry runs with a fresh budget
+            return _fail(store, item_id, "model_budget",
+                         f"{_BUDGET_WHY} ({budget.spent} calls) at {stage}; retry runs it again")
+        moved = None if remap else _move_on(store, item_id, pick_url, why)
+        return moved if moved is not None else _fail(store, item_id, stage, f"{message} ({why})"[:_MAX_ERROR])
 
     try:
-        cands = derive_paths(sample)
+        report = derive_report(sample)
     except Exception as exc:  # walker errors carry a ValueError message
         return misfit("derive", f"derive failed: {exc}")
+    cands, dated = _undated(report["paths"])
+    if dated and not any(c.get("type") == "number" or _numeric_text(c.get("example")) for c in cands):
+        # every value is filed under a date (a daily series): a card can't follow that yet, and the names left
+        # beside it (a symbol, a time zone) answer no number — say which, never a mapping over them
+        return misfit("derive", "the sample files its values under dates", why=_DATED_WHY)
     if not cands:
-        return misfit("derive", "no candidate paths in sample")
+        if report["unaddressable"]:
+            return misfit("derive", "no addressable paths in sample",
+                          why="names its fields in a way SmartBrain can't address")
+        return misfit("derive", "no candidate paths in sample", why="holds no values SmartBrain can read")
     fields = reconcile_field_types(infer_fields(intent), cands)
     _transition(store, item_id, "mapping", source_url=url,
                 note=f"{len(cands)} candidates; mapping to {sorted(fields)}")
@@ -5827,7 +6032,7 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
         # A9/A11 (case matrix, 2026-09-15): the data decides list-vs-value, not the
         # hint — no ``[N]`` step in the picked paths degrades to the value card.
         if klass == _DISPLAY_LIST and not all(
-            _LIST_EXEMPLAR_RE.match(str(path)) for path in list(mapping.values())[:1]
+            _list_exemplar(str(path)) for path in list(mapping.values())[:1]
         ):
             klass = _DISPLAY_VALUE
             extra = "display_hint 'list' but no list-shaped data; value card"
@@ -7440,6 +7645,20 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
                            note=f"{gone.get('provider') or gone.get('host')} {why}",
                            **{slot: rest or None, other: None}, _access=None, _format=None)
     return None
+
+
+_MAX_WAITED = 3
+
+
+def _note_waited(store: ni.NIStore, item_id: str, url: str, said: str) -> None:
+    """Remember on the record that ``url``'s host asked this build to wait (``said``: its words, may be empty), so
+    a build that then ends with no card ends with a retry (``_auto_continue``). Bounded; one entry a host."""
+    host = _host_hint(url)
+    assert isinstance(said, str), "the host's words, or empty"
+    record = _flow_read(store, item_id) or {}
+    waited = [w for w in record.get("_waited") or [] if isinstance(w, dict) and w.get("host") != host]
+    waited = (waited + [{"host": host[:253], "said": said[:200]}])[-_MAX_WAITED:]
+    _flow_write(store, item_id, {**record, "_waited": waited})
 
 
 def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, *, host_wide: bool = False) -> dict | None:

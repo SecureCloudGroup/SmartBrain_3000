@@ -1,0 +1,28 @@
+{
+  "name": "alphavantage-made-up-key",
+  "host": "www.alphavantage.co",
+  "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&apikey=[redacted]",
+  "key": {
+    "in": "query",
+    "name": "apikey"
+  },
+  "status": 200,
+  "content_type": "application/json",
+  "captured": true,
+  "captured_at": "2026-10-31T12:39:31+00:00",
+  "note": "a made-up key answered with a real quote (first seen 2026-10-31): a quote that answers proves nothing about the key, and no invalid-key sentence has been seen from this provider",
+  "body": {
+    "Global Quote": {
+      "01. symbol": "IBM",
+      "02. open": "258.2800",
+      "03. high": "259.5900",
+      "04. low": "254.7105",
+      "05. price": "257.8100",
+      "06. volume": "5741772",
+      "07. latest trading day": "2026-10-30",
+      "08. previous close": "258.2800",
+      "09. change": "-0.4700",
+      "10. change percent": "-0.1820%"
+    }
+  }
+}

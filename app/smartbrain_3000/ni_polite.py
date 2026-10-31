@@ -9,7 +9,12 @@ One shared object sits behind ``netguard``'s guarded request while an NI fetch r
   A card build someone is waiting on (``waiting()``) instead waits for the bucket to refill, up to
   ``BUILD_WAIT_S`` in all: SmartBrain's own spacing is never a verdict on the source.
 * a per-host pause from 429 / 503 answers, honouring ``Retry-After`` (seconds or HTTP date), capped
-  at ``RETRY_AFTER_CAP_S``.
+  at ``RETRY_AFTER_CAP_S``, and from a 200 whose small JSON body is the host's message that its limit was hit
+  (``ni_message.host_limit``: Alpha Vantage's "1 request per second" and "25 requests per day" sentences), paused for
+  the window the sentence names. Both raise ``host_busy`` with ``WAITED`` in the message and the host's words after
+  it (``waited_words``), and so does every request while that pause holds: a refresh stays due, a build ends with a
+  retry. Inside ``waiting()`` a pause of at most ``BURST_WAIT_S`` (a per-second burst limit, a ``Retry-After: 1``) is
+  waited out once, as the host asked, and the request sent once more.
 * fetch dedupe on the tick: cards on one URL reuse one response for ``DEDUPE_TTL_S`` (third-party
   hosts: the cadence floor) so 50 cards on one URL make one request per interval.
 * the 15 minute cadence floor for third-party hosts (``cadence_floor_minutes``).
@@ -38,7 +43,7 @@ from email.utils import parsedate_to_datetime
 from urllib import robotparser
 from urllib.parse import urlparse
 
-from . import netguard
+from . import netguard, ni_message
 
 CADENCE_FLOOR_MINUTES = 15     # D9: third-party API / page cadence floor
 HOST_BURST = 5                 # requests a host may take at once
@@ -53,6 +58,9 @@ ROBOTS_FAIL_TTL_S = 600.0
 ROBOTS_MAX_BYTES = 512_000
 ALLOWED_PORTS = (80, 443)
 _MAX_HOSTS = 512
+LIMIT_BODY_BYTES = 8192        # a limit message is a sentence: a larger body is data, never parsed here
+WAITED = "host asked us to wait"   # the message of every host_busy the host itself asked for
+BURST_WAIT_S = 5.0             # a host's own pause this short is waited out once inside a build, then asked again
 _MAX_CACHE = 16
 _MAX_CACHED_BYTES = 1_000_000
 _MAX_ROBOTS = 256
@@ -113,13 +121,52 @@ def parse_retry_after(value: object, now: float | None = None) -> float | None:
     return min(RETRY_AFTER_CAP_S, max(RETRY_AFTER_MIN_S, seconds))
 
 
+def body_limit(got: dict) -> tuple[float, str] | None:
+    """``(seconds, the host's words)`` when a 2xx response's small JSON body is the host's message that its limit was
+    hit (``ni_message.host_limit``), else None: a larger body, a non-JSON one or data is never read here."""
+    assert isinstance(got, dict), "a response"
+    content = got.get("content")
+    status = got.get("status")
+    if not isinstance(content, (bytes, bytearray)) or not content or len(content) > LIMIT_BODY_BYTES:
+        return None
+    if isinstance(status, int) and not 200 <= status < 300:
+        return None
+    ctype = str(got.get("content_type") or "").lower()
+    if "json" not in ctype and not ctype.startswith("text/"):
+        return None
+    import json  # local: only small bodies reach here
+
+    try:
+        body = json.loads(netguard.decode_body(bytes(content), ctype))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return ni_message.host_limit(body)
+
+
+def waited_words(exc: BaseException) -> str | None:
+    """The host's own words when ``exc`` is a wait the host asked for, "" when it asked with a status and no
+    words (a 429 / 503), None when the wait was not the host's (SmartBrain's own budget) or not a wait at all."""
+    if getattr(exc, "kind", None) != "host_busy":
+        return None
+    text = str(exc)
+    if not text.startswith(WAITED):
+        return None
+    return text[len(WAITED):].lstrip(": ").strip()
+
+
 class _Host:
-    __slots__ = ("paused_until", "stamp", "tokens")
+    __slots__ = ("paused_until", "said", "stamp", "tokens")
 
     def __init__(self, now: float) -> None:
         self.tokens = float(HOST_BURST)
         self.stamp = now
         self.paused_until = 0.0
+        self.said = ""  # the host's own words for its pause, repeated to every request while it holds
+
+
+def _waited(said: str) -> netguard.FetchError:
+    """The refusal of a request the host asked us to hold, with its words when it gave any."""
+    return netguard.FetchError(f"{WAITED}: {said}" if said else WAITED, kind="host_busy")
 
 
 class Politeness:
@@ -136,14 +183,17 @@ class Politeness:
     def admit(self, host: str) -> None:
         """Take one request from ``host``'s bucket, or raise ``FetchError(kind="host_busy")``. Inside ``waiting()``
         an empty bucket is waited for while this thread's wait allowance lasts; a pause the host asked for
-        (429 / 503) never is: that is the host's word, not SmartBrain's spacing."""
+        (429 / 503, a limit body) never is here: that is the host's word, not SmartBrain's spacing, and the refusal
+        says so, with the host's words (``waited_words``)."""
         assert host, "host required"
         for _ in range(HOST_BURST):  # bounded: each pass sleeps for at least one refill's share, or ends
             need = self._take(host)
             if need == 0.0:
                 return
+            if need < 0.0:
+                raise _waited(self._said(host))
             allowance = float(getattr(self._local, "wait", 0.0) or 0.0)
-            if need < 0.0 or need > allowance:
+            if need > allowance:
                 raise netguard.FetchError("host is over its request budget", kind="host_busy")
             self._local.wait = allowance - need
             _sleep(need)
@@ -169,12 +219,33 @@ class Politeness:
             state.tokens -= 1.0
             return 0.0
 
-    def pause(self, host: str, seconds: float) -> None:
-        """Pause ``host`` for ``seconds`` (already clamped by the caller)."""
+    def pause(self, host: str, seconds: float, said: str = "") -> None:
+        """Pause ``host`` for ``seconds`` (already clamped by the caller); ``said``: the host's words for it."""
         assert host and seconds > 0, "host and a positive pause required"
+        assert isinstance(said, str), "the host's words, or empty"
         with self._lock:
             state = self._hosts.setdefault(host, _Host(_clock()))
-            state.paused_until = max(state.paused_until, _clock() + seconds)
+            until = _clock() + seconds
+            if until >= state.paused_until:
+                state.said = said[:300]
+            state.paused_until = max(state.paused_until, until)
+
+    def _said(self, host: str) -> str:
+        with self._lock:
+            state = self._hosts.get(host)
+            return state.said if state is not None else ""
+
+    def _wait_out(self, seconds: float) -> bool:
+        """Inside ``waiting()`` (a build someone is waiting on), sleep out a pause the host asked for when it is at
+        most ``BURST_WAIT_S`` and within this thread's allowance, charged to it, and say so; False otherwise (a
+        refresh, a longer pause: the host's word stands and the caller is told to wait)."""
+        allowance = getattr(self._local, "wait", None)
+        if allowance is None or seconds > BURST_WAIT_S or seconds > float(allowance):
+            return False
+        self._local.wait = float(allowance) - seconds
+        _sleep(seconds)
+        self._local.slept = float(getattr(self._local, "slept", 0.0) or 0.0) + seconds
+        return True
 
     def _prune(self, now: float) -> None:
         idle = [h for h, s in self._hosts.items() if s.paused_until <= now and s.tokens >= HOST_BURST - 0.5]
@@ -197,19 +268,39 @@ class Politeness:
             if hit is not None:
                 return hit
         self.admit(host)
+        got, pause, refusal = self._ask(host, go)
+        if refusal is not None and self._wait_out(pause):
+            # a build someone is waiting on, and the host asked for a moment only (Alpha Vantage's "1 request per
+            # second", T's Mac 2026-10-31): wait that moment, as asked, and ask once more; never a third time
+            self.admit(host)
+            got, pause, refusal = self._ask(host, go)
+        if refusal is not None:
+            raise refusal
+        if reuse:
+            self._cache_put(key, host, got)
+        return got
+
+    def _ask(self, host: str, go) -> tuple[dict, float, netguard.FetchError | None]:
+        """One request: ``(got, 0.0, None)``, or ``({}, pause, refusal)`` when the host asked us to wait (a 429, a
+        503 with ``Retry-After``, or a 2xx body that is its limit message), the host already paused for ``pause``.
+        Any other refusal raises; a 503 with no ``Retry-After`` still pauses the host but fails this request."""
         try:
             got = go()
         except netguard.FetchError as exc:
             if exc.status in (429, 503):
                 wait = parse_retry_after(exc.retry_after)
-                self.pause(host, wait if wait is not None else RETRY_DEFAULT_S)
+                pause = wait if wait is not None else RETRY_DEFAULT_S
+                self.pause(host, pause)
                 if exc.status == 429 or wait is not None:  # asked to slow down: defer, not fail
-                    raise netguard.FetchError("host asked us to wait", status=exc.status,
-                                              kind="host_busy") from None
+                    return {}, pause, netguard.FetchError(WAITED, status=exc.status, kind="host_busy")
             raise
-        if reuse:
-            self._cache_put(key, host, got)
-        return got
+        limited = body_limit(got)
+        if limited is None:
+            return got, 0.0, None
+        seconds, said = limited  # a 200 that says "slow down" is the host's word, as a 429 is: never cached
+        pause = min(RETRY_AFTER_CAP_S, max(RETRY_AFTER_MIN_S, seconds))
+        self.pause(host, pause, said)
+        return {}, pause, _waited(said)
 
     def _cache_get(self, key: tuple) -> dict | None:
         with self._lock:
@@ -307,8 +398,9 @@ def engaged(port: int | None = None, robots: bool | None = None):
 
 @contextlib.contextmanager
 def waiting(seconds: float = BUILD_WAIT_S):
-    """Run the body (a card build someone is waiting on) so a host over SmartBrain's own budget is waited for, up to
-    ``seconds`` in all on this thread, instead of refused. Refreshes never wait: a busy host defers them. Nested, it
+    """Run the body (a card build, or a run someone tapped, that a person is waiting on) so a host over SmartBrain's
+    own budget is waited for, up to ``seconds`` in all on this thread, instead of refused. The engine's refreshes
+    never wait: a busy host defers them. Nested, it
     never grants more than the allowance left, and what the inner body waits is charged to the outer one. The time
     slept is counted from zero for the outermost span and dropped when it ends, so it never leaks past the build."""
     assert 0.0 <= seconds <= RETRY_AFTER_CAP_S, "a bounded wait"

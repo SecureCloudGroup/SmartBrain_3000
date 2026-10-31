@@ -1,0 +1,28 @@
+{
+  "name": "alphavantage-global-quote",
+  "host": "www.alphavantage.co",
+  "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&apikey=[redacted]",
+  "key": {
+    "in": "query",
+    "name": "apikey"
+  },
+  "status": 200,
+  "content_type": "application/json",
+  "captured": true,
+  "captured_at": "2026-10-31T12:07:17+00:00",
+  "note": "the quote body the pack's alphavantage-quote row serves: numbered, spaced field names, numbers as text",
+  "body": {
+    "Global Quote": {
+      "01. symbol": "IBM",
+      "02. open": "258.2800",
+      "03. high": "259.5900",
+      "04. low": "254.7105",
+      "05. price": "257.8100",
+      "06. volume": "5741772",
+      "07. latest trading day": "2026-10-30",
+      "08. previous close": "258.2800",
+      "09. change": "-0.4700",
+      "10. change percent": "-0.1820%"
+    }
+  }
+}

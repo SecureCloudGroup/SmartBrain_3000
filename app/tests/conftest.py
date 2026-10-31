@@ -61,6 +61,27 @@ def _init_with_desktop_credential(self, *args, sb_auth: bool = True, **kwargs):
 
 _TestClient.__init__ = _init_with_desktop_credential
 
+# Production opens every database through ``db.open_db``, which pins DuckDB's TimeZone to UTC (its cursors inherit
+# the pin: test_data): a TIMESTAMP column holds UTC wall time and the engine reads it back as UTC (``ni._to_utc``).
+# The suite's own databases (``duckdb.connect(":memory:")`` in some 90 files) took the host's zone instead, so on a
+# machine off UTC a test that wrote a time read it back hours off: on T's Mac (America/New_York) the cadence floor
+# test failed, which CI's UTC runners never could (2026-10-31). Every database the suite opens carries the pin.
+import duckdb as _duckdb
+
+_original_duckdb_connect = _duckdb.connect
+
+
+def _connect_like_production(*args, **kwargs):
+    conn = _original_duckdb_connect(*args, **kwargs)
+    try:
+        conn.execute("SET GLOBAL TimeZone = 'UTC';")
+    except _duckdb.Error:
+        pass  # a DuckDB without ICU has no zone but UTC
+    return conn
+
+
+_duckdb.connect = _connect_like_production
+
 
 import pytest
 

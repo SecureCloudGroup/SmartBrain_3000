@@ -11,6 +11,77 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- Neural Interface: cards build from Alpha Vantage, and from every other source whose field names the plain path
+  grammar can't spell. The path walker reported a key with a space, a dot or a leading digit ("Global Quote",
+  "05. price", a date) as unaddressable and offered nothing, so such a source dropped out of the pick in a fraction
+  of a second with no model call (the NVDA card on 0.27.1, 0.27.2 and 0.27.3). The walker now writes those keys as
+  the quoted keys the engine has resolved since 0.26 (`["Global Quote"]["05. price"]`); the field-name comparison,
+  the column labels and the list-row check read that spelling, and a mapped card's pipeline carries it.
+- Neural Interface: a source that answers with a sentence instead of its data (Alpha Vantage refuses its demo key on
+  a real symbol with a 200 OK sentence) moves on at once with the provider's own words as the reason. Before, the
+  model spent five calls trying to map a price out of the sentence before the judge refused. Anything in the
+  sentence that looks like a key or token is redacted before it is shown, kept or read by research.
+- Neural Interface: a source that says "slow down" in a 200 OK body is the host asking SmartBrain to wait, as a 429
+  is, never a verdict on the source. Alpha Vantage answers a second request inside one second with "spreading out
+  your free API requests more sparingly (1 request per second)", and a spent daily quota with a sentence too; a
+  build read the first as "No ready source answers this yet" (seen on T's Mac, 2026-10-31). The host is now paused
+  for the window its sentence names (a second, a minute, an hour for a daily quota). A build someone is waiting on
+  waits out a pause of up to 5 seconds once and asks again (a `Retry-After` of a few seconds too); a pause that
+  holds ends the build failed with Retry and the host's own words, never declined and never researched past, with
+  a line that names the window: a retry before an hourly or daily limit resets ends the same way, and the card says
+  so instead of "Retry later". A
+  kept card's refresh stays due and is never marked failed, so a spent quota no longer runs the card toward broken.
+  While the host's pause holds, every request to it is held back with the host's words.
+- Neural Interface: a refresh you tap waits out a source's one-second limit once, as a build does, then reads the
+  source. On T's Mac the first refresh after Keep came within a second of the card's own first run, Alpha Vantage
+  answered its "1 request per second" sentence, and the card said "the local page browser is busy", with no page
+  browser involved. A source that still can't take the request is now answered as such (code `host_busy`), and a
+  run that never happened leaves the card exactly as due as it was. Before, it stamped the card as checked, so a
+  card waiting on its first check after Keep stayed unconfirmed for a whole cadence. The same holds when the page
+  browser is busy.
+- Neural Interface: the key check compares hosts. A key given on a card for one source (Alpha Vantage) no longer
+  counts as the key for another host's row (Finnhub) on the same card: the card asks for that host's key, instead of
+  fetching with the wrong one and dropping the row when the host-bound loader refused it.
+- Neural Interface: a source that files its values under each day's date (Alpha Vantage's daily series) is refused
+  with that reason, instead of being mapped to one day's value that would never change on the card.
+- Neural Interface: a build resumed after the key was given, whose last source then moved on, goes on to research
+  or to the honest decline; before, it stopped in a source pick with nothing to tap.
+- Neural Interface: one build spends at most 24 model calls across every source it tries; past that it fails with
+  its own reason, and a retry runs with a fresh budget.
+- Neural Interface: a sentence in a sample (a provider's note or description) no longer counts as evidence that a
+  numeric want is text.
+- Privacy: keys stay out of app.log. The HTTP client logged every request's full address at INFO, and a keyed
+  source's address carries the key in its query string. Those request lines are off, and every log line, with the
+  traceback or stack it carries, is redacted of key-bearing query parameters and authorization headers before a
+  handler writes it.
+- Privacy: a source's answer never hands the user's key on. Alpha Vantage answers a spent daily quota (its free key
+  allows 25 requests a day; a card every 30 minutes asks 48) with a sentence that names the key it was sent, and a
+  build keeps a source's words: its reason, History, what the card shows. The sentence reader hid a word shaped like
+  a token, but a key of another shape (all letters, or shorter than 16 characters) went through. Every body that
+  answers a keyed request now has that request's own key removed at the fetch, in every spelling a body could carry
+  it, before the rate-limit reader, the sentence reader, the path walker or a model sees it.
+- Deleting a card drops every secret stored under it, including a key the card asked for on its way to a source it
+  never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
+
+### Added
+- `tools/ni-proof.py` observes one ask on a running SmartBrain over its local API, the way the done gate for a
+  fix requires: it types the ask, answers only what it is told to (the model consent, a key from an environment
+  variable, the YES, one refresh), and writes every state the card passed through, its reading, the model calls
+  per step and the audit rows, as JSON and Markdown. It never prints or writes a key: every line it prints has
+  the run's keys and the token scrubbed, and the report is refused if one is in it. With `--watch MINUTES` it
+  waits for the card's next scheduled run, and a built card whose refresh or scheduled run did not happen does not
+  pass. `tools/ni-scratch.py` runs it against a throwaway app from the checkout with the install's routes copied
+  read-only, its own data folder, and no contact with the install's model gateway.
+- `tools/ni-capture-fixtures.py` records real provider bodies (Alpha Vantage, Finnhub, Open-Meteo) as test
+  fixtures through the app's guarded fetch, keys redacted; `tools/ni-library-rows.py` records the rows the
+  installed Library pack offers for an ask. `app/tests/test_ni_proof_asks.py` replays both through the production
+  fetch path, politeness layer included, on a Claude Code route table, and fails while any provider fixture is
+  still a hand-typed shape. The capture spaces its requests to one host and refuses a body that is not the kind
+  its entry is for (data with named keys, a provider's message, or its limit message), and the test re-checks
+  every committed fixture by the same rule. The first capture showed Alpha Vantage answering a made-up key with a
+  real quote, so the invalid-key sentence the first fixtures assumed is gone: a quote proves nothing about a key.
+
 ## [0.27.3] - 2026-10-30
 
 **Upgrading from 0.27.2.** No migration and no change to your cards, sources or settings; the Global

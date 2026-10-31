@@ -21,12 +21,14 @@ approval and audited.
 from __future__ import annotations
 
 import codecs
+import contextlib
 import ipaddress
+import json
 import socket
 import threading
 import time
-from collections.abc import Callable
-from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
+from collections.abc import Callable, Iterable, Iterator
+from urllib.parse import quote, quote_plus, urldefrag, urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -479,17 +481,82 @@ def set_politeness(obj: object | None) -> object | None:
     return previous
 
 
+# A body answering a request that carries the user's key must not carry that key any further. Alpha Vantage answers
+# a spent daily quota with a 200 sentence naming the key it was sent ("We have detected your API key as <the key>
+# and our standard API rate limit is 25 requests per day", as publicly reported), and a source's words are what a
+# build keeps as its reason (History, the card, its record) and what the politeness hook repeats to every request
+# while the pause holds. ``scrubbing(values)`` names the credential values riding this thread's requests; every body
+# fetched inside it has each one, in each spelling a body could carry it, replaced with ``SCRUBBED`` before anything
+# reads it, the politeness hook included.
+SCRUBBED = "[redacted]"
+SCRUB_MIN_CHARS = 6        # shorter is no key a provider issues, and would hit ordinary text
+_SCRUB = threading.local()
+
+
+@contextlib.contextmanager
+def scrubbing(values: Iterable[str]) -> Iterator[None]:
+    """Inside, every body this thread fetches has each of ``values`` replaced with ``SCRUBBED``. Nests: an inner
+    block adds its values to the outer one's."""
+    previous = getattr(_SCRUB, "forms", ())
+    forms = dict(previous)
+    forms.update(_scrub_forms(values))
+    _SCRUB.forms = tuple(sorted(forms.items(), key=lambda kv: len(kv[0]), reverse=True))
+    try:
+        yield
+    finally:
+        _SCRUB.forms = previous
+
+
+def _scrub_forms(values: Iterable[str]) -> dict[bytes, bytes]:
+    """Each value's spellings in a body (as sent, URL-encoded either way, JSON-escaped, PHP's escaped slash), in
+    UTF-8 and both UTF-16 orders, each with its replacement in the same encoding. A ``Bearer <key>`` header value
+    counts its key alone too."""
+    out: dict[bytes, bytes] = {}
+    for value in values:  # bounded: a request's credentials (a key, at most a few)
+        text = str(value or "").strip()
+        for part in {text, (text.split() or [""])[-1]}:
+            if len(part) < SCRUB_MIN_CHARS:
+                continue
+            escaped = json.dumps(part)[1:-1]
+            for spelled in {part, quote(part, safe=""), quote_plus(part), escaped, escaped.replace("/", "\\/")}:
+                for encoding in ("utf-8", "utf-16-le", "utf-16-be"):
+                    out[spelled.encode(encoding)] = SCRUBBED.encode(encoding)
+    return out
+
+
+def scrub(content: bytes) -> bytes:
+    """``content`` with every value this thread is ``scrubbing`` replaced; unchanged outside a ``scrubbing`` block."""
+    assert isinstance(content, (bytes, bytearray)), "a body"
+    out = bytes(content)
+    for form, replacement in getattr(_SCRUB, "forms", ()):  # bounded: the spellings of a request's credentials
+        if form in out:
+            out = out.replace(form, replacement)
+    return out
+
+
+def _scrubbed(got: object) -> object:
+    """A guarded response with its body scrubbed (``scrub``); anything else as it came."""
+    if not getattr(_SCRUB, "forms", ()) or not isinstance(got, dict):
+        return got
+    content = got.get("content")
+    if not isinstance(content, (bytes, bytearray)):
+        return got
+    clean = scrub(content)
+    return got if clean == content else {**got, "content": clean}
+
+
 def _guarded_get(url: str, allowed_ct: tuple[str, ...], max_bytes: int,
                  deadline_seconds: float | None = None, accept_zip_magic: bool = False,
                  method: str = "GET", content: bytes | None = None,
                  extra_headers: dict | None = None,
                  allow_redirects: bool = True, binary_kind: str | None = None) -> dict:
-    """The guarded request, through the thread's politeness object when one is installed."""
+    """The guarded request, through the thread's politeness object when one is installed. The body is scrubbed of
+    the credentials this thread is ``scrubbing`` before the politeness object or the caller sees it."""
     polite = active_politeness()
 
     def go() -> dict:
-        return _guarded_get_once(url, allowed_ct, max_bytes, deadline_seconds, accept_zip_magic,
-                                 method, content, extra_headers, allow_redirects, binary_kind)
+        return _scrubbed(_guarded_get_once(url, allowed_ct, max_bytes, deadline_seconds, accept_zip_magic,
+                                           method, content, extra_headers, allow_redirects, binary_kind))
 
     if polite is None:
         return go()
