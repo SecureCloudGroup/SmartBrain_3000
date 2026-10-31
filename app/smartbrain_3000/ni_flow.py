@@ -925,35 +925,41 @@ def _undated(cands: list[dict]) -> tuple[list[dict], list[dict]]:
 # a body that is a sentence to the caller, not data: the keys such bodies use, normalized (lower, [a-z0-9] runs)
 _MESSAGE_KEYS = frozenset({"information", "info", "error", "errors", "errormessage", "message", "msg", "note",
                            "notice", "warning", "detail", "details", "status", "reason", "fault", "description"})
-_MESSAGE_CODE_KEYS = frozenset({"code", "errorcode", "status", "statuscode", "success", "ok"})
+_MESSAGE_CODE_KEYS = frozenset({"code", "cod", "errorcode", "status", "statuscode", "success", "ok"})
+# what a provider's message carries beside its sentence that names no data: a request id, a link to its docs
+_MESSAGE_META_KEYS = frozenset({"requestid", "traceid", "documentation", "documentationurl", "moreinfo", "help"})
+_MESSAGE_ANY_KEYS = _MESSAGE_KEYS | _MESSAGE_CODE_KEYS | _MESSAGE_META_KEYS
 _MESSAGE_MAX_LEAVES = 4
 _MESSAGE_MIN_WORDS = 3
 _MESSAGE_GIST_CHARS = 140
 
 
 def _message_leaves(sample: dict) -> list[tuple[str, object]] | None:
-    """The (normalized key, value) leaves of a small object, or None when it is data: a list anywhere, more
-    than ``_MESSAGE_MAX_LEAVES`` leaves, a number outside a code key, or a string that is a number."""
+    """The (normalized key, value) leaves of a body that can only be a provider talking about the request, or None
+    when it is data. Data is: a key that names data (any key outside the message, code and meta keys — ``title``,
+    ``price``, ``indicator``: a status page's ``{"indicator": "none", "description": "All Systems Operational"}``
+    is data), a list, an object nested deeper than one wrapper (``{"status": {"error_code": .., "error_message":
+    ..}}`` is one), more than ``_MESSAGE_MAX_LEAVES`` leaves, or a number (or a number sent as text) outside a code
+    key. (2026-10-31, caught by a live-regression test: the first rule read a sentence under any message-like key,
+    so a page object with a title and a note was taken for a message.)"""
     leaves: list[tuple[str, object]] = []
     stack: list[tuple[object, int]] = [(sample, 0)]
-    for _ in range(64):  # bounded: a message body is tiny; anything bigger is data
+    for _ in range(8):  # bounded: the top object and its wrappers; a body with more objects than that is data
         if not stack:
             return leaves
         node, depth = stack.pop()
-        if isinstance(node, list) or depth > 3:
-            return None
-        if not isinstance(node, dict):
+        if not isinstance(node, dict) or depth > 1:
             return None
         for key, value in node.items():  # bounded by the leaf cap below
             norm = re.sub(r"[^a-z0-9]+", "", str(key).lower())
+            if norm not in _MESSAGE_ANY_KEYS or isinstance(value, list):
+                return None
             if isinstance(value, dict):
                 stack.append((value, depth + 1))
                 continue
-            if isinstance(value, list):
-                return None
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and norm not in _MESSAGE_CODE_KEYS:
-                return None
-            if isinstance(value, str) and _numeric_text(value):
+            numeric = (isinstance(value, (int, float)) and not isinstance(value, bool)) \
+                or (isinstance(value, str) and _numeric_text(value))
+            if numeric and norm not in _MESSAGE_CODE_KEYS:
                 return None
             leaves.append((norm, value))
             if len(leaves) > _MESSAGE_MAX_LEAVES:
@@ -968,9 +974,9 @@ def provider_message(sample: object) -> str | None:
     ``{"Information": "Thank you for using Alpha Vantage! Our standard API rate limit is 25 requests per
     day..."}``, ``{"Error Message": "..."}`` — so no status says anything is wrong, the walker offers the one
     sentence as a string candidate, and the mapping spent five model calls trying to read a price out of it
-    (T's Mac, 2026-10-30). A body is a message when it is a small object of a few string leaves (no list, no
-    number outside a code field, no number sent as text) and one of them sits under a message-like key and reads
-    as a sentence of three words or more. The gist is returned for the reason line, bounded."""
+    (T's Mac, 2026-10-30). A body is a message when every key in it is a message, code or request-id key, at the
+    top or under one wrapper (``_message_leaves``: no key names data), and a leaf under a message key reads as a
+    sentence of three words or more. The gist is returned for the reason line, bounded."""
     if not isinstance(sample, dict) or not sample:
         return None
     leaves = _message_leaves(sample)

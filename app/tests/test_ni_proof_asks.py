@@ -324,8 +324,16 @@ def test_provider_message_tells_a_sentence_from_data() -> None:
     assert ni_flow.provider_message({"status": "ok", "note": "Data under a free license for personal use",
                                      "price": "123.4"}) is None, "a number sent as text makes it data"
     assert ni_flow.provider_message({"status": {"error_code": 429, "error_message": "You've exceeded the Rate Limit."}})
+    assert ni_flow.provider_message({"code": 429, "status": "error",
+                                     "message": "You have run out of API credits for the current minute."})
+    assert ni_flow.provider_message({"cod": "429", "message": "Your account is temporarily blocked"}), "a code as text"
     assert ni_flow.provider_message({"message": "Unauthorized"}) is None, "one word is not a sentence to quote"
     assert ni_flow.provider_message({"rows": [], "message": "no rows matched your query today"}) is None, "a list is data"
+    # a key that names data makes the body data, whatever text sits beside it
+    assert ni_flow.provider_message({"page": {"title": "text only", "note": "no number anywhere"}}) is None
+    assert ni_flow.provider_message({"status": {"indicator": "none", "description": "All Systems Operational"}}) is None
+    assert ni_flow.provider_message({"Global Quote": {}}) is None, "an empty quote is no sentence"
+    assert ni_flow.provider_message({"error": {"error": {"message": "nested three deep is not a message body"}}}) is None
 
 
 # ---- the card's key is for one host ------------------------------------------------------------------------------

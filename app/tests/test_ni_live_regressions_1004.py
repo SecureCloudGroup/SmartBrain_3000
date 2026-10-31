@@ -160,11 +160,12 @@ _WEB = [{"title": "Pollen Count | Atlanta Allergy", "host": "www.atlantaallergy.
          "url": "https://pollentracker.app/atlanta", "evidence": []}]
 
 
-@pytest.mark.parametrize("sample", [
-    {"page": {"title": "text only", "note": "no number anywhere"}},  # mapping: no candidate of the wanted type
-    {},  # derive: no candidate paths at all
+@pytest.mark.parametrize(("sample", "why"), [
+    ({"page": {"title": "text only", "note": "no number anywhere"}},  # mapping: no candidate of the wanted type
+     "couldn't be read for this ask"),
+    ({}, "holds no values SmartBrain can read"),  # derive: no candidate paths at all (its own line since 2026-10-31)
 ])
-def test_a_mapping_misfit_on_a_listed_page_ends_declined_with_the_reason(monkeypatch, sample) -> None:
+def test_a_mapping_misfit_on_a_listed_page_ends_declined_with_the_reason(monkeypatch, sample, why) -> None:
     """The paste box lists a decline's pages as links; the one the user pasted is the source they named. A misfit
     ends on the declined card saying why, never on another page nobody tapped and never a web search."""
     monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", lambda: pytest.fail("searched"))
@@ -178,7 +179,7 @@ def test_a_mapping_misfit_on_a_listed_page_ends_declined_with_the_reason(monkeyp
     out = ni_flow._sample_and_map(store, item_id, "pollen count in Atlanta", intent, _WEB[0]["url"],
                                   lambda _p: "{}", lambda _u: sample)
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "source_cant_answer"
-    assert out["_decline_card"]["line"] == "www.atlantaallergy.com couldn't be read for this ask"
+    assert out["_decline_card"]["line"] == f"www.atlantaallergy.com {why}"
 
 
 def test_a_mapping_misfit_on_a_pasted_link_still_fails_honestly(monkeypatch) -> None:
