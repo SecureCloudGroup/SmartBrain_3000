@@ -8,17 +8,17 @@
   },
   "status": 200,
   "content_type": "application/json",
-  "captured": false,
-  "captured_at": null,
+  "captured": true,
+  "captured_at": "2026-10-31T12:07:17+00:00",
   "note": "the flat quote body the pack's finnhub-quote row serves (needs the user's key)",
   "body": {
-    "c": 181.25,
-    "d": 2.1,
-    "dp": 1.1721,
-    "h": 183.0,
-    "l": 179.4,
-    "o": 180.0,
-    "pc": 179.15,
-    "t": 1761782400
+    "c": 204.64,
+    "d": -9.02,
+    "dp": -4.2217,
+    "h": 209.06,
+    "l": 200.9199,
+    "o": 208.94,
+    "pc": 213.66,
+    "t": 1793390400
   }
 }

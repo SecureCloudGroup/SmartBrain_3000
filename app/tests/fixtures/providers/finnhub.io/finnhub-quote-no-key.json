@@ -5,10 +5,10 @@
   "key": null,
   "status": 401,
   "content_type": "application/json",
-  "captured": false,
-  "captured_at": null,
+  "captured": true,
+  "captured_at": "2026-10-31T12:07:18+00:00",
   "note": "the 401 a keyed endpoint answers without a key: the key wall a card asks on",
   "body": {
-    "error": "You don't have access to this resource."
+    "error": "Please use an API key."
   }
 }

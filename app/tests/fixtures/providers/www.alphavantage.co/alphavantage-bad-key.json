@@ -8,10 +8,21 @@
   },
   "status": 200,
   "content_type": "application/json",
-  "captured": false,
-  "captured_at": null,
+  "captured": true,
+  "captured_at": "2026-10-31T12:07:17+00:00",
   "note": "a 200 OK sentence under a spaced key: an invalid key",
   "body": {
-    "Error Message": "the parameter apikey is invalid or missing. Please claim your free API key on (https://www.alphavantage.co/support/#api-key). It should take less than 20 seconds."
+    "Global Quote": {
+      "01. symbol": "IBM",
+      "02. open": "258.2800",
+      "03. high": "259.5900",
+      "04. low": "254.7105",
+      "05. price": "257.8100",
+      "06. volume": "5741772",
+      "07. latest trading day": "2026-10-30",
+      "08. previous close": "258.2800",
+      "09. change": "-0.4700",
+      "10. change percent": "-0.1820%"
+    }
   }
 }
