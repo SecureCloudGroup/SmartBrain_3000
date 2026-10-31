@@ -9,7 +9,7 @@
   "status": 200,
   "content_type": "application/json",
   "captured": true,
-  "captured_at": "2026-10-31T12:07:17+00:00",
+  "captured_at": "2026-10-31T12:39:31+00:00",
   "note": "a made-up key answered with a real quote (first seen 2026-10-31): a quote that answers proves nothing about the key, and no invalid-key sentence has been seen from this provider",
   "body": {
     "Global Quote": {
