@@ -11,6 +11,14 @@ status and content type, the key's placement (never its value: the URL is writte
 pass while any fixture is still provisional (``captured: false``: the documented shape, written by
 ``--provisional`` so the tests have a body to run against before a capture).
 
+Each entry says what kind of body it is for (``expect``: data carrying named keys, a provider's message, or its
+"slow down" message), read by the app's own rule (``ni_message``); a body of another kind is refused, not written,
+and the test re-checks every committed fixture the same way. Requests to one host are at least ``PACE_S`` apart.
+Both came from the first capture (T's Mac, 2026-10-31): two Alpha Vantage requests inside a second got its
+"1 request per second" sentence in place of the daily series, the tool saved it as ``captured: true``, and only an
+unrelated failing test caught it; and the entry for a bad key expected an error sentence nobody had seen, where
+Alpha Vantage answered the made-up key with a real quote.
+
 Keys: ``--key alphavantage=<key> --key finnhub=<key>`` or the environment (``SB_CAPTURE_KEY_ALPHAVANTAGE``,
 ``SB_CAPTURE_KEY_FINNHUB``); a key is sent only to its own host, and is never printed or written. Alpha Vantage's
 ``demo`` key answers for IBM (its documented example symbol) and is used for the shape captures when no key is given;
@@ -27,24 +35,31 @@ import json
 import os
 import pathlib
 import sys
+import time
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "app"))
 
-from smartbrain_3000 import logredact, netguard  # noqa: E402
+from smartbrain_3000 import logredact, netguard, ni_message  # noqa: E402
 
 REDACTED = "[redacted]"
+PACE_S = 1.5   # between two requests to one host: Alpha Vantage allows one a second
+KINDS = ("data", "message", "limit")
 
 # ---- the catalogue -------------------------------------------------------------------------------------------
 # name, url (with {key} where the key goes), the key's provider ("" for keyless), how it is placed, a note on what
-# the body is for, and the documented shape used until the real body is captured.
+# the body is for, what it must be (``expect``: the status, the kind of body, the key paths data must carry), and the
+# documented shape used until the real body is captured. ``force_demo`` sends the entry's ``demo`` value (the
+# provider's demo key, or a made-up one) instead of the user's key; ``burst`` sends up to that many requests back to
+# back and keeps the first that is what the entry expects (a limit only answers a burst). Capture order is this order.
 CATALOGUE: list[dict] = [
     {"name": "alphavantage-global-quote", "host": "www.alphavantage.co",
      "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&apikey={key}",
      "provider": "alphavantage", "key": {"in": "query", "name": "apikey"}, "demo": "demo",
      "note": "the quote body the pack's alphavantage-quote row serves: numbered, spaced field names, numbers as text",
+     "expect": {"status": 200, "kind": "data", "keys": [["Global Quote", "05. price"]]},
      "provisional": {"Global Quote": {"01. symbol": "IBM", "02. open": "289.5000", "03. high": "292.3800",
                                       "04. low": "287.1100", "05. price": "291.2700", "06. volume": "4213456",
                                       "07. latest trading day": "2026-10-30", "08. previous close": "288.9000",
@@ -53,6 +68,7 @@ CATALOGUE: list[dict] = [
      "url": "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&apikey={key}",
      "provider": "alphavantage", "key": {"in": "query", "name": "apikey"}, "demo": "demo",
      "note": "the daily series the pack's alphavantage-daily row serves: values filed under each day's date",
+     "expect": {"status": 200, "kind": "data", "keys": [["Meta Data"], ["Time Series (Daily)"]]},
      "provisional": {"Meta Data": {"1. Information": "Daily Prices (open, high, low, close) and Volumes",
                                    "2. Symbol": "IBM", "3. Last Refreshed": "2026-10-30", "4. Output Size": "Compact",
                                    "5. Time Zone": "US/Eastern"},
@@ -67,29 +83,49 @@ CATALOGUE: list[dict] = [
      "provider": "alphavantage", "key": {"in": "query", "name": "apikey"}, "demo": "demo", "force_demo": True,
      "note": "a 200 OK sentence instead of data: the demo key on a symbol it does not cover (the same shape as the "
              "spent-quota 'Information' body)",
+     "expect": {"status": 200, "kind": "message"},
      "provisional": {"Information": "The **demo** API key is for demo purposes only. Please claim your free API key "
                                     "at (https://www.alphavantage.co/support/#api-key) to explore our full API "
                                     "offerings. It takes fewer than 20 seconds."}},
-    {"name": "alphavantage-bad-key", "host": "www.alphavantage.co",
+    {"name": "alphavantage-made-up-key", "host": "www.alphavantage.co",
      "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&apikey={key}",
      "provider": "alphavantage", "key": {"in": "query", "name": "apikey"}, "demo": "not-a-real-key-0000",
      "force_demo": True,
-     "note": "a 200 OK sentence under a spaced key: an invalid key",
-     "provisional": {"Error Message": "the parameter apikey is invalid or missing. Please claim your free API key on "
-                                      "(https://www.alphavantage.co/support/#api-key). It should take less than 20 "
-                                      "seconds."}},
+     "note": "a made-up key answered with a real quote (first seen 2026-10-31): a quote that answers proves nothing "
+             "about the key, and no invalid-key sentence has been seen from this provider",
+     "expect": {"status": 200, "kind": "data", "keys": [["Global Quote", "05. price"]]},
+     "provisional": {"Global Quote": {"01. symbol": "IBM", "02. open": "289.5000", "03. high": "292.3800",
+                                      "04. low": "287.1100", "05. price": "291.2700", "06. volume": "4213456",
+                                      "07. latest trading day": "2026-10-30", "08. previous close": "288.9000",
+                                      "09. change": "2.3700", "10. change percent": "0.8204%"}}},
+    {"name": "alphavantage-burst-limited", "host": "www.alphavantage.co",
+     "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&apikey={key}",
+     "provider": "alphavantage", "key": {"in": "query", "name": "apikey"}, "demo": None, "burst": 3,
+     "note": "the 200 OK sentence the user's key gets for a second request inside one second: the host asking "
+             "SmartBrain to wait, never a verdict on the source (first seen 2026-10-31, read as 'No ready source "
+             "answers this yet')",
+     "expect": {"status": 200, "kind": "limit"},
+     # provisional only: the session on T's Mac reported "...spreading out your free API requests more sparingly (1
+     # request per second)..."; the rest is Alpha Vantage's public wording. The capture replaces it.
+     "provisional": {"Information": "Thank you for using Alpha Vantage! Please consider spreading out your free API "
+                                    "requests more sparingly (1 request per second). You may subscribe to any of the "
+                                    "premium plans at https://www.alphavantage.co/premium/ to lift the free key rate "
+                                    "limit (25 requests per day), raise the per-minute rate limit, and completely "
+                                    "remove the daily rate limit."}},
     {"name": "finnhub-quote", "host": "finnhub.io",
      "url": "https://finnhub.io/api/v1/quote?symbol=NVDA&token={key}",
      "provider": "finnhub", "key": {"in": "query", "name": "token"}, "demo": None,
      "note": "the flat quote body the pack's finnhub-quote row serves (needs the user's key)",
+     "expect": {"status": 200, "kind": "data", "keys": [["c"], ["pc"], ["t"]]},
      "provisional": {"c": 181.25, "d": 2.1, "dp": 1.1721, "h": 183.0, "l": 179.4, "o": 180.0, "pc": 179.15,
                      "t": 1761782400}},
     {"name": "finnhub-quote-no-key", "host": "finnhub.io",
      "url": "https://finnhub.io/api/v1/quote?symbol=NVDA",
      "provider": "", "key": None, "demo": None,
      "note": "the 401 a keyed endpoint answers without a key: the key wall a card asks on",
+     "expect": {"status": 401, "kind": "message"},
      "provisional_status": 401, "provisional_content_type": "application/json",
-     "provisional": {"error": "You don't have access to this resource."}},
+     "provisional": {"error": "Please use an API key."}},
     {"name": "open-meteo-forecast", "host": "api.open-meteo.com",
      "url": "https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.01&current=temperature_2m,"
             "relative_humidity_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,"
@@ -97,6 +133,8 @@ CATALOGUE: list[dict] = [
             "&timezone=America%2FNew_York",
      "provider": "", "key": None, "demo": None,
      "note": "the keyless forecast body the Global Library's weather sources read (current + daily blocks)",
+     "expect": {"status": 200, "kind": "data", "keys": [["current", "temperature_2m"], ["daily", "time"],
+                                                        ["daily", "temperature_2m_max"]]},
      "provisional": {"latitude": 40.71, "longitude": -74.01, "generationtime_ms": 0.2, "utc_offset_seconds": -14400,
                      "timezone": "America/New_York", "timezone_abbreviation": "EDT", "elevation": 10.0,
                      "current_units": {"time": "iso8601", "interval": "seconds", "temperature_2m": "°F",
@@ -137,8 +175,63 @@ def key_for(entry: dict, keys: dict[str, str]) -> str | None:
     return keys.get(entry["provider"]) or entry.get("demo")
 
 
-def fetch(entry: dict, keys: dict[str, str]) -> dict:
-    """One guarded fetch of ``entry``: ``{status, content_type, body}``; a 4xx/5xx is recorded, not raised."""
+class Pacer:
+    """At least ``seconds`` between two requests to one host. Alpha Vantage allows one request a second, and the
+    first capture, unpaced, got its "slow down" sentence in place of the daily series (2026-10-31)."""
+
+    def __init__(self, seconds: float = PACE_S, clock=time.monotonic, sleep=time.sleep) -> None:
+        assert seconds >= 0, "a pace"
+        self.seconds, self.clock, self.sleep = float(seconds), clock, sleep
+        self.last: dict[str, float] = {}
+
+    def wait(self, host: str) -> None:
+        """Sleep until ``host`` may take the next request, then count it as sent now."""
+        last = self.last.get(host)
+        if last is not None:
+            gap = self.seconds - (self.clock() - last)
+            if gap > 0:
+                self.sleep(gap)
+        self.last[host] = self.clock()
+
+    def mark(self, host: str) -> None:
+        """Count a request to ``host`` sent now, unpaced (a burst)."""
+        self.last[host] = self.clock()
+
+
+def kind_of(body: object) -> str:
+    """The kind of body by the app's own rule: ``limit`` (the host's "slow down"), ``message`` (any other sentence
+    in place of data) or ``data``."""
+    if ni_message.host_limit(body) is not None:
+        return "limit"
+    return "message" if ni_message.message_sentence(body) is not None else "data"
+
+
+def check(entry: dict, got: dict) -> list[str]:
+    """What makes ``got`` not the body ``entry`` is for: the status, the kind of body (``kind_of``) and each key
+    path a data body must carry. Empty when it is right. Names no value from the body."""
+    expect = entry["expect"]
+    assert expect.get("kind") in KINDS, f"{entry['name']}: an expected kind"
+    problems = []
+    status = int(expect.get("status") or 200)
+    if got.get("status") != status:
+        problems.append(f"HTTP {got.get('status')}, expected {status}")
+    body = got.get("body")
+    kind = kind_of(body)
+    if kind != expect["kind"]:
+        problems.append(f"a {kind} body, expected {expect['kind']}")
+    for path in expect.get("keys") or []:  # bounded: a few paths of a few keys
+        node = body
+        for name in path:
+            if not isinstance(node, dict) or name not in node:
+                problems.append("no " + " / ".join(path))
+                break
+            node = node[name]
+    return problems
+
+
+def fetch(entry: dict, keys: dict[str, str], pacer: Pacer | None = None, *, paced: bool = True) -> dict:
+    """One guarded fetch of ``entry``: ``{status, content_type, body}``; a 4xx/5xx is recorded, not raised.
+    ``pacer`` spaces it from the last request to the host (``paced`` False: a burst, counted but not spaced)."""
     key = key_for(entry, keys)
     if entry.get("key") and not key:
         raise LookupError(f"{entry['name']}: no key for {entry['provider']} (pass --key {entry['provider']}=...)")
@@ -147,6 +240,8 @@ def fetch(entry: dict, keys: dict[str, str]) -> dict:
     if entry.get("key") and entry["key"].get("in") == "header":
         headers = {entry["key"]["name"]: key}
         url = entry["url"].replace("{key}", "")
+    if pacer is not None:
+        (pacer.wait if paced else pacer.mark)(entry["host"])
     try:
         # the guard the flow fetches with: address checks, pinned connection, redirects refused, byte cap
         got = netguard._guarded_get(url, ("application/json", "text/"), netguard._MAX_BYTES,
@@ -156,6 +251,8 @@ def fetch(entry: dict, keys: dict[str, str]) -> dict:
             raise
         # the guard refuses a 4xx before reading it; the refusal's body is the fixture here (a 401's JSON), read
         # once more by the same client, so a test can replay the same wall
+        if pacer is not None:
+            pacer.wait(entry["host"])
         return {"status": exc.status, "content_type": exc.content_type or "", "body": _refusal_body(url, headers)}
     text = netguard.decode_body(got["content"], got["content_type"])
     try:
@@ -176,6 +273,21 @@ def _refusal_body(url: str, headers: dict | None) -> object:
         return response.json()
     except ValueError:
         return response.text[:4000]
+
+
+def capture(entry: dict, keys: dict[str, str], pacer: Pacer, fetcher=None) -> tuple[dict, list[str]]:
+    """``entry``'s body and what is wrong with it (``check``; empty when it is the body the entry is for). A ``burst``
+    entry sends up to that many requests back to back and keeps the first that is right; any other sends one."""
+    fetcher = fetcher or fetch
+    tries = max(1, int(entry.get("burst") or 1))
+    got: dict = {}
+    problems: list[str] = []
+    for n in range(tries):  # bounded: the entry's burst
+        got = fetcher(entry, keys, pacer, paced=n == 0)
+        problems = check(entry, got)
+        if not problems:
+            break
+    return got, problems
 
 
 def write(entry: dict, got: dict, out_dir: pathlib.Path, *, captured: bool, secret: str | None = None) -> pathlib.Path:
@@ -213,7 +325,12 @@ def main() -> int:
         env = os.environ.get(f"SB_CAPTURE_KEY_{entry['provider'].upper()}") if entry.get("provider") else None
         if env and entry["provider"] not in keys:
             keys[entry["provider"]] = env.strip()
+    unknown = sorted(set(args.only) - {e["name"] for e in CATALOGUE})
+    if unknown:
+        print(f"no catalogue entry named {', '.join(unknown)}")
+        return 2
     failures = 0
+    pacer = Pacer()
     for entry in CATALOGUE:  # bounded: the catalogue
         if args.only and entry["name"] not in args.only:
             continue
@@ -221,18 +338,23 @@ def main() -> int:
             got = {"status": int(entry.get("provisional_status") or 200),
                    "content_type": str(entry.get("provisional_content_type") or "application/json"),
                    "body": entry["provisional"]}
+            assert not check(entry, got), f"{entry['name']}: the documented shape is the kind the entry expects"
             path = write(entry, got, args.out, captured=False)
             print(f"provisional {path}")
             continue
         secret = None if entry.get("force_demo") or not entry.get("key") else keys.get(entry["provider"])
         try:
-            got = fetch(entry, keys)
+            got, problems = capture(entry, keys, pacer)
+            if problems:  # not the body this entry is for: nothing is written, the old fixture stays
+                failures += 1
+                print(f"REFUSED    {entry['name']} (HTTP {got.get('status')}): {'; '.join(problems)}")
+                continue
             path = write(entry, got, args.out, captured=True, secret=secret)
         except Exception as exc:  # one provider's refusal never stops the others
             failures += 1
             print(f"FAILED     {entry['name']}: {type(exc).__name__}: {logredact.redact(str(exc))[:200]}")
             continue
-        print(f"captured   {path} (HTTP {got['status']}, {got['content_type']})")
+        print(f"captured   {path} (HTTP {got['status']}, {got['content_type']}, {kind_of(got['body'])})")
     return 1 if failures else 0
 
 

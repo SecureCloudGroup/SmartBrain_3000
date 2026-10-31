@@ -157,7 +157,9 @@ def test_a_build_waits_at_most_its_allowance(wire, monkeypatch) -> None:
     assert sum(slept) <= ni_polite.HOST_REFILL_S
 
 
-def test_a_build_never_waits_out_a_pause_the_host_asked_for(wire, monkeypatch) -> None:
+def test_a_build_never_waits_out_a_long_pause_the_host_asked_for(wire, monkeypatch) -> None:
+    """Only a pause of at most ``BURST_WAIT_S`` is waited out (the tests under "a limit body"); 20 s is the host's
+    word to come back later."""
     slept = _sleeps(wire, monkeypatch)
     url = "https://slow-host.example/api"
     wire.answers[url] = netguard.FetchError("upstream returned HTTP 429", status=429, retry_after="20")
@@ -258,6 +260,153 @@ def test_a_503_without_retry_after_fails_once_but_still_pauses_the_host(wire) ->
         _fetch("https://flaky-host.example/next")
     assert second.value.kind == "host_busy", "the host rests for the default pause"
     assert ni.NIError("host_busy").kind in ni.CAPACITY_KINDS
+
+
+# --- a limit body: a 200 that says "slow down" -------------------------------------------------
+
+def _said(text: str, key: str = "Information") -> dict:
+    import json
+
+    return {"final_url": "", "status": 200, "content_type": "application/json",
+            "content": json.dumps({key: text}).encode("utf-8")}
+
+
+PER_SECOND = "Please consider spreading out your requests more sparingly (1 request per second)."
+PER_MINUTE = "Our standard rate limit is 30 requests per minute; please slow down."
+PER_DAY = "Our standard API rate limit is 25 requests per day."
+
+
+def test_a_limit_body_pauses_the_host_for_its_window_with_its_words_and_is_never_cached(wire) -> None:
+    """A 200 whose body is the host's limit message is the host's word, as a 429 is: the host is paused for the window
+    the sentence names, the refusal carries the host's words (a refresh defers, a build says why), every request
+    while the pause holds is refused the same way without being sent, and the body is never reused."""
+    url = "https://limited-host.example/v1/quote"
+    wire.answers[url] = _said(PER_MINUTE)
+    ni_polite.set_dedupe(True)
+    with pytest.raises(netguard.FetchError) as first:
+        _fetch(url)
+    assert first.value.kind == "host_busy" and ni_polite.waited_words(first.value) == PER_MINUTE
+    before = len(wire.calls)
+    with pytest.raises(netguard.FetchError) as held:
+        _fetch("https://limited-host.example/v1/other")
+    assert len(wire.calls) == before, "no request while the host's pause holds"
+    assert ni_polite.waited_words(held.value) == PER_MINUTE, "the host's words, not 'over its request budget'"
+    wire.now[0] += 61
+    wire.answers.pop(url)
+    assert _fetch(url) == {"text": "hello"}, "released after the minute, and the limit body was never cached"
+    assert ni.NIError("host_busy").kind in ni.CAPACITY_KINDS
+    assert ni._fetch_error(first.value).kind == "host_busy", "the engine's capacity status: the card stays due"
+
+
+def test_a_daily_limit_pauses_the_host_for_the_cap_and_a_build_never_waits_for_it(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    url = "https://limited-host.example/v2/quote"
+    wire.answers[url] = _said(PER_DAY, key="Note")
+    with ni_polite.waiting(), pytest.raises(netguard.FetchError) as first:
+        _fetch(url)
+    assert first.value.kind == "host_busy" and PER_DAY in str(first.value) and not slept
+    wire.now[0] += ni_polite.RETRY_AFTER_CAP_S - 1
+    with pytest.raises(netguard.FetchError):
+        _fetch("https://limited-host.example/v2/other")
+    wire.now[0] += 2
+    wire.answers.pop(url)
+    assert _fetch(url) == {"text": "hello"}, "the hour's cap, then released"
+
+
+def test_a_build_waits_out_a_one_second_limit_once_then_asks_again(wire, monkeypatch) -> None:
+    """Alpha Vantage's burst limit (T's Mac, 2026-10-31): a build someone is waiting on waits the moment the host
+    named, charged to its allowance, and sends the request once more; a refresh never waits."""
+    slept = _sleeps(wire, monkeypatch)
+    url = "https://burst-host.example/v1/quote"
+    answers = [_said(PER_SECOND)]
+
+    def answer(u, *a, **k):
+        wire.calls.append(u)
+        return answers.pop(0) if answers else {"final_url": u, "status": 200, "content_type": "application/json",
+                                               "content": JSON_BODY}
+
+    monkeypatch.setattr(netguard, "_guarded_get_once", answer)
+    with ni_polite.waiting():
+        assert _fetch(url) == {"text": "hello"}
+        assert ni_polite.SHARED._local.wait == ni_polite.BUILD_WAIT_S - slept[0], "charged to the build's allowance"
+    assert slept == [2.0] and wire.calls == [url, url]
+    answers.append(_said(PER_SECOND))
+    wire.now[0] += 10
+    with pytest.raises(netguard.FetchError) as refresh:
+        _fetch(url)
+    assert refresh.value.kind == "host_busy" and slept == [2.0], "a refresh defers, it never waits"
+
+
+def test_a_build_asks_at_most_twice_when_the_host_keeps_limiting(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    url = "https://burst-host.example/v2/quote"
+    wire.answers[url] = _said(PER_SECOND)
+    with ni_polite.waiting(), pytest.raises(netguard.FetchError) as busy:
+        _fetch(url)
+    assert ni_polite.waited_words(busy.value) == PER_SECOND
+    assert wire.count("burst-host.example") == 2 and slept == [2.0], "the request, once more, then the host's word"
+
+
+def test_a_build_waits_out_a_short_retry_after_once(wire, monkeypatch) -> None:
+    slept = _sleeps(wire, monkeypatch)
+    url = "https://burst-host.example/v3/quote"
+    answers = [netguard.FetchError("upstream returned HTTP 429", status=429, retry_after="1")]
+
+    def answer(u, *a, **k):
+        wire.calls.append(u)
+        if answers:
+            raise answers.pop(0)
+        return {"final_url": u, "status": 200, "content_type": "application/json", "content": JSON_BODY}
+
+    monkeypatch.setattr(netguard, "_guarded_get_once", answer)
+    with ni_polite.waiting():
+        assert _fetch(url) == {"text": "hello"}
+    assert slept == [1.0] and wire.calls == [url, url]
+
+
+def test_only_a_small_json_message_body_is_read_as_a_limit(wire) -> None:
+    """Data that mentions a limit stays data: a body over ``LIMIT_BODY_BYTES`` is never parsed here, a CSV is not
+    JSON, a key that names data makes the body data, a non-2xx is the guard's."""
+    import json
+
+    big = json.dumps({"Information": PER_MINUTE, "pad": "x" * ni_polite.LIMIT_BODY_BYTES}).encode()
+    assert ni_polite.body_limit({"status": 200, "content_type": "application/json", "content": big}) is None
+    assert ni_polite.body_limit({"status": 200, "content_type": "text/csv",
+                                 "content": b"note\nrate limit is 30 requests per minute\n"}) is None
+    data = json.dumps({"plan": "free", "note": PER_MINUTE}).encode()
+    assert ni_polite.body_limit({"status": 200, "content_type": "application/json", "content": data}) is None
+    assert ni_polite.body_limit({"status": 200, "content_type": "image/png", "content": b"\x89PNG"}) is None
+    assert ni_polite.body_limit({**_said(PER_MINUTE), "status": 404}) is None
+    assert ni_polite.body_limit(_said(PER_MINUTE)) == (60.0, PER_MINUTE)
+    url = "https://data-host.example/v1/plan"
+    wire.answers[url] = {"final_url": url, "status": 200, "content_type": "application/json", "content": data}
+    assert _fetch(url) == {"plan": "free", "note": PER_MINUTE}
+
+
+def test_waited_words_tell_the_hosts_wait_from_smartbrains_own_budget() -> None:
+    assert ni_polite.waited_words(netguard.FetchError(f"{ni_polite.WAITED}: slow down", kind="host_busy")) == \
+        "slow down"
+    assert ni_polite.waited_words(netguard.FetchError(ni_polite.WAITED, status=429, kind="host_busy")) == ""
+    assert ni_polite.waited_words(netguard.FetchError("host is over its request budget", kind="host_busy")) is None
+    assert ni_polite.waited_words(netguard.FetchError(ni_polite.WAITED)) is None, "not a host_busy"
+    assert ni_polite.waited_words(ValueError("x")) is None
+
+
+def test_a_kept_cards_limit_body_defers_it_on_the_tick_and_never_fails_it(wire) -> None:
+    store, conn, key = _store()
+    url = "https://limited-host.example/v3/now"
+    iid = store.add_item(_http_spec(url), {"text": "preview"})
+    store.set_state(iid, "live")
+    conn.execute("UPDATE ni_items SET last_checked = NULL;")
+    wire.answers[url] = _said(PER_MINUTE)
+    ni.tick(_app(conn, key))
+    item = store.get_item(iid)
+    assert item["last_checked"] is None and item["consecutive_failures"] == 0, "due, never failed"
+    assert conn.execute("SELECT count(*) FROM ni_runs WHERE item_id = ?;", [iid]).fetchone()[0] == 0
+    wire.now[0] += 61
+    wire.answers.pop(url)
+    ni.tick(_app(conn, key))
+    assert store.get_item(iid)["last_checked"] is not None and store.get_item(iid)["consecutive_failures"] == 0
 
 
 # --- the cadence floor ---------------------------------------------------------------------

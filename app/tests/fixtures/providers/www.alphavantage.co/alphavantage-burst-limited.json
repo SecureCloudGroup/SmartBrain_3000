@@ -1,0 +1,17 @@
+{
+  "name": "alphavantage-burst-limited",
+  "host": "www.alphavantage.co",
+  "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&apikey=[redacted]",
+  "key": {
+    "in": "query",
+    "name": "apikey"
+  },
+  "status": 200,
+  "content_type": "application/json",
+  "captured": false,
+  "captured_at": null,
+  "note": "the 200 OK sentence the user's key gets for a second request inside one second: the host asking SmartBrain to wait, never a verdict on the source (first seen 2026-10-31, read as 'No ready source answers this yet')",
+  "body": {
+    "Information": "Thank you for using Alpha Vantage! Please consider spreading out your free API requests more sparingly (1 request per second). You may subscribe to any of the premium plans at https://www.alphavantage.co/premium/ to lift the free key rate limit (25 requests per day), raise the per-minute rate limit, and completely remove the daily rate limit."
+  }
+}

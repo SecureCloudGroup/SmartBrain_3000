@@ -53,6 +53,7 @@ from . import (
     pagegraph,
 )
 from . import ni_fetch as _ni_fetch
+from . import ni_message as _ni_message
 from .browsers import router as _browser_router
 from .library_index import GEO_RESOLVERS, frame_kind_from_text
 from .library_resolve import resolve_lookup
@@ -922,71 +923,9 @@ def _undated(cands: list[dict]) -> tuple[list[dict], list[dict]]:
     return kept, dated
 
 
-# a body that is a sentence to the caller, not data: the keys such bodies use, normalized (lower, [a-z0-9] runs)
-_MESSAGE_KEYS = frozenset({"information", "info", "error", "errors", "errormessage", "message", "msg", "note",
-                           "notice", "warning", "detail", "details", "status", "reason", "fault", "description"})
-_MESSAGE_CODE_KEYS = frozenset({"code", "cod", "errorcode", "status", "statuscode", "success", "ok"})
-# what a provider's message carries beside its sentence that names no data: a request id, a link to its docs
-_MESSAGE_META_KEYS = frozenset({"requestid", "traceid", "documentation", "documentationurl", "moreinfo", "help"})
-_MESSAGE_ANY_KEYS = _MESSAGE_KEYS | _MESSAGE_CODE_KEYS | _MESSAGE_META_KEYS
-_MESSAGE_MAX_LEAVES = 4
-_MESSAGE_MIN_WORDS = 3
-_MESSAGE_GIST_CHARS = 140
-
-
-def _message_leaves(sample: dict) -> list[tuple[str, object]] | None:
-    """The (normalized key, value) leaves of a body that can only be a provider talking about the request, or None
-    when it is data. Data is: a key that names data (any key outside the message, code and meta keys — ``title``,
-    ``price``, ``indicator``: a status page's ``{"indicator": "none", "description": "All Systems Operational"}``
-    is data), a list, an object nested deeper than one wrapper (``{"status": {"error_code": .., "error_message":
-    ..}}`` is one), more than ``_MESSAGE_MAX_LEAVES`` leaves, or a number (or a number sent as text) outside a code
-    key. (2026-10-31, caught by a live-regression test: the first rule read a sentence under any message-like key,
-    so a page object with a title and a note was taken for a message.)"""
-    leaves: list[tuple[str, object]] = []
-    stack: list[tuple[object, int]] = [(sample, 0)]
-    for _ in range(8):  # bounded: the top object and its wrappers; a body with more objects than that is data
-        if not stack:
-            return leaves
-        node, depth = stack.pop()
-        if not isinstance(node, dict) or depth > 1:
-            return None
-        for key, value in node.items():  # bounded by the leaf cap below
-            norm = re.sub(r"[^a-z0-9]+", "", str(key).lower())
-            if norm not in _MESSAGE_ANY_KEYS or isinstance(value, list):
-                return None
-            if isinstance(value, dict):
-                stack.append((value, depth + 1))
-                continue
-            numeric = (isinstance(value, (int, float)) and not isinstance(value, bool)) \
-                or (isinstance(value, str) and _numeric_text(value))
-            if numeric and norm not in _MESSAGE_CODE_KEYS:
-                return None
-            leaves.append((norm, value))
-            if len(leaves) > _MESSAGE_MAX_LEAVES:
-                return None
-    return None
-
-
-def provider_message(sample: object) -> str | None:
-    """The sentence a source answered with instead of its data, or None.
-
-    Alpha Vantage answers a spent daily quota, a demo key on a real symbol and a bad key with 200 OK bodies —
-    ``{"Information": "Thank you for using Alpha Vantage! Our standard API rate limit is 25 requests per
-    day..."}``, ``{"Error Message": "..."}`` — so no status says anything is wrong, the walker offers the one
-    sentence as a string candidate, and the mapping spent five model calls trying to read a price out of it
-    (T's Mac, 2026-10-30). A body is a message when every key in it is a message, code or request-id key, at the
-    top or under one wrapper (``_message_leaves``: no key names data), and a leaf under a message key reads as a
-    sentence of three words or more. The gist is returned for the reason line, bounded."""
-    if not isinstance(sample, dict) or not sample:
-        return None
-    leaves = _message_leaves(sample)
-    if not leaves:
-        return None
-    for norm, value in leaves:  # bounded: ≤ _MESSAGE_MAX_LEAVES
-        if norm in _MESSAGE_KEYS and isinstance(value, str) and len(value.split()) >= _MESSAGE_MIN_WORDS:
-            gist = " ".join(value.replace("*", "").split())
-            return gist[:_MESSAGE_GIST_CHARS].rstrip() + ("…" if len(gist) > _MESSAGE_GIST_CHARS else "")
-    return None
+# The provider-message rule lives in ``ni_message`` (one rule for the build and the politeness layer); the flow
+# and its tests reach it here.
+provider_message = _ni_message.provider_message
 
 
 # ---- stage 4: mapping (M#2, type-filtered menu) --------------------------
@@ -1040,7 +979,7 @@ def _is_quantity_want(slug: str) -> bool:
     return any(w in _QUANTITY_WORDS for w in words) and not dated and not _is_text_want(slug)
 
 
-_NUMERIC_TEXT_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_NUMERIC_TEXT_RE = _ni_message.NUMERIC_TEXT_RE
 _SENTENCE_WORDS = 6
 
 
@@ -1053,16 +992,7 @@ def _sentence_example(example: object) -> bool:
     return isinstance(raw, str) and len(raw.split()) >= _SENTENCE_WORDS
 
 
-def _numeric_text(example: object) -> bool:
-    """A sampled string that is really a number ("6.904", "-3", "42") — many APIs and every
-    CSV send numbers as text. Leading zeros ("02134", an id or ZIP) stay text."""
-    raw = example
-    if isinstance(raw, str) and raw.startswith('"') and raw.endswith('"'):
-        raw = raw[1:-1]  # the walker's examples are JSON-encoded
-    if not isinstance(raw, str) or not _NUMERIC_TEXT_RE.fullmatch(raw.strip()):
-        return False
-    digits = raw.strip().lstrip("-")
-    return not (len(digits) > 1 and digits[0] == "0" and digits[1] != ".")
+_numeric_text = _ni_message.numeric_text  # one rule with the provider-message reading
 
 
 def _slugify_field_name(raw: str) -> str:
@@ -4253,7 +4183,7 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     assert len(ordered) == len(buildable), "a partition loses no row"
     ordered += [r for r in rows if r not in buildable]  # the link rows ride behind, for the honest stop
     _transition(store, item_id, "source", note="finding the best SmartBrain Library source",
-                _ranked_library=ordered, _ranked_search=None, _auto_picked=True, _try=None)
+                _ranked_library=ordered, _ranked_search=None, _auto_picked=True, _try=None, _waited=None)
     return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
 
 
@@ -4291,6 +4221,14 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
         if out.get("state") != "source":
             return out
     rec = _flow_read(store, item_id) or rec
+    waited = [w for w in rec.get("_waited") or [] if isinstance(w, dict) and w.get("host")]
+    if rec.get("state") == "source" and not rec.get("_cancel") and not _buildable(rec.get("_ranked_library")) \
+            and waited:
+        # a host asked SmartBrain to wait and nothing else built: the source may answer in a minute, so the build
+        # ends with a retry, never a decline nor research past a source that is only busy (2026-10-31)
+        first = waited[0]
+        return _fail(store, item_id, "waited", f"{first['host']} asked SmartBrain to wait"
+                     + (f": {first['said']}" if first.get("said") else " (its rate limit)"))
     if rec.get("state") == "source" and not rec.get("_cancel") and not _buildable(rec.get("_ranked_library")):
         from . import (
             ni_research_flow,  # every row failed: research before the honest stop (v2 only)
@@ -5889,6 +5827,20 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             # that starts serving HTML still fails honestly.
             return _build_page_card(store, item_id, request, intent, url,
                                      call_model, remap=remap)
+        said = ni_polite.waited_words(exc)
+        if said is not None:
+            # the host asked SmartBrain to wait: a 429 / 503, or a 200 that says "slow down" (``ni_polite``: Alpha
+            # Vantage's "1 request per second", T's Mac 2026-10-31, read as "No ready source answers this yet").
+            # Not a verdict on the source: every row of that host goes for this build (one wall for every tenant),
+            # with the host's words, and a build that ends with no card after it ends with a retry (``_waited``).
+            # A pasted link, a Fix or a remap has no other row: it ends with the retry at once.
+            why = "asked SmartBrain to wait" + (f": {said}" if said else " (its rate limit)")
+            if not remap and (_flow_read(store, item_id) or {}).get("_auto_picked"):
+                _note_waited(store, item_id, url, said)
+                moved = _repick_without(store, item_id, pick_url, why=why, host_wide=True)
+                if moved is not None:
+                    return moved
+            return _fail(store, item_id, "waited", f"{_host_hint(url) or 'the source'} {why}")
         if not remap and getattr(exc, "status", None) in (401, 403, 429):  # Library or web row
             # FETCH-F6 (2026-10-04): a 429 / challenge / rate_limited signal is host-wide (every tenant
             # of this host sees the same wall); a plain 401 / 403 drops only this URL — a multi-tenant
@@ -7689,6 +7641,20 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
                            note=f"{gone.get('provider') or gone.get('host')} {why}",
                            **{slot: rest or None, other: None}, _access=None, _format=None)
     return None
+
+
+_MAX_WAITED = 3
+
+
+def _note_waited(store: ni.NIStore, item_id: str, url: str, said: str) -> None:
+    """Remember on the record that ``url``'s host asked this build to wait (``said``: its words, may be empty), so
+    a build that then ends with no card ends with a retry (``_auto_continue``). Bounded; one entry a host."""
+    host = _host_hint(url)
+    assert isinstance(said, str), "the host's words, or empty"
+    record = _flow_read(store, item_id) or {}
+    waited = [w for w in record.get("_waited") or [] if isinstance(w, dict) and w.get("host") != host]
+    waited = (waited + [{"host": host[:253], "said": said[:200]}])[-_MAX_WAITED:]
+    _flow_write(store, item_id, {**record, "_waited": waited})
 
 
 def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, *, host_wide: bool = False) -> dict | None:

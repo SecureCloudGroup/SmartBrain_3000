@@ -6,10 +6,12 @@ within the hour. These tests replay, through ``ni_flow.run_flow`` with its produ
 pack really ranks for "NVDA stock price every 30 minutes" (``fixtures/library/rows-nvda.json``, recorded with
 ``tools/ni-library-rows.py``) against the bodies the providers serve (``fixtures/providers/<host>/<name>.json``,
 captured with ``tools/ni-capture-fixtures.py``). The only seams are the model (scripted, but it reads the real menu
-and copies a path from it) and ``netguard.safe_fetch_json`` (the one network call under ``ni_fetch._get``), so the
-key store, the host-bound credential loader, the request builder, the politeness layer and every build check run as
-they do on an install. ``test_every_provider_fixture_is_captured`` keeps the suite honest: a provisional fixture
-(the documented shape, ``captured: false``) fails it until the real body is captured.
+and copies a path from it), ``netguard._guarded_get_once`` (the one function that touches the network: the bytes
+the provider sent, with its status and content type) and the politeness clock, so the key store, the host-bound
+credential loader, the request builder, the politeness layer (host budget, pauses, limit bodies), the guard's JSON
+parse and every build check run as they do on an install. ``test_every_provider_fixture_is_captured`` keeps the
+suite honest: a provisional fixture (the documented shape, ``captured: false``) fails it until the real body is
+captured, and every fixture must be the kind of body its catalogue entry is for.
 
 What T's Mac showed on 2026-10-30 and each test here pins:
 * Alpha Vantage's ``"Global Quote"`` / ``"05. price"`` keys yielded zero paths, so the row dropped with no model
@@ -18,14 +20,23 @@ What T's Mac showed on 2026-10-30 and each test here pins:
 * the Alpha Vantage key on the card made the key check skip the pause for the Finnhub row, whose fetch the loader
   then refused: the key check compares hosts, and the card asks for Finnhub's key.
 * the daily series files its values under each day's date: it is refused with that reason, never mapped.
+
+What the first capture showed on 2026-10-31:
+* a second request inside one second gets a 200 OK "1 request per second" sentence, which a build read as "No ready
+  source answers this yet": the host's "slow down" is a wait, never a verdict. A build waits out a one-second limit
+  once and builds; a limit that holds ends it with a retry; a refresh stays due.
+* Alpha Vantage answered a made-up key with a real quote: a quote proves nothing about the key, and the invalid-key
+  sentence the first fixtures assumed was never seen.
 """
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import pathlib
 import re
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import duckdb
@@ -34,11 +45,20 @@ from test_ni_answers import WEATHER_URL, lib  # noqa: F401  (lib is a fixture: t
 from test_ni_auto_pick import _row
 
 from smartbrain_3000 import db as dbmod
-from smartbrain_3000 import gateway, netguard, ni, ni_flow, ni_master
+from smartbrain_3000 import (
+    gateway,
+    netguard,
+    ni,
+    ni_flow,
+    ni_master,
+    ni_message,
+    ni_polite,
+)
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 PROVIDERS = FIXTURES / "providers"
+CAPTURE_TOOL = pathlib.Path(__file__).resolve().parents[2] / "tools" / "ni-capture-fixtures.py"
 ROWS_NVDA = json.loads((FIXTURES / "library" / "rows-nvda.json").read_text(encoding="utf-8"))
 ASK = ROWS_NVDA["ask"]
 AV_QUOTE, FINNHUB, AV_DAILY = (r["url"] for r in ROWS_NVDA["rows"])
@@ -87,21 +107,35 @@ def _base(url: str) -> str:
 
 
 class _Replay:
-    """``netguard.safe_fetch_json`` as the providers answered: the fixture body for the address a row fetches, the
-    key checked the way the provider would (present, under the name the row declares, the value the user gave for
-    THIS host), a 4xx fixture raised as the guard raises it. Every request is recorded, keys included, so a test can
-    assert exactly what left this computer."""
+    """``netguard._guarded_get_once`` as the providers answered: the fixture body, as the bytes and content type
+    they sent, for the address a row fetches (``serves``: a fixture name, or names served in turn, the last
+    repeating); the key checked the way the provider would (present, under the name the row declares, the value the
+    user gave for THIS host); a 4xx fixture raised as the guard raises it. Every request is recorded, keys
+    included, so a test can assert exactly what left this computer."""
 
-    def __init__(self, serves: dict[str, str], keys: dict[str, str] | None = None) -> None:
-        self.serves = {_base(url): fixture(name) for url, name in serves.items()}
+    def __init__(self, serves: dict[str, str | list[str]], keys: dict[str, str] | None = None) -> None:
+        self.serves = {_base(url): [fixture(n) for n in ([names] if isinstance(names, str) else names)]
+                       for url, names in serves.items()}
         self.keys = dict(keys or {})
         self.fetched: list[str] = []
+        self._sent: dict[str, int] = {}
 
-    def __call__(self, url: str, headers: dict | None = None, allow_redirects: bool = True) -> object:
+    def serve(self, url: str, names: str | list[str]) -> None:
+        """From now on ``url`` answers ``names`` (a provider whose answer changed)."""
+        self.serves[_base(url)] = [fixture(n) for n in ([names] if isinstance(names, str) else names)]
+        self._sent[_base(url)] = 0
+
+    def __call__(self, url: str, allowed_ct: tuple, max_bytes: int, deadline_seconds=None, accept_zip_magic=False,
+                 method: str = "GET", content=None, extra_headers: dict | None = None, allow_redirects: bool = True,
+                 binary_kind=None) -> dict:
+        assert method == "GET" and content is None, "a build and a refresh only read"
         self.fetched.append(url)
         parts = urlsplit(url)
-        fx = self.serves.get(_base(url))
-        assert fx is not None, f"fetched an address no fixture answers: {_base(url)}"
+        queue = self.serves.get(_base(url))
+        assert queue, f"fetched an address no fixture answers: {_base(url)}"
+        sent = self._sent.get(_base(url), 0)
+        self._sent[_base(url)] = sent + 1
+        fx = queue[min(sent, len(queue) - 1)]
         assert parts.hostname == fx["host"], "the fixture's own host"
         query = dict(parse_qsl(parts.query, keep_blank_values=True))
         if fx.get("key"):
@@ -111,10 +145,14 @@ class _Replay:
             assert allow_redirects is False, "a keyed request never follows a redirect"
         else:
             assert not (set(query) & KEY_PARAMS), "a keyless source is fetched with no key"
+        ctype = str(fx.get("content_type") or "application/json")
         if int(fx["status"]) >= 400:
             raise netguard.FetchError(f"upstream returned HTTP {fx['status']}", status=int(fx["status"]),
-                                      content_type=str(fx.get("content_type") or ""))
-        return copy.deepcopy(fx["body"])
+                                      content_type=ctype)
+        assert ctype.startswith(allowed_ct) or "json" in ctype, "a content type the guard lets through"
+        raw = json.dumps(fx["body"]).encode("utf-8")
+        assert len(raw) <= max_bytes, "within the guard's byte cap"
+        return {"final_url": url, "status": int(fx["status"]), "content_type": ctype, "content": raw}
 
 
 _MENU_LINE = re.compile(r"^- (?P<path>.+?)  \((?P<type>[a-z]+)", re.MULTILINE)
@@ -166,12 +204,20 @@ class _Model:
 def _t_install(monkeypatch):
     """T's install: every route Claude Code and no local model, research on its default (Automatic: the suite's
     conftest turns it off for every other test), the card's consent for claudecode/opus sealed, the key store wired
-    as ``main`` wires it, no search provider."""
+    as ``main`` wires it, no search provider. The politeness clock is a test clock: a wait moves it (``slept``)."""
     for name in ("SMARTBRAIN_NI_RESEARCH", "SMARTBRAIN_NI_RESEARCH_MODEL", "SMARTBRAIN_NI_RESEARCH_WEB"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(gateway, "load_routes", lambda conn: dict(T_ROUTES))
     monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
-    yield
+    clock = SimpleNamespace(now=1000.0, slept=[])
+
+    def sleep(seconds: float) -> None:
+        clock.slept.append(seconds)
+        clock.now += seconds
+
+    monkeypatch.setattr(ni_polite, "_clock", lambda: clock.now)
+    monkeypatch.setattr(ni_polite, "_sleep", sleep)
+    yield clock
     ni_flow.set_secrets_provider(None)
     ni_flow.set_library_provider(None)
 
@@ -181,7 +227,7 @@ def _card(monkeypatch, rows: list[dict], replay: _Replay, ask: str = ASK) -> tup
     test_ni_route_matrix), over ``rows``, fetching through ``replay``."""
     library = _Library(rows)
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: library)
-    monkeypatch.setattr(netguard, "safe_fetch_json", replay)
+    monkeypatch.setattr(netguard, "_guarded_get_once", replay)
     store = _store()
     secrets = SecretStore(store.conn, gen_master_key())
     ni_flow.set_secrets_provider(lambda: secrets)
@@ -225,6 +271,30 @@ def test_every_provider_fixture_is_captured() -> None:
     provisional = sorted(p.stem for p in PROVIDERS.glob("*/*.json")
                          if not json.loads(p.read_text(encoding="utf-8")).get("captured"))
     assert provisional == [], f"still the documented shape, not a captured body: {provisional}"
+
+
+def _capture_tool():
+    spec = importlib.util.spec_from_file_location("ni_capture_fixtures", CAPTURE_TOOL)
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    return tool
+
+
+@pytest.mark.skipif(not CAPTURE_TOOL.exists(), reason="the capture tool ships in the repository only")
+def test_every_fixture_is_the_kind_of_body_its_catalogue_entry_is_for() -> None:
+    """2026-10-31: the first capture saved Alpha Vantage's "1 request per second" sentence as the daily series,
+    ``captured: true``, and an entry expected an invalid-key sentence nobody had seen (a made-up key got a real
+    quote). Every fixture is checked by the capture tool's own rule (``check``: the status, the kind of body by the
+    app's ``ni_message`` reading, the keys data must carry), and every entry has exactly its one fixture."""
+    tool = _capture_tool()
+    files = {p.stem: p for p in PROVIDERS.glob("*/*.json")}
+    assert sorted(files) == sorted(e["name"] for e in tool.CATALOGUE), "one fixture per catalogue entry, no other"
+    for entry in tool.CATALOGUE:  # bounded: the catalogue
+        fx = json.loads(files[entry["name"]].read_text(encoding="utf-8"))
+        assert fx["host"] == entry["host"] and fx["key"] == entry.get("key"), entry["name"]
+        assert tool.check(entry, fx) == [], f"{entry['name']}: {tool.check(entry, fx)}"
+    kinds = {e["name"]: e["expect"]["kind"] for e in tool.CATALOGUE}
+    assert kinds["alphavantage-burst-limited"] == "limit" and kinds["alphavantage-made-up-key"] == "data"
 
 
 def test_no_fixture_carries_a_key() -> None:
@@ -295,11 +365,11 @@ def test_the_sealed_card_refreshes_through_the_same_request(monkeypatch) -> None
 
 # ---- a sentence instead of data --------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["alphavantage-demo-key-refused", "alphavantage-bad-key"])
+@pytest.mark.parametrize("name", ["alphavantage-demo-key-refused"])
 def test_a_sentence_body_moves_on_at_once_with_no_model_call_and_the_reason_on_the_record(monkeypatch, name) -> None:
-    """Alpha Vantage's spent-quota / demo-key / bad-key bodies are 200 OK sentences. The row moves on with the
+    """Alpha Vantage refuses its demo key on a real symbol with a 200 OK sentence. The row moves on with the
     sentence's gist as its reason and not one mapping or judge call; the pick goes on to Finnhub, which asks for
-    its own key."""
+    its own key. (A limit sentence is a wait, not a refusal: the tests below.)"""
     replay = _Replay({AV_QUOTE: name}, {"www.alphavantage.co": AV_KEY})
     model = _Model()
     store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
@@ -317,10 +387,14 @@ def test_a_sentence_body_moves_on_at_once_with_no_model_call_and_the_reason_on_t
 
 
 def test_provider_message_tells_a_sentence_from_data() -> None:
-    for name in ("alphavantage-global-quote", "alphavantage-time-series-daily", "finnhub-quote", "open-meteo-forecast"):
+    for name in ("alphavantage-global-quote", "alphavantage-time-series-daily", "alphavantage-made-up-key",
+                 "finnhub-quote", "open-meteo-forecast"):
         assert ni_flow.provider_message(fixture(name)["body"]) is None, f"{name} is data"
-    for name in ("alphavantage-demo-key-refused", "alphavantage-bad-key"):
+        assert ni_message.host_limit(fixture(name)["body"]) is None, f"{name} is no limit"
+    for name in ("alphavantage-demo-key-refused", "alphavantage-burst-limited", "finnhub-quote-no-key"):
         assert ni_flow.provider_message(fixture(name)["body"]), f"{name} is a sentence"
+    assert ni_message.host_limit(fixture("alphavantage-demo-key-refused")["body"]) is None, "a refusal, not a wait"
+    assert ni_message.host_limit(fixture("alphavantage-burst-limited")["body"])[0] == ni_message.WAIT_SECOND_S
     assert ni_flow.provider_message({"status": "ok", "note": "Data under a free license for personal use",
                                      "price": "123.4"}) is None, "a number sent as text makes it data"
     assert ni_flow.provider_message({"status": {"error_code": 429, "error_message": "You've exceeded the Rate Limit."}})
@@ -334,6 +408,94 @@ def test_provider_message_tells_a_sentence_from_data() -> None:
     assert ni_flow.provider_message({"status": {"indicator": "none", "description": "All Systems Operational"}}) is None
     assert ni_flow.provider_message({"Global Quote": {}}) is None, "an empty quote is no sentence"
     assert ni_flow.provider_message({"error": {"error": {"message": "nested three deep is not a message body"}}}) is None
+
+
+# ---- the host asks SmartBrain to wait ----------------------------------------------------------------------------
+
+def _keyed_quote_card(monkeypatch, rows: list[dict], replay: _Replay, model: _Model) -> tuple[ni.NIStore, str, dict]:
+    """The NVDA card past its key pause: the user's Alpha Vantage key given, the quote row's build run."""
+    store, item_id, secrets = _card(monkeypatch, rows, replay)
+    ni_flow.run_flow(store, item_id, gateway_call=model)
+    ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
+    return store, item_id, ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)
+
+
+def test_a_one_second_limit_is_waited_out_once_and_the_quote_builds(monkeypatch, _t_install) -> None:
+    """T's Mac, 2026-10-31: a second Alpha Vantage request inside one second got the "1 request per second"
+    sentence, and a build that read it ended "No ready source answers this yet". The politeness layer reads the
+    sentence as the host asking to wait: a build someone is waiting on waits the second it named, once, asks again
+    and builds from the quote, with no model call over the sentence."""
+    replay = _Replay({AV_QUOTE: ["alphavantage-burst-limited", "alphavantage-global-quote"]},
+                     {"www.alphavantage.co": AV_KEY})
+    model = _Model()
+    store, item_id, out = _keyed_quote_card(monkeypatch, ROWS_NVDA["rows"], replay, model)
+    item = _held(store, item_id, out, AV_QUOTE)
+    assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"] * 2, "the request, and once more after the wait"
+    assert _t_install.slept == [ni_message.WAIT_SECOND_S], "the wait the host named, once"
+    assert item["spec"]["pipeline"][0]["paths"]["price"] == '["Global Quote"]["05. price"]'
+    assert model.calls["mapping"] >= 1 and model.calls["judge"] <= 1
+
+
+def test_a_limit_that_holds_ends_the_build_with_a_retry_and_the_hosts_words(monkeypatch, _t_install) -> None:
+    """The host asks again after the wait: the build is not a verdict on the source. Every row of that host goes
+    for this build (one wall for every tenant), no model reads the sentence, no research runs past a source that is
+    only busy, and the card ends failed with a retry and the host's own words, never declined. While the host's
+    pause holds a retry sends nothing and says the same; once it ends, the retry builds."""
+    rows = [ROWS_NVDA["rows"][0], ROWS_NVDA["rows"][2]]   # the two Alpha Vantage rows
+    replay = _Replay({AV_QUOTE: "alphavantage-burst-limited", AV_DAILY: "alphavantage-time-series-daily"},
+                     {"www.alphavantage.co": AV_KEY})
+    model = _Model()
+    researched: list[str] = []
+    from smartbrain_3000 import ni_research_flow
+    monkeypatch.setattr(ni_research_flow, "fallback", lambda *a, **k: researched.append("ran") or {})
+    store, item_id, out = _keyed_quote_card(monkeypatch, rows, replay, model)
+    assert out["state"] == "failed" and ni_master.error_class_of(out["error"]) == "waited", out
+    assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"] * 2, "asked twice, the daily row never fetched"
+    assert model.calls["mapping"] == 0 and model.calls["judge"] == 0 and researched == []
+    said = fixture("alphavantage-burst-limited")["body"]["Information"]
+    assert "www.alphavantage.co asked SmartBrain to wait" in out["error"] and said[:60] in out["error"], out["error"]
+    assert ni_master.reason_for("failed", out["error"]).startswith("The source asked SmartBrain to wait")
+    assert ni_master.choose_move(state="failed", error_class="waited", shell=True)["reopen"] == ["retry", "pick_source"]
+    assert not (ni_flow._flow_read(store, item_id) or {}).get("_decline_card"), "never a decline"
+    # Retry while the host's pause holds: nothing is sent, the same words
+    record = ni_flow._flow_read(store, item_id)
+    ni_flow._flow_write(store, item_id, ni_flow._fresh_record(record, ASK, "intent", "retry", keep_named=True),
+                        revive=True)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "failed" and ni_master.error_class_of(out["error"]) == "waited", out
+    assert len(replay.fetched) == 2 and said[:60] in out["error"], "no request while the host's pause holds"
+    # Retry after it: the host answers, the card builds
+    _t_install.now += ni_message.WAIT_SECOND_S + 1
+    replay.serve(AV_QUOTE, "alphavantage-global-quote")
+    record = ni_flow._flow_read(store, item_id)
+    ni_flow._flow_write(store, item_id, ni_flow._fresh_record(record, ASK, "intent", "retry", keep_named=True),
+                        revive=True)
+    _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=model), AV_QUOTE)
+
+
+def test_a_refresh_the_host_asks_to_wait_stays_due_and_is_never_a_failure(monkeypatch, _t_install) -> None:
+    """A kept card whose refresh gets the host's limit sentence is not failed (no run row, no streak, no repair, the
+    last value stays): the host is paused for the window it named and the card stays due; the next refresh after
+    the pause reads the quote. Before 2026-10-31 the sentence was read as the card's data and failed it."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    ni_flow.run_flow(store, item_id, gateway_call=_Model())
+    ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
+    _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=AV_QUOTE), AV_QUOTE)
+    monkeypatch.setattr(ni, "_clock", lambda: datetime.now().astimezone() + timedelta(minutes=31))
+    replay.serve(AV_QUOTE, "alphavantage-burst-limited")
+    with pytest.raises(ni.NIError) as busy:
+        ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
+    assert busy.value.kind == "host_busy" and busy.value.kind in ni.CAPACITY_KINDS
+    assert _t_install.slept == [], "a refresh never waits: the card stays due"
+    item = store.get_item(item_id)
+    assert item["consecutive_failures"] == 0 and store.conn.execute(
+        "SELECT count(*) FROM ni_runs WHERE item_id = ? AND status <> 'ok';", [item_id]).fetchone()[0] == 0
+    _t_install.now += ni_message.WAIT_SECOND_S + 1
+    replay.serve(AV_QUOTE, "alphavantage-global-quote")
+    ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
+    assert store.read_snapshot(item_id, "latest")["ok"]
+    assert len(replay.fetched) == 3, "the build's sample, the limited refresh, the refresh after the pause"
 
 
 # ---- the card's key is for one host ------------------------------------------------------------------------------
@@ -455,11 +617,11 @@ def test_open_meteo_builds_from_its_captured_body_through_the_declared_answers_p
     class _Weather(_Replay):
         def __init__(self):
             super().__init__({}, {})
-            self.serves = {_base(WEATHER_URL): {"host": "api.open-meteo.com", "key": None, "status": 200, "body": body}}
+            self.serves = {_base(WEATHER_URL): [{**fixture("open-meteo-forecast"), "body": body}]}
 
     replay = _Weather()
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: _Wrap([_row("open-meteo-forecast", WEATHER_URL)]))
-    monkeypatch.setattr(netguard, "safe_fetch_json", replay)
+    monkeypatch.setattr(netguard, "_guarded_get_once", replay)
     store = _store()
     ask = "NYC temperature every 30 minutes"
     item_id = ni_flow.create_shell_item(store, ask)

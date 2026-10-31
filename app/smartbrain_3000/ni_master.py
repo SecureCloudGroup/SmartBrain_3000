@@ -297,7 +297,7 @@ def choose_move(*, state: str, error_class: str, shell: bool) -> dict:
     if state == "failed" and error_class == "declined":
         # Round-5 field lesson: a decline is a fork, not a death.
         return {"move": "ask_user", "question": "pick_source", "reopen": []}
-    if state == "failed" and shell and error_class in ("fetch", "stale"):
+    if state == "failed" and shell and error_class in ("fetch", "stale", "waited"):
         # The source (or the worker) let the shell down — offer both roads.
         return {"move": "park", "question": None,
                 "reopen": ["retry", "pick_source"]}
@@ -330,6 +330,8 @@ _REASONS: dict[str, str] = {
     "assembly": "The card couldn't be assembled from the mapped fields.",
     "derive": "The data came back in a shape no card can read yet.",
     "busy": "Another card was building — this one couldn't start.",
+    "waited": ("The source asked SmartBrain to wait (its rate limit), so nothing was built yet. Retry later; "
+               "History shows what it said."),
     "worker": "The build crashed — retry runs it again from your request.",
     "remap": "The rebuild couldn't start from this card's source.",
     "cancelled": "You stopped this build.",
