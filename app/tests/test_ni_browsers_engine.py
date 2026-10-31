@@ -254,6 +254,7 @@ def test_a_render_that_finds_the_slot_taken_mid_run_is_a_409_with_the_busy_code(
                           "code": "render_busy"}  # top-level code beside detail (auth.py's no_session shape)
     item = store.get_item(item_id)
     assert item["consecutive_failures"] == 0 and store.list_runs(item_id) == []
+    assert item["last_checked"] is None and item["last_status"] in (None, ""), "no run: as due as it was"
 
 
 def test_a_manual_run_on_an_unavailable_engine_keeps_its_shape_and_gains_the_code(client) -> None:

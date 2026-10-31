@@ -9,7 +9,8 @@ ends, and writes what it saw, as JSON and Markdown:
 
 * every state the card passed through, with the seconds since the ask, its progress line and what it asked;
 * each source the build tried and why it moved on, when the card lists them, and the reason the card ended on;
-* the card's reading (its bound values), its engine runs, and one refresh when asked;
+* the card's reading (its bound values), its engine runs, one refresh when asked, and the card's next scheduled
+  run when asked to wait for it (``--watch MINUTES``: the ask's own cadence is the claim being proved);
 * the model calls each Neural Interface step made, per model, from the app's own usage view;
 * the audit rows for the card (what was given, tapped, fetched), the app's version, and the model each step runs on.
 
@@ -19,7 +20,9 @@ the same-host key the card offers for one tap (``--reuse``), skipping a Library 
 the card offers the skip (``--skip-keyless``), the card's YES on its reading (``--yes``) and one refresh through
 the engine (``--refresh``).
 Anything else the card asks is reported, and the run waits for a person to answer it on the card, up to
-``--timeout``.
+``--timeout``. A built card meets ``--expect built`` only with a number on it, and, when the run asked for them,
+a refresh that read the source and a scheduled run inside the watch: the first run on T's Mac (2026-10-31) built
+the card, its refresh was refused, and the run still passed; the report now names each shortfall.
 
 Keys: a key goes from its environment variable to the card's key route and nowhere else. Nothing printed or written
 carries a key or the local API token: the report is refused, and nothing written, if any of their text is in it.
@@ -28,7 +31,7 @@ The token is sent to a loopback address only, never through a proxy.
 Usage:
     python3 tools/ni-proof.py --ask "NVDA stock price every 30 minutes" --consent allow \\
         --key www.alphavantage.co=SB_PROOF_KEY_ALPHAVANTAGE --key finnhub.io=SB_PROOF_KEY_FINNHUB \\
-        --yes --refresh --expect built --out ~/Documents/claude_working_folder/ni-proof
+        --yes --refresh --watch 33 --expect built --out ~/Documents/claude_working_folder/ni-proof
 
     --base        the app's address (default $SMARTBRAIN_PROOF_BASE, set by tools/ni-scratch.py, else
                   http://127.0.0.1:33000, the launcher's port)
@@ -67,6 +70,8 @@ MAX_POLLS = 20_000       # the watch loop's own bound beside the timeout
 MAX_EVENTS = 300
 AUDIT_LIMIT = 200        # /api/audit's newest rows read back for the card
 TEXT_MAX = 400
+WATCH_MAX_S = 3 * 3600.0   # --watch's ceiling
+WATCH_POLL_MAX_S = 30.0    # the watch reads the card at most this far apart (the app's own tick is 30 s)
 
 Api = Callable[[str, str, "dict | None"], "tuple[int, object]"]
 
@@ -86,6 +91,7 @@ class Plan:
     skip_keyless: bool = False
     yes: bool = False
     refresh: bool = False
+    watch_s: float = 0.0                                    # after the refresh: wait this long for a scheduled run
     timeout_s: float = 900.0
     poll_s: float = 2.0
 
@@ -93,6 +99,7 @@ class Plan:
         assert 3 <= len(self.ask.strip()) <= 2000, "an ask the composer takes (3 to 2000 characters)"
         assert self.consent in ("allow", "local", "stop"), "consent: allow, local or stop"
         assert self.timeout_s > 0 and self.poll_s > 0, "a timeout and a poll interval"
+        assert 0 <= self.watch_s <= WATCH_MAX_S, "a watch of at most three hours"
 
 
 @dataclass(frozen=True)
@@ -308,6 +315,10 @@ def observe(api: Api, plan: Plan, *, environ: dict | None = None, clock: Callabl
         card = report["card"]
         if plan.refresh and report["end"] == "built" and (card.get("c2_ok") or card.get("state") != "commissioning"):
             report["refresh"] = _refresh(api, item_id)
+            say(f"refresh: HTTP {report['refresh']['status']}")
+            report["card"] = _card(api, item_id)
+        if plan.watch_s > 0 and report["end"] == "built":
+            report["watch"] = _watch_runs(api, item_id, report["card"], plan, clock, sleep, say)
             report["card"] = _card(api, item_id)
         report["model_calls"] = _model_calls(api, started_at)
         report["audit"] = _audit(api, item_id, started_at)
@@ -356,6 +367,35 @@ def _watch(api: Api, plan: Plan, item_id: str, report: dict, started: float, env
             waiting_said = waiting
         sleep(plan.poll_s)
     return "timeout"
+
+
+def _watch_runs(api: Api, item_id: str, card: dict, plan: Plan, clock: Callable[[], float],
+                sleep: Callable[[float], None], say: Callable[[str], None]) -> dict:
+    """Wait up to ``plan.watch_s`` for the card's next engine run, the one its schedule makes, reading the card only
+    (no tap, no run asked for); stop at the first run that read the source. Every new run is kept with the reading
+    the card showed after it, and every state the card passed through."""
+    seen = {r.get("ts") for r in card.get("runs") or []}
+    every = max(plan.poll_s, min(WATCH_POLL_MAX_S, plan.watch_s / 20))
+    out: dict = {"minutes": round(plan.watch_s / 60, 1), "runs": [], "states": [card.get("state")]}
+    say(f"watching for the card's next scheduled run, up to {out['minutes']} min")
+    started = clock()
+    for _ in range(MAX_POLLS):  # bounded; the watch window ends it first
+        if clock() - started >= plan.watch_s:
+            break
+        sleep(min(every, max(0.0, plan.watch_s - (clock() - started))))
+        now = _card(api, item_id)
+        if now.get("state") != out["states"][-1] and len(out["states"]) < MAX_EVENTS:
+            out["states"].append(now.get("state"))
+        new = sorted((r for r in now.get("runs") or [] if r.get("ts") not in seen), key=lambda r: str(r.get("ts")))
+        for run in new[:MAX_EVENTS]:  # bounded: the runs one read shows
+            seen.add(run.get("ts"))
+            out["runs"].append({"after_s": round(clock() - started, 1), **run, "summary": now.get("summary")})
+            say(f"{'':>9}scheduled run {run.get('ts')}: {run.get('status')} {run.get('error') or ''}".rstrip())
+        if any(r.get("status") == "ok" for r in new):
+            break
+    out["ok_runs"] = sum(1 for r in out["runs"] if r.get("status") == "ok")
+    out["waited_s"] = round(clock() - started, 1)
+    return out
 
 
 def _waiting_on_a_person(view: dict) -> str:
@@ -467,9 +507,12 @@ def numbers_in(payload: object, path: str = "", limit: int = 40) -> list[dict]:
 
 
 def _refresh(api: Api, item_id: str) -> dict:
-    """One run through the engine, the refresh every card lives on."""
+    """One run through the engine, the refresh every card lives on; a refusal keeps its sentence and its code."""
     status, out = api("POST", f"/api/ni/items/{item_id}/run", None)
-    return {"status": status, "answer": out if status < 400 else _detail(out)}
+    if status < 400:
+        return {"status": status, "answer": out}
+    code = out.get("code") if isinstance(out, dict) else None
+    return {"status": status, "answer": {"detail": _detail(out), **({"code": str(code)[:40]} if code else {})}}
 
 
 def _model_calls(api: Api, since: datetime) -> list[dict]:
@@ -511,16 +554,42 @@ def _after(ts: object, since: datetime) -> bool:
 
 # ---- the report --------------------------------------------------------------------------------------------------
 
-def met(end: str, card: dict, expect: str) -> bool:
-    """Whether the end is the one ``--expect`` asked for. ``built`` also needs a reading with a number in it."""
+def met(end: str, card: dict, expect: str, *, refreshed: bool | None = None, watched: bool | None = None) -> bool:
+    """Whether the end is the one ``--expect`` asked for. ``built`` also needs a reading with a number in it, and
+    the refresh and the scheduled run when the run asked for them (``refreshed`` / ``watched``: None, not asked)."""
     assert expect in EXPECT, "a known expectation"
     if expect == "any":
         return end not in ("timeout", "error")
     if expect == "built":
-        return end == "built" and bool(card.get("values"))
+        return end == "built" and bool(card.get("values")) and refreshed is not False and watched is not False
     if expect == "declined":
         return end == "declined"
     return end not in ("built", "timeout", "error")
+
+
+def asked_for(report: dict, plan: Plan) -> tuple[bool | None, bool | None, list[str]]:
+    """For a built card: whether the refresh and the scheduled run the run asked for happened (None: not asked),
+    and each shortfall in words."""
+    if report.get("end") != "built":
+        return None, None, []
+    why: list[str] = []
+    refreshed = watched = None
+    if plan.refresh:
+        got = report.get("refresh") or {}
+        answer = got.get("answer") if isinstance(got.get("answer"), dict) else {}
+        refreshed = got.get("status") == 200 and answer.get("status") == "ok"
+        if not got:
+            why.append("no refresh was made: the card never got its YES")
+        elif not refreshed:
+            why.append(f"the refresh answered HTTP {got.get('status')}: {_cell(json.dumps(answer, default=str))}")
+    if plan.watch_s > 0:
+        seen = report.get("watch") or {}
+        watched = bool(seen.get("ok_runs"))
+        if not watched:
+            runs = "; ".join(f"{r.get('status')} {r.get('error') or ''}".strip() for r in seen.get("runs") or [])
+            why.append(f"no scheduled run read the source within {seen.get('minutes', round(plan.watch_s / 60, 1))} "
+                       f"min" + (f" (runs: {runs})" if runs else ""))
+    return refreshed, watched, why
 
 
 def markdown(report: dict) -> str:
@@ -531,7 +600,9 @@ def markdown(report: dict) -> str:
              + (f" (expected {report['expect']}: {'met' if report.get('met') else 'NOT met'})" if report.get("expect")
                 else ""),
              f"- Card: `{report.get('item_id')}`, state {card.get('state')}, last status {card.get('last_status')}",
-             f"- App {report['app'].get('version')}; asked at {report['started_at']}", "", "## Models", ""]
+             f"- App {report['app'].get('version')}; asked at {report['started_at']}"]
+    lines += [f"- Not met: {why}" for why in report.get("why_not") or []]
+    lines += ["", "## Models", ""]
     lines += [f"- {s['step']}: {s.get('model') or 'none'} ({s.get('setting')}, {s.get('where')})"
               + (" off" if s.get("off") else "") for s in report["app"].get("steps") or []]
     lines += ["", "## Timeline", "", "| t (s) | card | flow | progress / asks | reason |", "|---|---|---|---|---|"]
@@ -556,6 +627,14 @@ def markdown(report: dict) -> str:
     if report.get("refresh"):
         answer = _cell(json.dumps(report["refresh"]["answer"], default=str))
         lines += ["", "## Refresh", "", f"- HTTP {report['refresh']['status']}: {answer}"]
+    if report.get("watch"):
+        seen = report["watch"]
+        lines += ["", "## Watched for the next scheduled run", "",
+                  f"- Up to {seen.get('minutes')} min, watched {seen.get('waited_s')} s; states: "
+                  + " -> ".join(str(s) for s in seen.get("states") or [])]
+        lines += [f"- after {r.get('after_s')} s: run {r.get('ts')} {r.get('status')} {r.get('error') or ''} "
+                  f"({r.get('duration_ms')} ms); card then read: {r.get('summary') or '(none)'}"
+                  for r in seen.get("runs") or []] or ["- no run in the window"]
     lines += ["", "## Engine runs", ""] + ([f"- {r.get('ts')}: {r.get('status')} {r.get('error') or ''} "
                                             f"({r.get('duration_ms')} ms)" for r in card.get("runs") or []]
                                            or ["- none"])
@@ -616,6 +695,8 @@ def main(argv: list[str] | None = None, *, api: Api | None = None, environ: dict
     ap.add_argument("--skip-keyless", action="store_true")
     ap.add_argument("--yes", action="store_true")
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--watch", type=float, default=0.0, metavar="MINUTES",
+                    help="after the refresh, wait this long for the card's next scheduled run (0: don't)")
     ap.add_argument("--expect", choices=EXPECT, default="any")
     ap.add_argument("--timeout", type=float, default=900.0)
     ap.add_argument("--poll", type=float, default=2.0)
@@ -624,7 +705,8 @@ def main(argv: list[str] | None = None, *, api: Api | None = None, environ: dict
     env = dict(os.environ if environ is None else environ)
     try:
         plan = Plan(ask=args.ask, consent=args.consent, keys=_key_args(args.key), reuse=args.reuse,
-                    skip_keyless=args.skip_keyless, yes=args.yes, refresh=args.refresh, timeout_s=args.timeout,
+                    skip_keyless=args.skip_keyless, yes=args.yes, refresh=args.refresh,
+                    watch_s=max(0.0, args.watch) * 60.0, timeout_s=args.timeout,
                     poll_s=args.poll)
         token = "" if api is not None else read_token(args.token_file, env)
         base = args.base or str(env.get("SMARTBRAIN_PROOF_BASE") or "") or DEFAULT_BASE
@@ -633,7 +715,8 @@ def main(argv: list[str] | None = None, *, api: Api | None = None, environ: dict
         print(f"ni-proof: {exc}", file=sys.stderr)
         return 2
     report["expect"] = args.expect
-    report["met"] = met(report["end"], report.get("card") or {}, args.expect)
+    refreshed, watched, report["why_not"] = asked_for(report, plan)
+    report["met"] = met(report["end"], report.get("card") or {}, args.expect, refreshed=refreshed, watched=watched)
     secrets = [str(env.get(name) or "") for name in plan.keys.values()] + ([token] if token else [])
     try:
         paths = write_report(report, pathlib.Path(args.out).expanduser(), secrets)

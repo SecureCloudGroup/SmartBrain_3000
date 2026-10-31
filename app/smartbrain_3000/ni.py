@@ -5273,6 +5273,17 @@ class NIStore:
             [when.astimezone(UTC) if when is not None else None, item_id],
         )
 
+    def restore_checked(self, item_id: str, last_checked: str | None, last_status: str | None) -> None:
+        """Put back the checked stamp ``get_item`` read before a manual run stamped ``manual``: the run met a
+        capacity answer (the page browser's slot, the source's host asking to wait) and never ran, so the card is
+        exactly as due as it was. ``last_checked`` is ``get_item``'s own text (a naive UTC TIMESTAMP) or None."""
+        assert item_id, "item id required"
+        assert last_checked is None or isinstance(last_checked, str), "get_item's text, or None"
+        self._conn.execute(
+            "UPDATE ni_items SET last_checked = CAST(? AS TIMESTAMP), last_status = ? WHERE id = ?;",
+            [last_checked, None if last_status is None else str(last_status)[:_MAX_STATUS], item_id],
+        )
+
     def mark_checked(self, item_id: str, status: str) -> None:
         """EVERY attempt records a host-free status (feeds law); the tick's own backoff."""
         assert item_id, "item id required"

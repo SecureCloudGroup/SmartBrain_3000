@@ -38,6 +38,7 @@ from . import (
     ni_master,
     ni_mcp,
     ni_measure,
+    ni_polite,
     ni_refresh,
     ni_standing,
     ni_watch,
@@ -871,21 +872,28 @@ def run_item(request: Request, item_id: str) -> dict:
     if ni.awaits_yes(item):
         raise HTTPException(status_code=409, detail="run refused: this card is waiting for you — tap Keep first")
     if ni.spec_renders(item["spec"]) and browser_runner.slot_busy():
-        return _render_busy_conflict()
+        return _busy_conflict("render_busy")
     result = _execute_manual_run(request, store, item)
-    if result.get("status") == "busy":  # B3a: the render found the slot taken — no run, no failure
-        return _render_busy_conflict()
+    if result.get("status") == "busy":  # B3a/S5a: the slot or the source's host turned it away — no run, no failure
+        return _busy_conflict(str(result.get("kind") or "render_busy"))
     return result
 
 
 _RENDER_BUSY_DETAIL = "the local page browser is busy — try again in a moment"
+# S5a: the card's source asked SmartBrain to wait longer than a run someone tapped waits (BURST_WAIT_S), or
+# SmartBrain's own spacing for that source is spent. Never the page browser (T's Mac, 2026-10-31: an Alpha
+# Vantage refresh right after YES got its "1 request per second" sentence and was answered with the line above).
+_HOST_BUSY_DETAIL = "the card's source can't take another request yet — the card stays as it was and refreshes on its own"
+_BUSY_DETAILS = {"render_busy": _RENDER_BUSY_DETAIL, "host_busy": _HOST_BUSY_DETAIL}
 
 
-def _render_busy_conflict() -> JSONResponse:
-    """B3a: the page browser's single slot is taken — a 409 whose body carries the closed
-    ``code: "render_busy"`` beside the sentence (the client's ApiError matches the code; the
-    ``no_session`` precedent in auth.py). A route declared ``-> dict`` returns it as is."""
-    body = {"detail": _RENDER_BUSY_DETAIL, "code": "render_busy"}
+def _busy_conflict(kind: str) -> JSONResponse:
+    """B3a/S5a: a capacity answer to a manual run — the page browser's single slot is taken
+    (``render_busy``) or the card's source can't take a request yet (``host_busy``). A 409 whose
+    body carries the closed ``code`` beside the sentence (the client's ApiError matches the code;
+    the ``no_session`` precedent in auth.py). A route declared ``-> dict`` returns it as is."""
+    body = {"detail": _BUSY_DETAILS.get(kind, _RENDER_BUSY_DETAIL), "code": kind if kind in _BUSY_DETAILS
+            else "render_busy"}
     assert body["code"] in ni.CAPACITY_KINDS, "a closed capacity code"
     assert set(body) == {"detail", "code"}, "closed keys"
     return JSONResponse(body, status_code=409)
@@ -913,11 +921,17 @@ def _execute_manual_run(request: Request, store: ni.NIStore, item: dict) -> dict
     try:
         # kb rides along so internal.kb items work on manual refresh too, not
         # just engine ticks (None when locked mid-request — run_item refuses).
-        result = ni.run_item(store, item_id, gateway_mod=gateway,
-                             secrets_store=secrets, schedules_store=schedules,
-                             kb=getattr(state, "kb", None))
+        # Someone tapped this run and waits on it: a moment's pause the source's host asks for
+        # (Alpha Vantage's "1 request per second", right after the YES kick fetched) is waited
+        # out once, as a build waits it (ni_polite.waiting); a longer one is the 409 below.
+        with ni_polite.waiting(ni_polite.BURST_WAIT_S):
+            result = ni.run_item(store, item_id, gateway_mod=gateway,
+                                 secrets_store=secrets, schedules_store=schedules,
+                                 kb=getattr(state, "kb", None))
     except ni.NIError as exc:
         if exc.kind in ("render_busy", "host_busy"):  # B3a/S5a: capacity, never a failure — the card stays as it was
+            # ...and as due as it was: the stamp above kept the tick off a run in flight, and no run happened
+            store.restore_checked(item_id, item.get("last_checked"), item.get("last_status"))
             return {"status": "busy", "kind": exc.kind, "code": exc.kind,
                     "duration_ms": int((time.monotonic() - started) * 1000)}
         store.mark_checked(item_id, exc.kind[:200])

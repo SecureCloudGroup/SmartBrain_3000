@@ -398,8 +398,9 @@ def engaged(port: int | None = None, robots: bool | None = None):
 
 @contextlib.contextmanager
 def waiting(seconds: float = BUILD_WAIT_S):
-    """Run the body (a card build someone is waiting on) so a host over SmartBrain's own budget is waited for, up to
-    ``seconds`` in all on this thread, instead of refused. Refreshes never wait: a busy host defers them. Nested, it
+    """Run the body (a card build, or a run someone tapped, that a person is waiting on) so a host over SmartBrain's
+    own budget is waited for, up to ``seconds`` in all on this thread, instead of refused. The engine's refreshes
+    never wait: a busy host defers them. Nested, it
     never grants more than the allowance left, and what the inner body waits is charged to the outer one. The time
     slept is counted from zero for the outermost span and dropped when it ends, so it never leaks past the build."""
     assert 0.0 <= seconds <= RETRY_AFTER_CAP_S, "a bounded wait"

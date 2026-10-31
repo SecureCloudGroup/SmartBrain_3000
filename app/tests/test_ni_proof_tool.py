@@ -12,6 +12,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +28,15 @@ from test_ni_proof_asks import (
     fixture,
 )
 
-from smartbrain_3000 import gateway, netguard, ni_flow
+from smartbrain_3000 import (
+    gateway,
+    netguard,
+    ni,
+    ni_flow,
+    ni_message,
+    ni_polite,
+    ni_routes,
+)
 
 TOOL = pathlib.Path(__file__).resolve().parents[2] / "tools" / "ni-proof.py"
 pytestmark = pytest.mark.skipif(not TOOL.exists(), reason="the proof tool ships in the repository only")
@@ -83,9 +92,10 @@ def _api(client: TestClient):
     return call
 
 
-def _run(tool, client, out: pathlib.Path, *args: str, environ: dict | None = None) -> tuple[int, dict, str]:
+def _run(tool, client, out: pathlib.Path, *args: str, environ: dict | None = None,
+         api=None) -> tuple[int, dict, str]:
     code = tool.main(["--ask", ASK, "--timeout", "60", "--poll", "0.05", "--out", str(out), *args],
-                     api=_api(client), environ=environ or {})
+                     api=api or _api(client), environ=environ or {})
     reports = sorted(out.glob("*.json"))
     assert len(reports) <= 1
     report = json.loads(reports[0].read_text(encoding="utf-8")) if reports else {}
@@ -104,6 +114,7 @@ def test_the_nvda_ask_is_observed_from_the_words_to_a_refreshed_card(tool, app, 
                                   "www.alphavantage.co=SB_PROOF_AV", "--yes", "--refresh", "--expect", "built",
                                   environ={"SB_PROOF_AV": AV_KEY})
     assert code == 0 and report["end"] == "built" and report["met"] is True, (report.get("end"), report["events"])
+    assert report["why_not"] == [] and "Not met" not in markdown
     assert [t["tap"] for t in report["taps"]] == ["consent", "key:www.alphavantage.co", "yes"]
     assert all(t["status"] == 200 for t in report["taps"])
     asked = [e.get("asks") for e in report["events"]]
@@ -158,6 +169,113 @@ def test_consent_stop_reports_the_question_and_sends_nothing(tool, app, monkeypa
     assert code == 0 and report["end"] == "stopped" and report["taps"] == []
     assert report["events"][-1]["asks"] == "model_consent" and sum(model.calls.values()) == 0
     assert replay.fetched == []
+
+
+# ---- what the first run on T's Mac showed (2026-10-31 13:47Z) ---------------------------------------------------
+# The NVDA card built there in 16 s from Alpha Vantage on claudecode/opus, price 204.64. The tool's refresh came
+# 0.2 s after the YES's own run; Alpha Vantage answered its "1 request per second" sentence; the route said "the
+# local page browser is busy" (no page browser was involved), left the card stamped as checked so its first
+# scheduled proof moved a whole cadence out, and the tool still reported the run as met.
+
+@pytest.fixture
+def polite_clock(monkeypatch):
+    """The politeness layer's clock as a test clock: a wait the host asks for moves it and is recorded."""
+    clock = SimpleNamespace(now=1000.0, slept=[])
+
+    def sleep(seconds: float) -> None:
+        clock.slept.append(seconds)
+        clock.now += seconds
+
+    monkeypatch.setattr(ni_polite, "_clock", lambda: clock.now)
+    monkeypatch.setattr(ni_polite, "_sleep", sleep)
+    return clock
+
+
+def _limited_from_the_refresh(client: TestClient, replay: _Replay, answers: list[str]):
+    """The app's API as the tool calls it, Alpha Vantage answering ``answers`` from the refresh on: the YES's run
+    has just fetched, and a second request inside a second gets the limit sentence."""
+    call = _api(client)
+
+    def api(method: str, path: str, body: dict | None = None):
+        if method == "POST" and path.endswith("/run"):
+            replay.serve(AV_QUOTE, answers)
+        return call(method, path, body)
+    return api
+
+
+def test_a_refresh_right_after_yes_waits_the_sources_second_out_and_reads_the_quote(tool, app, monkeypatch, tmp_path,
+                                                                                    polite_clock) -> None:
+    """A run someone tapped waits the second the host named, once, as a build does, asks again and reads the
+    quote: the refresh is ok and the card goes live."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    _wire(monkeypatch, ROWS_NVDA["rows"], replay)
+    api = _limited_from_the_refresh(app, replay, ["alphavantage-burst-limited", "alphavantage-global-quote"])
+    code, report, _ = _run(tool, app, tmp_path / "out", "--key", "www.alphavantage.co=SB_PROOF_AV", "--yes",
+                           "--refresh", "--expect", "built", environ={"SB_PROOF_AV": AV_KEY}, api=api)
+    assert code == 0 and report["met"] is True and report["why_not"] == [], report.get("why_not")
+    assert report["refresh"]["status"] == 200 and report["refresh"]["answer"]["status"] == "ok"
+    assert polite_clock.slept == [ni_message.WAIT_SECOND_S], "the second the host named, waited once"
+    assert replay.fetched[-2:] == [f"{AV_QUOTE}&apikey={AV_KEY}"] * 2, "the limited request, and once more"
+    assert report["card"]["state"] == "live"
+
+
+def test_a_refresh_the_source_still_refuses_says_so_and_leaves_the_card_as_due_as_it_was(tool, app, monkeypatch,
+                                                                                         tmp_path,
+                                                                                         polite_clock) -> None:
+    """The host asks again after the wait: the refresh is a 409 with the host's code and a sentence about the
+    source (never the page browser), the run is not met and the report says why, and the card is exactly as due
+    as the YES left it, so the engine's next pass makes its first scheduled proof once the host allows."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    _wire(monkeypatch, ROWS_NVDA["rows"], replay)
+    api = _limited_from_the_refresh(app, replay, ["alphavantage-burst-limited"])
+    code, report, markdown = _run(tool, app, tmp_path / "out", "--key", "www.alphavantage.co=SB_PROOF_AV", "--yes",
+                                  "--refresh", "--expect", "built", environ={"SB_PROOF_AV": AV_KEY}, api=api)
+    assert code == 1 and report["end"] == "built" and report["met"] is False
+    assert report["refresh"] == {"status": 409, "answer": {"detail": ni_routes._HOST_BUSY_DETAIL,
+                                                           "code": "host_busy"}}
+    assert "page browser" not in ni_routes._HOST_BUSY_DETAIL
+    assert report["why_not"][0].startswith("the refresh answered HTTP 409") and "Not met: the refresh" in markdown
+    store = app.app.state.ni
+    item = store.get_item(report["item_id"])
+    assert item["state"] == "commissioning" and item["consecutive_failures"] == 0
+    assert item["last_checked"] is None, "as due as the YES left it: its first scheduled proof is the next pass"
+    polite_clock.now += ni_message.WAIT_SECOND_S + 1
+    replay.serve(AV_QUOTE, "alphavantage-global-quote")
+    ni.tick(app.app)
+    item = store.get_item(report["item_id"])
+    assert item["state"] == "live" and item["last_status"] == "ok", "the card refreshed on its own"
+
+
+def test_the_watch_waits_for_the_next_scheduled_run_and_stops_at_it(tool) -> None:
+    """``--watch``: the ask's own cadence is what is being proved. The watch only reads the card, and stops at
+    the first new run that read the source; a window with none is not met, and the report says so."""
+    clock = SimpleNamespace(now=0.0)
+    runs = [{"ts": "2026-10-31 13:47:16", "status": "ok", "duration_ms": 140, "error": None}]
+
+    def api(method: str, path: str, body: dict | None = None):
+        assert method == "GET" and body is None, "the watch only reads"
+        if path == "/api/ni/board":
+            return 200, {"items": [{"id": "c1", "state": "live", "summary": "price: 204.64",
+                                    "payload": {"price": 204.64}}]}
+        return 200, {"runs": list(runs)}
+
+    def sleep(seconds: float) -> None:
+        clock.now += seconds
+        if clock.now >= 1800 and len(runs) == 1:   # the engine's pass, 30 minutes after the refresh
+            runs.insert(0, {"ts": "2026-10-31 14:17:30", "status": "ok", "duration_ms": 150, "error": None})
+
+    plan = tool.Plan(ask=ASK, refresh=True, watch_s=33 * 60.0)
+    seen = tool._watch_runs(api, "c1", {"state": "live", "runs": list(runs)}, plan, lambda: clock.now, sleep,
+                            lambda line: None)
+    assert seen["ok_runs"] == 1 and [r["ts"] for r in seen["runs"]] == ["2026-10-31 14:17:30"]
+    assert 1800 <= seen["waited_s"] <= 1800 + tool.WATCH_POLL_MAX_S, "stopped at the run, not at the window"
+    report = {"end": "built", "refresh": {"status": 200, "answer": {"status": "ok"}},
+              "watch": {"minutes": 1.0, "runs": [], "ok_runs": 0}}
+    refreshed, watched, why = tool.asked_for(report, tool.Plan(ask=ASK, refresh=True, watch_s=60.0))
+    assert refreshed is True and watched is False and why == ["no scheduled run read the source within 1.0 min"]
+    assert tool.met("built", {"values": [1]}, "built", refreshed=True, watched=False) is False
+    assert tool.met("built", {"values": [1]}, "built", refreshed=False) is False
+    assert tool.met("built", {"values": [1]}, "built") is True, "nothing asked beyond the build"
 
 
 # ---- the pieces -------------------------------------------------------------------------------------------------

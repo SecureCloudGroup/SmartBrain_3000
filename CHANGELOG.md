@@ -31,6 +31,13 @@ to know when a release changes behavior.
   holds ends the build failed with Retry and the host's own words, never declined and never researched past. A
   kept card's refresh stays due and is never marked failed, so a spent quota no longer runs the card toward broken.
   While the host's pause holds, every request to it is held back with the host's words.
+- Neural Interface: a refresh you tap waits out a source's one-second limit once, as a build does, then reads the
+  source. On T's Mac the first refresh after Keep came within a second of the card's own first run, Alpha Vantage
+  answered its "1 request per second" sentence, and the card said "the local page browser is busy", with no page
+  browser involved. A source that still can't take the request is now answered as such (code `host_busy`), and a
+  run that never happened leaves the card exactly as due as it was. Before, it stamped the card as checked, so a
+  card waiting on its first check after Keep stayed unconfirmed for a whole cadence. The same holds when the page
+  browser is busy.
 - Neural Interface: the key check compares hosts. A key given on a card for one source (Alpha Vantage) no longer
   counts as the key for another host's row (Finnhub) on the same card: the card asks for that host's key, instead of
   fetching with the wrong one and dropping the row when the host-bound loader refused it.
@@ -53,8 +60,10 @@ to know when a release changes behavior.
   fix requires: it types the ask, answers only what it is told to (the model consent, a key from an environment
   variable, the YES, one refresh), and writes every state the card passed through, its reading, the model calls
   per step and the audit rows, as JSON and Markdown. It never prints or writes a key: the report is refused if
-  one is in it. `tools/ni-scratch.py` runs it against a throwaway app from the checkout with the install's routes
-  copied read-only, its own data folder, and no contact with the install's model gateway.
+  one is in it. With `--watch MINUTES` it waits for the card's next scheduled run, and a built card whose refresh
+  or scheduled run did not happen does not pass. `tools/ni-scratch.py` runs it against a throwaway app from the
+  checkout with the install's routes copied read-only, its own data folder, and no contact with the install's
+  model gateway.
 - `tools/ni-capture-fixtures.py` records real provider bodies (Alpha Vantage, Finnhub, Open-Meteo) as test
   fixtures through the app's guarded fetch, keys redacted; `tools/ni-library-rows.py` records the rows the
   installed Library pack offers for an ask. `app/tests/test_ni_proof_asks.py` replays both through the production
