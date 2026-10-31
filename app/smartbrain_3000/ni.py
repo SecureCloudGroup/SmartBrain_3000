@@ -41,8 +41,8 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from email.utils import parsedate_to_datetime
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urlparse, urlunsplit
 from urllib.parse import quote as _url_quote
-from urllib.parse import urlencode, urlparse, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -8283,18 +8283,19 @@ def _fetch_http_json(source: dict, item_id: str, secrets_store) -> dict:
     fmt = source.get("format") or "json"
     from . import ni_polite  # lazy, like the imports above
     port = ni_polite.declared_port(source)  # S5a: the Library row's port, or the sealed URL's own
-    if fmt == TABLE_FORMAT:
-        return _fetch_http_table(url, source["table"], port)
-    if fmt == "json":
-        try:
-            return ni_fetch.fetch_parsed(
-                url, "json", headers=resolved_headers or None,
-                allow_redirects=not has_headers,  # E: refuse hop when carrying any header
-                port=port,
-            )
-        except netguard.FetchError as exc:
-            raise _fetch_error(exc) from None
-    return _fetch_http_textual(url, fmt, resolved_headers, has_headers, port)
+    with netguard.scrubbing(request_secrets(source, url, resolved_headers)):  # a body never hands the key on
+        if fmt == TABLE_FORMAT:
+            return _fetch_http_table(url, source["table"], port)
+        if fmt == "json":
+            try:
+                return ni_fetch.fetch_parsed(
+                    url, "json", headers=resolved_headers or None,
+                    allow_redirects=not has_headers,  # E: refuse hop when carrying any header
+                    port=port,
+                )
+            except netguard.FetchError as exc:
+                raise _fetch_error(exc) from None
+        return _fetch_http_textual(url, fmt, resolved_headers, has_headers, port)
 
 
 def _fetch_http_table(url: str, locator: dict, port: int | None) -> dict:
@@ -8377,6 +8378,18 @@ def http_request_parts(source: dict, item_id: str, secrets_store) -> tuple[str, 
     return url, headers
 
 
+def request_secrets(source: dict, url: str, headers: dict[str, str]) -> tuple[str, ...]:
+    """The credential values ``http_request_parts`` put on a request (its ``$secret`` headers, its ``secret_query``
+    parameters), for ``netguard.scrubbing`` around the fetch: a provider that names the key in its answer (Alpha
+    Vantage's spent daily quota) never hands it to the card's words, its record or a model."""
+    assert isinstance(source, dict) and isinstance(url, str) and isinstance(headers, dict), "a request's parts"
+    values = [headers.get(str(name), "") for name, value in (source.get("headers") or {}).items()
+              if isinstance(value, dict) and "$secret" in value]  # bounded by _MAX_HEADERS
+    query = parse_qs(urlparse(url).query, keep_blank_values=True)
+    values += [v for name in (source.get("secret_query") or {}) for v in query.get(str(name), [])]  # bounded: ≤2
+    return tuple(v for v in values if isinstance(v, str) and v)
+
+
 def contact_email(secrets_store) -> str | None:
     """The contact email the user typed for ``contact_ua`` providers, or None."""
     if secrets_store is None:
@@ -8455,15 +8468,16 @@ def _fetch_http_page_polite(source: dict, item_id: str, secrets_store, *,
             resolved_headers[name] = value
     has_headers = bool(resolved_headers)
     try:
-        got = netguard.safe_fetch_page(
-            url, headers=resolved_headers or None,
-            allow_redirects=not has_headers,  # E: refuse hop when carrying any header
-            # Overall wall-clock bound on the body read: without it a drip host
-            # (a chunk every <8s) stretches a 2MB read to minutes INSIDE the
-            # scheduler tick thread (the phase-2b D5 lesson). 15s fetch + 20s
-            # jail caps this item's worst case at ~35s.
-            deadline_seconds=_PAGE_FETCH_DEADLINE_S,
-        )
+        with netguard.scrubbing(request_secrets(source, url, resolved_headers)):  # a page never hands the key on
+            got = netguard.safe_fetch_page(
+                url, headers=resolved_headers or None,
+                allow_redirects=not has_headers,  # E: refuse hop when carrying any header
+                # Overall wall-clock bound on the body read: without it a drip host
+                # (a chunk every <8s) stretches a 2MB read to minutes INSIDE the
+                # scheduler tick thread (the phase-2b D5 lesson). 15s fetch + 20s
+                # jail caps this item's worst case at ~35s.
+                deadline_seconds=_PAGE_FETCH_DEADLINE_S,
+            )
     except netguard.FetchError as exc:
         raise _fetch_error(exc) from None
     body = got.get("content") if isinstance(got, dict) else None
@@ -8599,7 +8613,7 @@ def _fetch_http_image_polite(source: dict, item_id: str,
         elif isinstance(value, str):
             resolved_headers[name] = value
     has_headers = bool(resolved_headers)
-    try:
+    try:  # not scrubbed (``netguard.scrubbing``): no words are read from pixels, and a byte swap could break them
         got = netguard.safe_fetch_image(
             url, headers=resolved_headers or None,
             allow_redirects=not has_headers,

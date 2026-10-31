@@ -337,3 +337,33 @@ def test_numbers_are_read_off_the_payload_with_where_they_sit(tool) -> None:
                                         {"at": "n", "value": 3}]
     assert tool.met("built", {"values": []}, "built") is False, "built means a number on the card"
     assert tool.met("declined", {}, "not-built") and not tool.met("timeout", {}, "any")
+
+
+def test_no_line_the_tool_prints_holds_a_key_or_the_token(tool, tmp_path, capsys) -> None:
+    """Review of #569: the report file refuses a key, but the lines printed on the way there (the card's reason, a
+    refusal) went out as they came, and those lines are pasted where the report goes. Every printed line has the
+    run's keys and the token scrubbed first, whatever put one there."""
+    key = "QWERTYUIOPASDFGH"
+
+    def api(method: str, path: str, body: dict | None = None):
+        if path == "/api/health":
+            return 200, {"version": "test"}
+        if path == "/api/ni/step-models":
+            return 200, {"steps": []}
+        if path == "/api/ni/intake":
+            return 200, {"id": "c1"}
+        if path == "/api/ni/items/c1/flow":
+            return 200, {"id": "c1", "state": "draft", "actions": ["delete"],
+                         "flow": {"state": "failed", "reason": f"The source said: We have detected your API key as {key}",
+                                  "error": f"waited: www.alphavantage.co asked SmartBrain to wait: key {key}"}}
+        return 200, {}
+
+    out = tmp_path / "out"
+    code = tool.main(["--ask", ASK, "--key", "www.alphavantage.co=SB_PROOF_AV", "--timeout", "5", "--poll", "0.01",
+                      "--out", str(out)], api=api, environ={"SB_PROOF_AV": key})
+    printed = capsys.readouterr()
+    assert code == 2 and not out.exists(), "the report would hold the key: nothing was written"
+    assert key not in printed.out + printed.err, printed
+    assert f"API key as {tool.SCRUBBED}" in printed.out and "nothing was written" in printed.err
+    assert tool.scrubbed("token=tok-1 key=tok-1-and-more", ["tok-1", "tok-1-and-more", ""]) == \
+        f"token={tool.SCRUBBED} key={tool.SCRUBBED}", "the longest first, so no part of a key is left"

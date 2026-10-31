@@ -67,3 +67,40 @@ def test_redaction_is_fast_on_hostile_lines() -> None:
         start = time.perf_counter()
         logredact.redact(text)
         assert time.perf_counter() - start < 0.5, f"slow on {shape!r}"
+
+
+def test_a_traceback_that_names_a_keyed_url_is_redacted(caplog) -> None:
+    """The review of #569 reproduced it: ``log.exception`` over an HTTP client's status error prints the URL
+    the request went to, key and all, from the traceback, which the message factory alone never saw."""
+    import httpx
+
+    logredact.install()
+    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=NVDA&apikey={KEY}"
+    request = httpx.Request("GET", url)
+    log = logging.getLogger("smartbrain.test.redact.trace")
+    with caplog.at_level(logging.DEBUG, logger="smartbrain.test.redact.trace"):
+        try:
+            httpx.Response(401, request=request).raise_for_status()
+        except httpx.HTTPStatusError:
+            log.exception("fetch failed for %s", "card-1")
+        try:
+            raise ValueError("no key in this one")
+        except ValueError:
+            log.exception("plain failure")
+    assert KEY in url and "card-1" in caplog.text and "HTTPStatusError" in caplog.text, caplog.text
+    assert KEY not in caplog.text and "apikey=[redacted]" in caplog.text, caplog.text
+    failed, plain = caplog.records
+    assert failed.exc_info is None and KEY not in failed.exc_text, "the raw exception is not kept for a handler"
+    assert plain.exc_info is not None and "no key in this one" in caplog.text, "a clean traceback is left as it is"
+
+
+def test_a_stack_that_names_a_keyed_url_is_redacted(caplog) -> None:
+    """``stack_info`` prints the caller's source lines; one that holds a keyed URL is redacted like a message."""
+    logredact.install()
+    log = logging.getLogger("smartbrain.test.redact.stack")
+    with caplog.at_level(logging.DEBUG, logger="smartbrain.test.redact.stack"):
+        record = logging.getLogRecordFactory()(
+            "smartbrain.test.redact.stack", logging.WARNING, __file__, 1, "asked from here", (), None,
+            sinfo=f"Stack (most recent call last):\n  fetch('https://h.example/?symbol=NVDA&token={KEY}')")
+        log.handle(record)
+    assert KEY not in caplog.text and "token=[redacted]" in caplog.text and "symbol=NVDA" in caplog.text

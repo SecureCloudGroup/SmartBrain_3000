@@ -4334,9 +4334,11 @@ def _fetch_with_access(url: str, fmt: str | None, access: dict, item_id: str, po
         raise ni.NIError("secret_missing", "the key store is locked")
     source = {"type": "http_json", "url": url, **_access_source(access, item_id)}
     full_url, headers = ni.http_request_parts(source, item_id, secrets_store)
-    if fmt is None:
-        return _ni_fetch.sniff_fetch(full_url, headers=headers or None, allow_redirects=False, port=port)
-    return _ni_fetch.fetch_parsed(full_url, fmt, headers=headers or None, allow_redirects=False, port=port)
+    # the body never hands the key on (a provider that names it in a sentence: the build keeps a source's words)
+    with _netguard_mod.scrubbing(ni.request_secrets(source, full_url, headers)):
+        if fmt is None:
+            return _ni_fetch.sniff_fetch(full_url, headers=headers or None, allow_redirects=False, port=port)
+        return _ni_fetch.fetch_parsed(full_url, fmt, headers=headers or None, allow_redirects=False, port=port)
 
 
 # the shared fetch-and-parse path (``ni_fetch``, P33); these names stay for the flow's callers and tests
@@ -5081,11 +5083,13 @@ def missing_access(store: ni.NIStore, item_id: str, secrets_store, *, copy: bool
         # the same card (T's Mac, 2026-10-30: the Alpha Vantage key sat on the card while the Finnhub row was tried)
         # is not this host's key, and the loader refuses it at fetch time — so the card asks, instead of dropping
         # the row with no fetch
-        have = placed and _card_key_host(secrets_store, item_id) == _access_host(access)
-        if copy and not have and secrets_store is not None and placed and not access.get("named"):
-            reuse = ni.find_reusable_credential(secrets_store, KEY_PARAM, access["host"])
+        # (and a row with no host has no key to count: no stored key, no host, is not a match: review of #569)
+        host = _access_host(access)
+        have = placed and host is not None and _card_key_host(secrets_store, item_id) == host
+        if copy and not have and secrets_store is not None and placed and host and not access.get("named"):
+            reuse = ni.find_reusable_credential(secrets_store, KEY_PARAM, host)
             if reuse is not None:
-                ni.put_credential(secrets_store, item_id, KEY_PARAM, reuse, access["host"])
+                ni.put_credential(secrets_store, item_id, KEY_PARAM, reuse, host)
                 _try_journal(store, item_id, "param_changed",
                              f"reused your existing {access['host']} key for this card")
                 have = True
@@ -5135,7 +5139,7 @@ def _patch_access(store: ni.NIStore, item_id: str, **fields: object) -> None:
 def _reused_key(store: ni.NIStore, item_id: str, access: dict, secrets_store) -> tuple[str, dict] | None:
     """The same-host key the user gave another card and where it goes, for the user's own tap; None when there is
     none, the card's key was refused, or the lookup faults (a fault asks for the key, never fails the card)."""
-    if secrets_store is None or access.get("refused"):
+    if secrets_store is None or access.get("refused") or _access_host(access) is None:
         return None
     try:
         value = ni.find_reusable_credential(secrets_store, KEY_PARAM, access["host"], named_too=True)

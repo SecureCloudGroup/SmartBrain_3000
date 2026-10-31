@@ -517,6 +517,155 @@ def test_a_refresh_the_host_asks_to_wait_stays_due_and_is_never_a_failure(monkey
     assert len(replay.fetched) == 3, "the build's sample, the limited refresh, the refresh after the pause"
 
 
+# ---- the key stays the user's ------------------------------------------------------------------------------------
+
+def _quota_spent(key: str) -> dict:
+    """Alpha Vantage's answer once a key's 25 requests for the day are spent, as publicly reported (users quoting it,
+    found 2026-10-31): it names the key it was sent. NOT captured, so it is no fixture of the catalogue
+    (``test_every_provider_fixture_is_captured``): capturing it spends a key's whole day. These tests rely only on
+    the key being in it and on its window being a day; the rest is the captured burst answer's (status, content
+    type, host)."""
+    return {**fixture("alphavantage-burst-limited"), "captured": False,
+            "body": {"Information": f"We have detected your API key as {key} and our standard API rate limit is 25 "
+                                    "requests per day. Please subscribe to any of the premium plans at "
+                                    "https://www.alphavantage.co/premium/ to instantly remove all daily rate limits."}}
+
+
+def _serve_body(replay: _Replay, url: str, fx: dict) -> None:
+    replay.serves[_base(url)] = [fx]
+    replay._sent[_base(url)] = 0
+
+
+class _Recording(_Model):
+    """The scripted model, keeping every prompt it was sent."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.prompts: list[str] = []
+
+    def __call__(self, model: str, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return super().__call__(model, prompt)
+
+
+def _kept(store: ni.NIStore, item_id: str) -> str:
+    """Everything the card keeps that a person, a phone or a model can read: its record (notes, error, what it
+    waited on), its History, what the card shows, its spec, its snapshots and its runs."""
+    item = store.get_item(item_id) or {}
+    runs = store.conn.execute("SELECT * FROM ni_runs WHERE item_id = ?;", [item_id]).fetchall()
+    return json.dumps([ni_flow._flow_read(store, item_id), store.read_journal(item_id),
+                       ni_flow.board_flow_field(store, item_id, read_only=True), item.get("spec"),
+                       store.read_snapshot(item_id, "preview"), store.read_snapshot(item_id, "latest"),
+                       [[str(v) for v in row] for row in runs]], default=str)
+
+
+# The sentence reader already hides a word shaped like a token (16 or more letters and digits, ``ni_message``); a key of
+# another shape went through to every place a build keeps a source's words: all letters (one Alpha Vantage key in
+# about 200 has no digit) or shorter than 16. The body is now scrubbed of the request's own key at the fetch.
+LETTERS_KEY = "QWERTYUIOPASDFGH"
+
+
+@pytest.mark.parametrize("key", [AV_KEY, LETTERS_KEY], ids=["token-shaped", "letters-only"])
+def test_a_spent_quota_that_names_the_key_ends_the_build_with_its_window_and_keeps_no_key(monkeypatch, _t_install,
+                                                                                        key) -> None:
+    """The card every 30 minutes asks Alpha Vantage 48 times a day; its free key allows 25, then answers with a
+    sentence that names the key. A build keeps a source's words (its error, History, what it waited on, what the
+    politeness layer repeats to every request while the host's pause holds). The body is scrubbed at the fetch, so
+    the key is nowhere the card keeps nor in any prompt, whatever its shape; the build ends with a retry and a
+    line that says a retry waits for the limit to reset (not "Retry later"); the day's limit is never waited out."""
+    rows = [ROWS_NVDA["rows"][0], ROWS_NVDA["rows"][2]]   # the two Alpha Vantage rows
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": key})
+    _serve_body(replay, AV_QUOTE, _quota_spent(key))
+    model = _Recording()
+    store, item_id, secrets = _card(monkeypatch, rows, replay)
+    ni_flow.run_flow(store, item_id, gateway_call=model)
+    ni_flow.give_access(store, item_id, secrets, key=key, email=None)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)
+    assert out["state"] == "failed" and ni_master.error_class_of(out["error"]) == "waited", out
+    assert replay.fetched == [f"{AV_QUOTE}&apikey={key}"], "asked once: a day's limit is never waited out"
+    assert _t_install.slept == [] and model.calls["mapping"] == 0
+    assert f"asked SmartBrain to wait: We have detected your API key as {netguard.SCRUBBED} and" in out["error"]
+    assert ni_master.reason_for("failed", out["error"]) == ni_master._WAITED_BY_WINDOW[ni_message.WAIT_LONG_S]
+    assert "A retry before the limit resets ends the same way" in ni_master.reason_for("failed", out["error"])
+    assert key not in _kept(store, item_id), "the key is nowhere the card keeps"
+    assert netguard.SCRUBBED in ni_polite.SHARED._said("www.alphavantage.co")
+    assert key not in ni_polite.SHARED._said("www.alphavantage.co"), "nor in what the pause repeats"
+    assert model.prompts and not any(key in p for p in model.prompts), "nor in any prompt"
+
+
+def test_a_refresh_that_meets_the_spent_quota_stays_due_for_its_window_and_keeps_no_key(monkeypatch,
+                                                                                       _t_install) -> None:
+    """The kept card's refresh meets the spent quota: the card stays due (a capacity status, no failure), the host
+    is paused for the window the sentence names (the hour cap, not a second), nothing is sent while it holds, and
+    the key is in neither the refusal, nor what the pause repeats to every request, nor anything the card keeps."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": LETTERS_KEY})
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    ni_flow.run_flow(store, item_id, gateway_call=_Model())
+    ni_flow.give_access(store, item_id, secrets, key=LETTERS_KEY, email=None)
+    _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=AV_QUOTE), AV_QUOTE)
+    monkeypatch.setattr(ni, "_clock", lambda: datetime.now().astimezone() + timedelta(minutes=31))
+    _serve_body(replay, AV_QUOTE, _quota_spent(LETTERS_KEY))
+    with pytest.raises(ni.NIError) as busy:
+        ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
+    assert busy.value.kind == "host_busy" and LETTERS_KEY not in str(busy.value)
+    assert LETTERS_KEY not in ni_polite.SHARED._said("www.alphavantage.co"), "the pause repeats no key"
+    _t_install.now += ni_message.WAIT_MINUTE_S
+    with pytest.raises(ni.NIError) as still:
+        ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
+    assert still.value.kind == "host_busy" and len(replay.fetched) == 2, "nothing sent while the day's pause holds"
+    assert store.get_item(item_id)["consecutive_failures"] == 0
+    assert LETTERS_KEY not in _kept(store, item_id)
+
+
+def test_no_log_record_holds_the_key_over_the_keyed_build_and_refresh_on_the_real_http_client(monkeypatch, caplog,
+                                                                                            _t_install) -> None:
+    """Postmortem M6, end to end. The keyed NVDA build and a refresh run over the real HTTP client: ``httpx`` with a
+    stub transport in place of the network, so everything above it is production (netguard's pinned request, the
+    politeness layer, the key store, the request builder). Every logger is at DEBUG, the HTTP client's own included,
+    whose INFO request line names the URL and its key: each such line reaches the handler redacted, and no record
+    holds the key (message, arguments or traceback)."""
+    import logging
+
+    import httpx
+
+    from smartbrain_3000 import logredact
+
+    real_once = netguard._guarded_get_once
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    monkeypatch.setattr(netguard, "_guarded_get_once", real_once)   # the real guarded request, not the replay
+    sent: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        url = f"https://{request.headers['host']}{request.url.raw_path.decode('ascii')}"
+        sent.append(url)
+        fx = replay.serves[_base(url)][0]
+        return httpx.Response(int(fx["status"]), headers={"content-type": fx["content_type"]},
+                              content=json.dumps(fx["body"]).encode("utf-8"))
+
+    class _Stubbed(httpx.Client):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(transport=httpx.MockTransport(answer), **kwargs)
+
+    monkeypatch.setattr(netguard.httpx, "Client", _Stubbed)
+    monkeypatch.setattr(netguard, "_validated_ip", lambda host: "93.184.216.34")
+    logredact.install()
+    with caplog.at_level(logging.DEBUG), caplog.at_level(logging.DEBUG, logger="httpx"), \
+            caplog.at_level(logging.DEBUG, logger="httpcore"):
+        ni_flow.run_flow(store, item_id, gateway_call=_Model())
+        ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
+        _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=AV_QUOTE), AV_QUOTE)
+        monkeypatch.setattr(ni, "_clock", lambda: datetime.now().astimezone() + timedelta(minutes=31))
+        ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
+    assert sent == [f"{AV_QUOTE}&apikey={AV_KEY}"] * 2, "the build's sample and the refresh, over the client"
+    assert store.read_snapshot(item_id, "latest")["ok"]
+    lines = [r.getMessage() for r in caplog.records if r.name == "httpx"]
+    assert len(lines) == 2 and all("HTTP Request: GET" in m and "apikey=[redacted]" in m for m in lines), lines
+    assert AV_KEY not in caplog.text
+    assert not any(AV_KEY in r.getMessage() or AV_KEY in repr(r.args) or AV_KEY in (r.exc_text or "")
+                   for r in caplog.records)
+
+
 # ---- the card's key is for one host ------------------------------------------------------------------------------
 
 def test_the_cards_key_for_another_host_does_not_count_for_this_row(monkeypatch) -> None:
@@ -558,6 +707,24 @@ def test_missing_access_counts_only_a_key_bound_to_the_rows_host() -> None:
     ni.put_credential(secrets, item_id, ni_flow.KEY_PARAM, FH_KEY, "Finnhub.IO")   # stored normalized
     assert ni_flow.missing_access(store, item_id, secrets, copy=False) == []
     assert ni_flow._card_key_host(secrets, item_id) == "finnhub.io" and ni_flow._card_key_host(secrets, "none") is None
+
+
+def test_a_row_with_no_host_and_a_card_with_no_key_is_no_match() -> None:
+    """Review of #569: the host check compared the card's key host with the row's, and with neither (no key stored,
+    a sealed access with no host) None equalled None, so the card counted a key it does not have and skipped the
+    pause. Nothing is copied or offered for a row with no host either."""
+    store = _store()
+    secrets = SecretStore(store.conn, gen_master_key())
+    item_id = ni_flow.create_shell_item(store, ASK)
+    record = ni_flow._make_record(ASK, "source")
+    for access in ({"key": {"in": "query", "name": "apikey"}, "host": ""},
+                   {"key": {"in": "query", "name": "apikey"}}):
+        ni_flow._flow_write(store, item_id, {**record, "_access": access})
+        assert ni_flow._card_key_host(secrets, item_id) is None
+        assert ni_flow.missing_access(store, item_id, secrets) == ["key"], access
+        assert ni_flow.missing_access(store, item_id, secrets, copy=False) == ["key"], access
+        assert secrets.get(f"ni:{item_id}:{ni_flow.KEY_PARAM}") is None, "nothing copied"
+        assert not (ni_flow._flow_read(store, item_id) or {})["_access"].get("reuse"), "nothing offered"
 
 
 # ---- a series filed under dates ----------------------------------------------------------------------------------

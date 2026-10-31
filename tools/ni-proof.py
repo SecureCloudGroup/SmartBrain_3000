@@ -293,11 +293,13 @@ def _access_tap(item: str, access: dict, actions: set, plan: Plan, done: set[str
 
 def observe(api: Api, plan: Plan, *, environ: dict | None = None, clock: Callable[[], float] = time.monotonic,
             sleep: Callable[[float], None] = time.sleep, say: Callable[[str], None] = print) -> dict:
-    """Type the ask, watch the card to its end, gather the evidence. Returns the report (no key or token in it)."""
+    """Type the ask, watch the card to its end, gather the evidence. Returns the report (no key or token in it).
+    Every line it says has the run's keys scrubbed out first, whatever put one there (a card's note, an answer)."""
     env = dict(os.environ if environ is None else environ)
     empty = [f"${name}" for name in plan.keys.values() if not str(env.get(name) or "").strip()]
     if empty:
         raise ProofError(f"no key in {', '.join(empty)}: nothing was asked")
+    say = _scrubbing(say, [str(env.get(name) or "") for name in plan.keys.values()])
     started, started_at = clock(), datetime.now(UTC)
     report: dict = {"ask": plan.ask, "started_at": started_at.isoformat(timespec="seconds"),
                     "plan": {**asdict(plan), "keys": dict(plan.keys)}, "app": _app_facts(api),
@@ -657,6 +659,23 @@ def _cell(text: object) -> str:
     return " ".join(str(text).replace("|", "/").split())[:TEXT_MAX]
 
 
+SCRUBBED = "[redacted]"
+
+
+def scrubbed(text: str, secrets: list[str]) -> str:
+    """``text`` with every key and the token in ``secrets`` replaced (longest first), for a line this prints: the
+    terminal is read by whoever runs the proof, and its lines are pasted where the report goes."""
+    assert isinstance(text, str), "a line"
+    for secret in sorted({s for s in secrets if s}, key=len, reverse=True):  # bounded: the keys given and the token
+        text = text.replace(secret, SCRUBBED)
+    return text
+
+
+def _scrubbing(say: Callable[[str], None], secrets: list[str]) -> Callable[[str], None]:
+    """``say``, with ``secrets`` scrubbed from every line first."""
+    return lambda line: say(scrubbed(line, secrets))
+
+
 def write_report(report: dict, out_dir: pathlib.Path, secrets: list[str]) -> tuple[pathlib.Path, pathlib.Path]:
     """Write ``<slug>-<time>.json`` and ``.md``; refuse (ValueError, nothing written) if a key or the token is in
     either, whatever put it there."""
@@ -703,29 +722,34 @@ def main(argv: list[str] | None = None, *, api: Api | None = None, environ: dict
     ap.add_argument("--out", default="ni-proof")
     args = ap.parse_args(argv)
     env = dict(os.environ if environ is None else environ)
+    secrets: list[str] = []   # the run's keys and the token: scrubbed from every line this prints
+
+    def shown(line: str, *, err: bool = False) -> None:
+        print(scrubbed(line, secrets), file=sys.stderr if err else sys.stdout)
+
     try:
         plan = Plan(ask=args.ask, consent=args.consent, keys=_key_args(args.key), reuse=args.reuse,
                     skip_keyless=args.skip_keyless, yes=args.yes, refresh=args.refresh,
                     watch_s=max(0.0, args.watch) * 60.0, timeout_s=args.timeout,
                     poll_s=args.poll)
         token = "" if api is not None else read_token(args.token_file, env)
+        secrets += [str(env.get(name) or "") for name in plan.keys.values()] + ([token] if token else [])
         base = args.base or str(env.get("SMARTBRAIN_PROOF_BASE") or "") or DEFAULT_BASE
-        report = observe(api or http_api(base, token), plan, environ=env)
+        report = observe(api or http_api(base, token), plan, environ=env, say=shown)
     except ProofError as exc:
-        print(f"ni-proof: {exc}", file=sys.stderr)
+        shown(f"ni-proof: {exc}", err=True)
         return 2
     report["expect"] = args.expect
     refreshed, watched, report["why_not"] = asked_for(report, plan)
     report["met"] = met(report["end"], report.get("card") or {}, args.expect, refreshed=refreshed, watched=watched)
-    secrets = [str(env.get(name) or "") for name in plan.keys.values()] + ([token] if token else [])
     try:
         paths = write_report(report, pathlib.Path(args.out).expanduser(), secrets)
     except ValueError as exc:
-        print(f"ni-proof: {exc}", file=sys.stderr)
+        shown(f"ni-proof: {exc}", err=True)
         return 2
-    print(f"report: {paths[0]}\n        {paths[1]}")
+    shown(f"report: {paths[0]}\n        {paths[1]}")
     if report["end"] == "error":
-        print(f"ni-proof: {report.get('error')}", file=sys.stderr)
+        shown(f"ni-proof: {report.get('error')}", err=True)
         return 2
     if report["end"] == "timeout":
         return 3

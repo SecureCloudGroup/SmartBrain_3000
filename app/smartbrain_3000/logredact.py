@@ -11,9 +11,10 @@ Two layers, both installed once from ``main`` at import:
 * the request loggers of the HTTP client (``httpx``, ``httpcore``) are raised to WARNING, so no request line
   is written at all — a URL is never log material here (``netguard`` reports fetch failures by class name for
   the same reason);
-* a log-record factory redacts a credential wherever one still appears in any logger's message: a key-bearing
-  query parameter (``apikey=``, ``token=``, ``key=``, ...), an authorization or API-key header value. The
-  factory runs for every record before any handler sees it, so a line a future module writes with a URL in
+* a log-record factory redacts a credential wherever one still appears in any logger's message, or in the
+  traceback or stack a record carries (``log.exception`` over an HTTP client error names the URL it was sent): a
+  key-bearing query parameter (``apikey=``, ``token=``, ``key=``, ...), an authorization or API-key header value.
+  The factory runs for every record before any handler sees it, so a line a future module writes with a URL in
   it is cleaned too.
 
 ``redact`` is pure and tested on its own; ``install`` is idempotent.
@@ -65,7 +66,10 @@ def redact(text: str) -> str:
 
 
 def _redacting_factory(inner):
-    """A ``logging`` record factory that formats the record's message once and stores it redacted."""
+    """A ``logging`` record factory that formats the record's message once and stores it redacted, and does the same
+    for the traceback (``exc_info``: an HTTP client's error names the URL it was sent, key and all) and the stack
+    (``stack_info``) a record carries. A traceback that needed it is kept as its redacted text only (``exc_text``,
+    which every formatter prints as is), so no handler can format the raw exception again."""
     assert callable(inner), "the factory to wrap"
 
     def factory(*args, **kwargs):
@@ -73,10 +77,21 @@ def _redacting_factory(inner):
         try:
             text = record.getMessage()
         except Exception:  # a record whose args don't format: leave it to the handler to report
-            return record
-        clean = redact(text)
-        if clean != text:
-            record.msg, record.args = clean, ()
+            text = None
+        if text is not None:
+            clean = redact(text)
+            if clean != text:
+                record.msg, record.args = clean, ()
+        if record.exc_info:
+            try:
+                trace = logging.Formatter().formatException(record.exc_info)
+            except Exception:  # an exception that won't format: the handler reports what it can
+                trace = None
+            clean = redact(trace) if trace is not None else None
+            if clean is not None and clean != trace:
+                record.exc_text, record.exc_info = clean, None
+        if isinstance(record.stack_info, str):
+            record.stack_info = redact(record.stack_info)
         return record
 
     return factory

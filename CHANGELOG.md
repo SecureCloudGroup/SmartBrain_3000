@@ -28,7 +28,9 @@ to know when a release changes behavior.
   build read the first as "No ready source answers this yet" (seen on T's Mac, 2026-10-31). The host is now paused
   for the window its sentence names (a second, a minute, an hour for a daily quota). A build someone is waiting on
   waits out a pause of up to 5 seconds once and asks again (a `Retry-After` of a few seconds too); a pause that
-  holds ends the build failed with Retry and the host's own words, never declined and never researched past. A
+  holds ends the build failed with Retry and the host's own words, never declined and never researched past, with
+  a line that names the window: a retry before an hourly or daily limit resets ends the same way, and the card says
+  so instead of "Retry later". A
   kept card's refresh stays due and is never marked failed, so a spent quota no longer runs the card toward broken.
   While the host's pause holds, every request to it is held back with the host's words.
 - Neural Interface: a refresh you tap waits out a source's one-second limit once, as a build does, then reads the
@@ -50,8 +52,15 @@ to know when a release changes behavior.
 - Neural Interface: a sentence in a sample (a provider's note or description) no longer counts as evidence that a
   numeric want is text.
 - Privacy: keys stay out of app.log. The HTTP client logged every request's full address at INFO, and a keyed
-  source's address carries the key in its query string. Those request lines are off, and every log line is redacted
-  of key-bearing query parameters and authorization headers before a handler writes it.
+  source's address carries the key in its query string. Those request lines are off, and every log line, with the
+  traceback or stack it carries, is redacted of key-bearing query parameters and authorization headers before a
+  handler writes it.
+- Privacy: a source's answer never hands the user's key on. Alpha Vantage answers a spent daily quota (its free key
+  allows 25 requests a day; a card every 30 minutes asks 48) with a sentence that names the key it was sent, and a
+  build keeps a source's words: its reason, History, what the card shows. The sentence reader hid a word shaped like
+  a token, but a key of another shape (all letters, or shorter than 16 characters) went through. Every body that
+  answers a keyed request now has that request's own key removed at the fetch, in every spelling a body could carry
+  it, before the rate-limit reader, the sentence reader, the path walker or a model sees it.
 - Deleting a card drops every secret stored under it, including a key the card asked for on its way to a source it
   never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
 
@@ -59,11 +68,11 @@ to know when a release changes behavior.
 - `tools/ni-proof.py` observes one ask on a running SmartBrain over its local API, the way the done gate for a
   fix requires: it types the ask, answers only what it is told to (the model consent, a key from an environment
   variable, the YES, one refresh), and writes every state the card passed through, its reading, the model calls
-  per step and the audit rows, as JSON and Markdown. It never prints or writes a key: the report is refused if
-  one is in it. With `--watch MINUTES` it waits for the card's next scheduled run, and a built card whose refresh
-  or scheduled run did not happen does not pass. `tools/ni-scratch.py` runs it against a throwaway app from the
-  checkout with the install's routes copied read-only, its own data folder, and no contact with the install's
-  model gateway.
+  per step and the audit rows, as JSON and Markdown. It never prints or writes a key: every line it prints has
+  the run's keys and the token scrubbed, and the report is refused if one is in it. With `--watch MINUTES` it
+  waits for the card's next scheduled run, and a built card whose refresh or scheduled run did not happen does not
+  pass. `tools/ni-scratch.py` runs it against a throwaway app from the checkout with the install's routes copied
+  read-only, its own data folder, and no contact with the install's model gateway.
 - `tools/ni-capture-fixtures.py` records real provider bodies (Alpha Vantage, Finnhub, Open-Meteo) as test
   fixtures through the app's guarded fetch, keys redacted; `tools/ni-library-rows.py` records the rows the
   installed Library pack offers for an ask. `app/tests/test_ni_proof_asks.py` replays both through the production

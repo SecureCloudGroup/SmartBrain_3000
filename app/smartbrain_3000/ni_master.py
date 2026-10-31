@@ -31,6 +31,8 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
+from . import ni_message
+
 # Closed move set (round 7). ``research`` is registered now, chosen from G3.
 MOVES: frozenset[str] = frozenset({
     "advance", "retry", "reroute", "ask_user", "research", "degrade",
@@ -331,10 +333,23 @@ _REASONS: dict[str, str] = {
     "derive": "The data came back in a shape no card can read yet.",
     "busy": "Another card was building — this one couldn't start.",
     "waited": ("The source asked SmartBrain to wait (its rate limit), so nothing was built yet. Retry later; "
-               "History shows what it said."),
+               "History shows what it said."),  # a window its words name reads ``_WAITED_BY_WINDOW`` instead
     "worker": "The build crashed — retry runs it again from your request.",
     "remap": "The rebuild couldn't start from this card's source.",
     "cancelled": "You stopped this build.",
+}
+
+
+# "Retry later" is wrong for a quota that runs by the day (Alpha Vantage's free key: 25 requests a day): a retry
+# before it resets ends the same way. The window the host's own words name (``ni_message.limit_wait``) says which.
+_WAITED_BY_WINDOW: dict[float, str] = {
+    ni_message.WAIT_SECOND_S: ("The source asked SmartBrain to wait a moment (its per-second limit), so nothing was "
+                               "built yet. Retry in a moment; History shows what it said."),
+    ni_message.WAIT_MINUTE_S: ("The source asked SmartBrain to wait (its per-minute limit), so nothing was built "
+                               "yet. Retry in a minute; History shows what it said."),
+    ni_message.WAIT_LONG_S: ("The source's request limit is spent for now (it counts by the hour, day or month), so "
+                             "nothing was built yet. A retry before the limit resets ends the same way; History shows "
+                             "what it said."),
 }
 
 
@@ -343,6 +358,9 @@ def reason_for(state: str, error: str | None) -> str:
     klass = error_class_of(error)
     if state == "declined":  # the code is the error's class; an unknown code reads the blind sentence, never a raise
         return DECLINE_LINES.get(klass, DECLINE_HEADLINE + ".")
+    if klass == "waited":
+        window = ni_message.limit_wait(str(error).split(":", 1)[-1])
+        return _WAITED_BY_WINDOW.get(window, _REASONS[klass]) if window is not None else _REASONS[klass]
     if klass in _REASONS:
         return _REASONS[klass]
     if state == "unsupported":

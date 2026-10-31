@@ -720,3 +720,53 @@ def test_fetch_json_still_refuses_a_non_json_media_type(monkeypatch) -> None:
     with pytest.raises(FetchError) as err:
         netguard.safe_fetch_json("http://api.test/doc")
     assert err.value.kind == "not_json"
+
+
+# ---- a body never hands the key on (``scrubbing``) ----------------------------------------------------------------
+
+def test_a_body_that_names_the_requests_key_is_scrubbed_before_anyone_reads_it(monkeypatch) -> None:
+    """Alpha Vantage answers a spent daily quota with a sentence naming the key it was sent (as publicly reported).
+    Inside ``scrubbing`` every spelling of the key a body could carry is replaced in the bytes ``_guarded_get``
+    returns, before the politeness hook reads them; outside it, and for any other value, a body is untouched."""
+    key, bearer = "ZK9Q/X2A+7LM", "Bearer tok-4F5G6H7J8K"
+    body = (f'{{"Information": "We have detected your API key as {key} and", "echo": "{key.replace("/", chr(92) + "/")}",'
+            f' "url": "https://h.example/?apikey=ZK9Q%2FX2A%2B7LM", "plus": "ZK9Q%2FX2A%2B7LM", "auth": "{bearer}",'
+            f' "alone": "tok-4F5G6H7J8K", "symbol": "NVDA", "short": "ab12"}}').encode()
+    seen: list[bytes] = []
+
+    class Polite:   # what the politeness hook sees of the body it is handed
+        def call(self, url, method, custom, shape, go):
+            got = go()
+            seen.append(got["content"])
+            return got
+
+    monkeypatch.setattr(netguard, "_guarded_get_once", lambda *a, **k: {"final_url": a[0], "status": 200,
+                                                                          "content_type": "application/json",
+                                                                          "content": body})
+    previous = netguard.set_politeness(Polite())
+    try:
+        with netguard.scrubbing([key, bearer, "ab12", ""]):
+            got = netguard._guarded_get("https://h.example/q", ("application/json",), 10_000)
+            with netguard.scrubbing(["NVDA22"]):   # nested: adds, then gives back
+                netguard._guarded_get("https://h.example/q", ("application/json",), 10_000)
+            again = netguard._guarded_get("https://h.example/q", ("application/json",), 10_000)
+        outside = netguard._guarded_get("https://h.example/q", ("application/json",), 10_000)
+    finally:
+        netguard.set_politeness(previous)
+    clean = got["content"].decode()
+    assert seen[0] == got["content"], "the politeness hook reads the scrubbed body"
+    for spelled in (key, key.replace("/", "\\/"), "ZK9Q%2FX2A%2B7LM", "tok-4F5G6H7J8K"):
+        assert spelled not in clean, spelled
+    assert clean.count(netguard.SCRUBBED) == 6 and '"symbol": "NVDA"' in clean and '"short": "ab12"' in clean, clean
+    assert again["content"] == got["content"] and outside["content"] == body, "nothing scrubbed outside the block"
+    assert netguard.scrub(b"plain") == b"plain"
+
+
+def test_a_utf16_body_is_scrubbed_in_its_own_encoding(monkeypatch) -> None:
+    key = "av-key-0A1B2C3D"
+    for encoding in ("utf-16-le", "utf-16-be"):
+        body = f'{{"Information": "your API key as {key} is spent"}}'.encode(encoding)
+        monkeypatch.setattr(netguard, "_guarded_get_once", lambda *a, _b=body, **k: {"content": _b, "status": 200})
+        with netguard.scrubbing([key]):
+            got = netguard._guarded_get("https://h.example/q", ("application/json",), 10_000)
+        assert got["content"].decode(encoding) == f'{{"Information": "your API key as {netguard.SCRUBBED} is spent"}}'
