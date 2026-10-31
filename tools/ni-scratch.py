@@ -13,7 +13,9 @@ with its own data folder, local API token and passphrase, sharing nothing with t
   inherited from the environment (every ``SMARTBRAIN_*`` variable is dropped first);
 * the ``claude`` CLI the app runs for a Claude Code route sees the environment an installed app gives it: the
   ``CLAUDE*`` and ``ANTHROPIC_*`` variables of a Claude Code session this is started from are dropped, so the CLI
-  runs on the user's own login and configuration, not the calling session's.
+  runs on the user's own login and configuration, not the calling session's;
+* no ``SB_*`` variable reaches the app either: a key the proof run is given for a card's key pause
+  (``SB_PROOF_KEY_*``) goes to the card's key route only, never into the app's environment or the CLI's.
 
 It unlocks the scratch app with a passphrase it keeps nowhere, turns the Claude Code provider on when a route
 needs it, sets the routes and the Neural Interface step settings (``--route`` / ``--step``, or copied read-only
@@ -45,7 +47,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 DEAD_GATEWAY = "http://127.0.0.1:9"     # discard: a refused connection, as the test suite uses
 HEALTH_WAIT_S = 90.0
 STOP_WAIT_S = 20.0
-DROPPED = ("SMARTBRAIN_", "CLAUDE", "ANTHROPIC_")   # the install's settings; a calling Claude Code session's own
+DROPPED = ("SMARTBRAIN_", "SB_", "CLAUDE", "ANTHROPIC_")  # the install's; the proof run's keys; a calling session's
 SCRATCH_ENV = {
     "SMARTBRAIN_SIGNALING_URL": "",          # remote access off: no routing id registered for a scratch app
     "SMARTBRAIN_WEBRTC_ENABLED": "0",

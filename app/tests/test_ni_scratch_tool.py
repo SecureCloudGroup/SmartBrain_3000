@@ -35,7 +35,8 @@ def test_the_scratch_app_inherits_no_smartbrain_setting_and_reaches_no_gateway(t
                     "SMARTBRAIN_DB_PATH": "/Users/t/Library/Application Support/SmartBrain/data/smartbrain.duckdb",
                     "SMARTBRAIN_SIGNALING_URL": "wss://rtc.example", "SMARTBRAIN_LOCAL_TOKEN": "the-install-token" * 3,
                     "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "remote", "CLAUDE_CONFIG_DIR": "/tmp/session",
-                    "ANTHROPIC_BASE_URL": "https://proxy.example"}
+                    "ANTHROPIC_BASE_URL": "https://proxy.example", "SB_PROOF_KEY_ALPHAVANTAGE": "a-key-for-the-card",
+                    "SB_NI_OWN_HOSTS": "nas.lan"}
     env = tool.scratch_env(install_like, tmp_path, 40123, "s" * 43)
     assert env["SMARTBRAIN_LLM_GATEWAY_URL"] == "http://127.0.0.1:9", "a port nothing listens on"
     assert env["SMARTBRAIN_DB_PATH"] == str(tmp_path / "smartbrain.duckdb")
@@ -44,6 +45,8 @@ def test_the_scratch_app_inherits_no_smartbrain_setting_and_reaches_no_gateway(t
     assert env["PATH"] == "/usr/bin" and env["HOME"] == "/Users/t", "the CLI and the user's login stay reachable"
     assert not any(v == install_like.get(k) for k, v in env.items() if k.startswith("SMARTBRAIN_")), "none inherited"
     assert not any(k.startswith(("CLAUDE", "ANTHROPIC_")) for k in env), "the CLI runs on the user's own login"
+    assert not any(k.startswith("SB_") for k in env) and "a-key-for-the-card" not in env.values(), (
+        "a key for the card goes to its key route, never into the app's or the CLI's environment")
 
 
 def test_an_install_is_only_read_when_its_settings_are_copied(tool) -> None:
