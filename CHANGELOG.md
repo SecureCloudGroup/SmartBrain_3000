@@ -49,6 +49,12 @@ to know when a release changes behavior.
   never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
 
 ### Added
+- `tools/ni-proof.py` observes one ask on a running SmartBrain over its local API, the way the done gate for a
+  fix requires: it types the ask, answers only what it is told to (the model consent, a key from an environment
+  variable, the YES, one refresh), and writes every state the card passed through, its reading, the model calls
+  per step and the audit rows, as JSON and Markdown. It never prints or writes a key: the report is refused if
+  one is in it. `tools/ni-scratch.py` runs it against a throwaway app from the checkout with the install's routes
+  copied read-only, its own data folder, and no contact with the install's model gateway.
 - `tools/ni-capture-fixtures.py` records real provider bodies (Alpha Vantage, Finnhub, Open-Meteo) as test
   fixtures through the app's guarded fetch, keys redacted; `tools/ni-library-rows.py` records the rows the
   installed Library pack offers for an ask. `app/tests/test_ni_proof_asks.py` replays both through the production
