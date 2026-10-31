@@ -33,6 +33,7 @@ cookie store) — out of scope per SECURITY.md.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import hashlib
 import hmac
@@ -41,6 +42,7 @@ import os
 import secrets
 import threading
 from collections import OrderedDict
+from collections.abc import Iterator
 from pathlib import Path
 
 from starlette.responses import JSONResponse
@@ -83,6 +85,19 @@ _REQUEST_VIA: contextvars.ContextVar[str | None] = contextvars.ContextVar("sb_re
 def request_via() -> str | None:
     """``PHONE_VIA`` / ``LAN_VIA`` while serving a phone-authority request, else None."""
     return _REQUEST_VIA.get()
+
+
+@contextlib.contextmanager
+def serving_via(via: str | None) -> Iterator[None]:
+    """Run the block with ``request_via()`` reading ``via``: a worker thread a request started serves that request's
+    origin. A new thread starts with no context variables, so without this a build a phone started read as the
+    Desktop's own (2026-10-31)."""
+    assert via in (None, PHONE_VIA, LAN_VIA), "a known origin"
+    token = _REQUEST_VIA.set(via)
+    try:
+        yield
+    finally:
+        _REQUEST_VIA.reset(token)
 
 
 def via_of(scope: dict, authority: str | None) -> str | None:

@@ -11,7 +11,21 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Changed
+- Neural Interface: when the Library has nothing it can build for an ask, or every source it offered fails, research
+  runs at once under the consent the card already holds (the consent question has said since 0.27.0 that "if no
+  ready-made source fits, it may also research one with the same service"). Before, a first run ended at once with
+  "No ready source answers this yet" and research ran only after a Keep looking tap, so an install whose Library
+  rows all failed never researched at all (T's install: zero research calls, ever). Research stays inside the same
+  ceilings and the same Cancel; a card that has no consent yet asks first. A card an older version declined that
+  way still reads and still offers Keep looking.
+
 ### Fixed
+- Neural Interface: a cloud run a paired phone starts draws one unit of the daily phone allowance whichever tap
+  started it (Retry, Fix, Refine, Skip this source, as Allow and Keep looking already did), and the build and the
+  research it reaches draw it once between them. Before, only Allow and Keep looking drew, and a build's worker
+  thread lost the request's origin, so repeated taps from a phone could spend on the owner's cloud model past the
+  ceiling.
 - Neural Interface: cards build from Alpha Vantage, and from every other source whose field names the plain path
   grammar can't spell. The path walker reported a key with a space, a dot or a leading digit ("Global Quote",
   "05. price", a date) as unaddressable and offered nothing, so such a source dropped out of the pick in a fraction
@@ -65,14 +79,21 @@ to know when a release changes behavior.
   never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
 
 ### Added
+- Neural Interface: the card says what it tried. A key pause and a declined card list each source the build tried
+  and why it moved on ("www.alphavantage.co: files its values under the day's date..."); before, those reasons
+  lived only in the sealed record, and a decline read "no source answers this" over three sources that each
+  failed for a different reason.
+- Neural Interface: **Skip this source** on a key pause. When the card asks for a key you don't have for a source
+  SmartBrain picked, the build goes on to the next source, then research, then the honest decline; before, the
+  card stayed paused with no way past the source but Cancel. A source you named yourself is never skipped for you.
 - `tools/ni-proof.py` observes one ask on a running SmartBrain over its local API, the way the done gate for a
   fix requires: it types the ask, answers only what it is told to (the model consent, a key from an environment
-  variable, the YES, one refresh), and writes every state the card passed through, its reading, the model calls
-  per step and the audit rows, as JSON and Markdown. It never prints or writes a key: every line it prints has
-  the run's keys and the token scrubbed, and the report is refused if one is in it. With `--watch MINUTES` it
-  waits for the card's next scheduled run, and a built card whose refresh or scheduled run did not happen does not
-  pass. `tools/ni-scratch.py` runs it against a throwaway app from the checkout with the install's routes copied
-  read-only, its own data folder, and no contact with the install's model gateway.
+  variable, the YES, one refresh), and writes every state the card passed through, what it tried and why, its
+  reading, the model calls per step and the audit rows, as JSON and Markdown. It never prints or writes a key:
+  every line it prints has the run's keys and the token scrubbed, and the report is refused if one is in it. With
+  `--watch MINUTES` it waits for the card's next scheduled run, and a built card whose refresh or scheduled run did
+  not happen does not pass. `tools/ni-scratch.py` runs it against a throwaway app from the checkout with the
+  install's routes copied read-only, its own data folder, and no contact with the install's model gateway.
 - `tools/ni-capture-fixtures.py` records real provider bodies (Alpha Vantage, Finnhub, Open-Meteo) as test
   fixtures through the app's guarded fetch, keys redacted; `tools/ni-library-rows.py` records the rows the
   installed Library pack offers for an ask. `app/tests/test_ni_proof_asks.py` replays both through the production

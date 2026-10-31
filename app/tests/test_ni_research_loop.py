@@ -361,9 +361,9 @@ LOOKING = {"since": "2026-10-24T00:00:00+00:00", "runs": 1, "next_at": None}   #
 
 def _flow(monkeypatch, library, store=None, intent=None, ask=_ASK, seam=None, looking=True, **seam_kw):
     """Run the v2 external flow where the Library has only a source that declares no answers: the auto-pick tries
-    it by mapping (2026-10-30) and its sample fetch fails here, so the ask goes on to research.
-    ``looking``: the card is a standing order (Keep looking, release P2), so research runs; without it the ask ends
-    at once as the ``no_ready_source`` decline."""
+    it by mapping (2026-10-30) and its sample fetch fails here, so the ask goes on to research, at once, under the
+    consent the seam stands for (2026-10-31: no Keep looking tap is needed). ``looking``: the card is a standing
+    order (Keep looking, release P2), which runs the same way."""
     store = store or _store()
     net = Net(monkeypatch, {URL: QUAKES})
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: library)

@@ -3,15 +3,18 @@
   // acceptable, a wrong card is the failure"). It says so plainly, gives the backend's one-line reason and up to
   // three links (read-only, opened in a new tab; nothing here builds or fetches), and offers the way back: run it
   // again, paste a link to the data (a shell), keep looking for a source (a standing order) or stop, bring the
-  // user's own key to a source that asked for one (Use my key), or on a finished card Fix / Refine. The page owns the requests; this component owns what it shows and nothing else
-  // needs to be kept for it.
+  // user's own key to a source that asked for one (Use my key), or on a finished card Fix / Refine. It also lists what
+  // the build tried and why each source was dropped (`tried`, 2026-10-31). The page owns the requests; this component
+  // owns what it shows and nothing else needs to be kept for it.
   import Icon from "$lib/components/Icon.svelte";
-  import type { FlowDecline } from "$lib/ni/types.gen";
+  import TriedList from "$lib/components/TriedList.svelte";
+  import type { FlowDecline, FlowTried } from "$lib/ni/types.gen";
   import { DECLINED_HEADLINE, declinedLinks } from "$lib/ni/flow";
   import { relTime } from "$lib/ni/time";
 
   let {
     decline,
+    tried = [],
     busy = false,
     error = "",
     canFix = false,
@@ -30,6 +33,8 @@
     onUseKey = () => {},
   }: {
     decline: FlowDecline;
+    // What the build tried and why each source was dropped, in the backend's words.
+    tried?: FlowTried[];
     busy?: boolean;
     // The server's sentence for the last reopen that failed, or "".
     error?: string;
@@ -56,6 +61,7 @@
 <div class="dc" data-reason={decline.reason}>
   <p class="dc-head">{headline}</p>
   <p class="muted dc-line">{decline.line}</p>
+  <TriedList {tried} />
   {#if decline.looking}
     <p class="dc-looking">Still looking (started {relTime(decline.looking.since)}). When I find a source, the card
       shows here for your Keep.</p>

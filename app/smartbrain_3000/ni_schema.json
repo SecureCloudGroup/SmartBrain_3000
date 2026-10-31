@@ -26,6 +26,7 @@
         "retry",
         "review_fix",
         "run",
+        "skip_source",
         "stop_looking",
         "use_key",
         "use_local"
@@ -364,7 +365,6 @@
         "ask_unsupported",
         "compare_unbuildable",
         "no_answering_source",
-        "no_ready_source",
         "research_gave_up",
         "source_cant_answer",
         "verify_refused"
@@ -481,6 +481,13 @@
         },
         "decline": {
           "$ref": "#/$defs/FlowDecline"
+        },
+        "tried": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FlowTried"
+          },
+          "maxItems": 6
         }
       },
       "additionalProperties": false,
@@ -788,6 +795,33 @@
         "render_notice",
         "site_cap"
       ]
+    },
+    "FlowTried": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 253
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "why": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "provider",
+        "why"
+      ],
+      "description": "A source this build tried and dropped: its host, its provider and the reason, in the card's words. The key pause and the declined card both list them."
     },
     "FlowTry": {
       "type": "object",

@@ -3831,6 +3831,14 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
             resolved_model = local
         elif _model_consent_of(store, item_id, record) != resolved_model:
             return _ask_model_consent(store, item_id, resolved_model, local, research=True)
+    if not ni_route_model and not _gateway_mod.is_local(resolved_model):
+        # local import: the refresh module reaches the researcher's tools
+        from . import ni_refresh
+        if not ni_refresh.charge_phone_spend(store.conn, ni._clock().astimezone(UTC)):
+            # a run a phone started (Retry, Fix, Refine, Skip this source) spends on a cloud model: it draws one unit
+            # of the daily ceiling first, once a run (an Allow or Keep looking tap drew it already), so the phone
+            # app's origin cannot run up the owner's key with repeated taps (2026-10-31: only those two taps drew)
+            return _fail(store, item_id, "model", ni_refresh.PHONE_SPEND_LINE)
 
     budget = ModelBudget()  # one build's model calls, across every row it tries
 
@@ -4112,6 +4120,11 @@ def _run_external_flow(store: ni.NIStore, item_id: str, request: str,
             # left, so a last row that moved on left the card in a pick with nothing to tap.
             return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
         return out
+    if (_flow_read(store, item_id) or {}).get("_auto_picked"):
+        # an auto build resumed with no address of its own (the user skipped the source it paused on, or allowed
+        # the model research asked for) goes on from the rows it had left: a second ranking would offer the
+        # dropped rows again, and the loop's own end is research, then the honest decline
+        return _auto_continue(store, item_id, request, intent, call_model, do_fetch)
     return _auto_pick(store, item_id, request, intent, call_model, do_fetch)
 
 
@@ -4147,8 +4160,8 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
     per-site budget, off with the open web), each through the same netguard path as a tap and audited with its
     host; a row needing a key or contact email goes last and asks for it on the card. Nothing recurs until Keep
     (the card is held, ``_built_from.path`` auto).
-    No buildable row: the ``no_ready_source`` decline at once, which offers Keep looking; on a standing order
-    (``_looking``, release P2) research, then the declined card (``_end``; the Library's link pages ride it)."""
+    No buildable row, or every row tried and dropped: research at once under the consent the card holds
+    (``ni_research_flow.fallback``), then the declined card (``_end``; the Library's link pages ride it)."""
     assert store is not None and item_id, "store + id required"
     from . import ni_compare_flow  # local: it builds on this module's helpers
     compared = ni_compare_flow.try_compare(store, item_id, request, intent, do_fetch)  # S7: an ask that compares things
@@ -7173,11 +7186,17 @@ def start_flow_worker(store: ni.NIStore, item_id: str, *,
         _fail(store, item_id, "busy",
               "another flow worker is already handling this item; retry later")
         return False
+    # local import: the refresh module reaches the researcher's tools
+    from . import auth, ni_refresh
+    # the worker serves the request that started it: a phone's run draws the daily ceiling before research spends
+    # (``ni_refresh.charge_phone_spend``), once, whichever tap started it (a new thread carries no context variables)
+    via, paid = auth.request_via(), ni_refresh.phone_paid()
 
     def _run() -> None:
         try:
-            run_flow(store, item_id, gateway_call=gateway_call, fetcher=fetcher,
-                     ni_route_model=ni_route_model, source_url=source_url)
+            with auth.serving_via(via), ni_refresh.paid_scope(paid):
+                run_flow(store, item_id, gateway_call=gateway_call, fetcher=fetcher,
+                         ni_route_model=ni_route_model, source_url=source_url)
         except Exception as exc:  # last-resort net; run_flow's own paths seal failures
             log.warning("ni_flow worker for %s crashed: %s", item_id, exc)
             try:
@@ -7352,6 +7371,11 @@ def board_flow_field(store: ni.NIStore, item_id: str, *, read_only: bool = False
                                  "reuse": bool(access.get("reuse"))}
                          if key else None,
                          "contact": bool(access.get("contact"))}
+    tried = [t for t in record.get("_tried") or [] if isinstance(t, dict) and t.get("host")][-_TRIED_MAX:]
+    if tried:
+        # what this build tried and why each source was dropped: the key pause and the decline both show it
+        out["tried"] = [{"host": str(t["host"])[:253], "provider": str(t.get("provider") or t["host"])[:120],
+                         "why": str(t.get("why") or "")[:200]} for t in tried]
     out["actions"] = ni_master.actions_for(
         state, record, shell=shell, awaiting_yes=False, item_state="", has_payload=False)
     progress = build_progress(record)
@@ -7641,9 +7665,13 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
             host = (urlparse(url).hostname or "").lower()
             rest = [r for r in rest if (urlparse(str(r.get("url") or "")).hostname or "").lower() != host]
         other = "_ranked_search" if slot == "_ranked_library" else "_ranked_library"
+        # what this build tried, for the card (2026-10-31: the reasons lived only in the sealed record's notes,
+        # and no route exposed them, so a decline read "no source answers this" over three dropped rows)
+        tried = [t for t in record.get("_tried") or [] if isinstance(t, dict)][-(_TRIED_MAX - 1):]
+        tried.append(_tried_entry(gone, url, why))
         return _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK,
                            note=f"{gone.get('provider') or gone.get('host')} {why}",
-                           **{slot: rest or None, other: None}, _access=None, _format=None)
+                           **{slot: rest or None, other: None}, _access=None, _format=None, _tried=tried)
     return None
 
 
@@ -7659,6 +7687,37 @@ def _note_waited(store: ni.NIStore, item_id: str, url: str, said: str) -> None:
     waited = [w for w in record.get("_waited") or [] if isinstance(w, dict) and w.get("host") != host]
     waited = (waited + [{"host": host[:253], "said": said[:200]}])[-_MAX_WAITED:]
     _flow_write(store, item_id, {**record, "_waited": waited})
+
+
+_TRIED_MAX = 6  # the sources one build can report it tried: the auto-pick's five rows and a kept source
+_SKIP_WHY = "was skipped: you have no key for it"
+
+
+def _tried_entry(row: dict, url: str, why: str) -> dict:
+    """One line of "what I tried": the dropped source's host and provider, and the reason, in the card's words."""
+    assert isinstance(row, dict) and isinstance(why, str), "a row and its reason"
+    host = str(row.get("host") or _host_hint(url))[:253]
+    return {"host": host, "provider": str(row.get("provider") or host)[:120], "why": " ".join(why.split())[:200]}
+
+
+def skip_source(store: ni.NIStore, item_id: str) -> bool:
+    """Skip the Library source the card paused on for a key (the user has none): the row is dropped with that
+    reason and the build goes on as the auto-pick would — the next row, then research under the card's consent,
+    then the honest decline. Only a row the build picked can be skipped: an address the user named is the one
+    source they asked for. ValueError with the user-facing reason; else whether the worker started."""
+    assert store is not None and item_id, "args required"
+    record = _flow_read(store, item_id) or {}
+    access = record.get("_access")
+    if record.get("state") != "awaiting_access" or not isinstance(access, dict) or not record.get("_auto_picked") \
+            or access.get("named"):
+        raise ValueError("this card isn't paused on a source it can skip")
+    url = str(access.get("url") or "")
+    if _repick_without(store, item_id, url, why=_SKIP_WHY) is None:
+        raise ValueError("this card isn't paused on a Library source")
+    # the worker reads no address of its own and goes on from the rows left (``_run_external_flow``)
+    _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK, source_url=None, _auto_picked=True,
+                note=f"skipped {_host_hint(url)}: no key")
+    return start_flow_worker(store, item_id)
 
 
 def _move_on(store: ni.NIStore, item_id: str, url: str, why: str, *, host_wide: bool = False) -> dict | None:

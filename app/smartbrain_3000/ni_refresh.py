@@ -8,12 +8,15 @@ the user approves. Pure code, no model, no network. A spec with no ``recipe`` ne
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import os
 import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import db, ni, ni_compare, ni_recipe
+from . import auth, db, ni, ni_compare, ni_recipe
 from .ni_research import tools
 from .ni_research.ctx import ResearchCtx
 
@@ -195,3 +198,43 @@ def take_budget(conn, now: datetime) -> bool:
             return False
         db.meta_set(conn, META_COUNT, f"{now.astimezone(UTC).date().isoformat()}:{used + 1}")
         return True
+
+
+PHONE_SPEND_LINE = ("today's allowance for cloud model use started from a phone is spent; "
+                    "retry from your Mac, or tomorrow")
+# Set once a request (or the run it started) drew its unit of the daily ceiling, so the research that run reaches is
+# not charged twice. Request-scoped like ``auth.request_via``; ``ni_flow.start_flow_worker`` carries it to the worker.
+_PHONE_PAID: contextvars.ContextVar[bool] = contextvars.ContextVar("sb_ni_phone_paid", default=False)
+
+
+def charge_phone_spend(conn, now: datetime) -> bool:
+    """One unit of the daily ceiling for cloud model use a paired phone or a LAN browser starts. True when the
+    Desktop asked (the owner at the desk is never counted), when this request or the run it started already drew its
+    unit (``phone_paid``), or when the unit is drawn now; False, nothing drawn, when today's allowance is spent. A tap
+    that starts cloud spend (Allow, Keep looking) draws at the tap; any other run a phone started (Retry, Fix, Refine,
+    Skip this source) draws before its first cloud model call (``ni_flow._run_flow``) or its cloud research
+    (``ni_research_flow.fallback``), once a run. Until 2026-10-31 only the two taps drew, so repeated Retry taps ran
+    cloud builds uncounted, and research at once under the card's consent would have added research to them. This
+    bounds what the phone app's origin can charge to the owner's key in a day (SECURITY.md)."""
+    assert conn is not None and now.tzinfo is not None, "conn and an aware time required"
+    if not auth.request_via() or _PHONE_PAID.get():
+        return True
+    if not take_budget(conn, now):
+        return False
+    _PHONE_PAID.set(True)
+    return True
+
+
+def phone_paid() -> bool:
+    """Did this request, or the run it started, already draw its unit of the daily ceiling?"""
+    return _PHONE_PAID.get()
+
+
+@contextlib.contextmanager
+def paid_scope(paid: bool) -> Iterator[None]:
+    """Run the block with ``phone_paid()`` reading ``paid``: the worker thread of a run its request already paid for."""
+    token = _PHONE_PAID.set(bool(paid))
+    try:
+        yield
+    finally:
+        _PHONE_PAID.reset(token)

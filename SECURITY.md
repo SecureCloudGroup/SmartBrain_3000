@@ -24,10 +24,12 @@ is true of the broker protocol and still leaves things worth knowing:
   operator) could serve modified JavaScript and read the stored credential, and could do
   anything a paired phone may do, which now includes asking for Neural Interface
   cards, allowing a cloud model on a card (charged to your key), activating a card's other
-  sites, starting a standing order, and changing a card's repair policy. A cloud-model
-  allowance or a standing order started from a phone draws one unit of the daily
-  re-research ceiling (`SMARTBRAIN_NI_RERESEARCH_DAILY`, default 10), so what that origin
-  can charge to your key in a day is bounded. It cannot enter or change keys (provider keys
+  sites, starting a standing order, and changing a card's repair policy. Every run a phone
+  starts that uses a cloud model (a cloud-model allowance, a standing order, and a Retry,
+  Fix, Refine or Skip this source on a card that builds or researches with one) draws one
+  unit of the daily re-research ceiling (`SMARTBRAIN_NI_RERESEARCH_DAILY`, default 10)
+  before its first cloud call, so what that origin can charge to your key in a day is
+  bounded. It cannot enter or change keys (provider keys
   and card credentials), paste links, type answers, change where model requests go or which
   model a step uses, change the passphrase, trust a publisher, change feeds, web-search or
   MCP settings, back up, pair or revoke devices, or install updates: those refuse anything

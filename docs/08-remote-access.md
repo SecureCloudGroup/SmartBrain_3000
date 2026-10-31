@@ -66,9 +66,12 @@ the cards you have: Retry, Cancel, Fix, Refine, Reopen, Stop looking, fill a val
 not a secret, switch the brief summary, and read the findings and the measure. The four
 fixed-choice consents are taps the phone may make too: allow a cloud model on a card,
 Activate a card's other sites, Keep looking, and the repair policy. The Desktop checks each
-one and records it in Activity as "from paired phone". Allowing a cloud model or starting
-Keep looking from the phone counts against the daily re-research allowance (see
-[Design limits](09-design-limits.md)), so a phone cannot run up your key without end. What
+one and records it in Activity as "from paired phone". Anything the phone starts that uses
+a cloud model counts against the daily re-research allowance (see
+[Design limits](09-design-limits.md)): allowing a cloud model, Keep looking, and a Retry,
+Fix, Refine or Skip this source on a card that builds or researches with one, once per run.
+When the day's allowance is spent, the card says so and the same tap works from your Mac.
+So a phone cannot run up your key without end. What
 the phone cannot do is hand over anything secret or anything that widens trust: pasting a
 link, typing an answer, adding a key or a feed, trusting a publisher, changing where model
 requests go or which model a step uses, MCP settings, the passphrase, backups, pairing and

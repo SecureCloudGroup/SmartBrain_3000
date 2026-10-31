@@ -26,7 +26,7 @@ from test_ni_answers import (  # noqa: F401  (lib is a fixture)
 
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import ni as nimod
-from smartbrain_3000 import ni_flow, ni_research_flow, ni_routes, tools
+from smartbrain_3000 import ni_flow, ni_routes, tools
 from smartbrain_3000.secrets import gen_master_key
 
 _QUAKE_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson"
@@ -89,13 +89,11 @@ def _model(prompt: str) -> str:
 _LOOKING = {"since": "2026-10-24T00:00:00+00:00", "runs": 1, "next_at": None}   # the user tapped Keep looking
 
 
-def _run(store, wrap, monkeypatch, fetch, *, search=None, request: str = _REQUEST, looking: bool = False,
-         research: bool = True) -> tuple[str, dict]:
-    """The v2 external flow over ``wrap``'s rows. ``looking``: the card is a standing order (Keep looking), so a
-    stop with no buildable row goes on to research (off in tests) instead of ending ``no_ready_source`` at once.
-    ``research``: a run could research (so a stop with nothing ready offers Keep looking); False reads the tier."""
-    if research:
-        monkeypatch.setattr(ni_research_flow, "can_research", lambda *_a: True)
+def _run(store, wrap, monkeypatch, fetch, *, search=None, request: str = _REQUEST,
+         looking: bool = False) -> tuple[str, dict]:
+    """The v2 external flow over ``wrap``'s rows. Research is off in the suite (conftest), so a stop with no
+    buildable row ends as the honest decline naming that; ``looking`` marks the card a standing order (Keep
+    looking), which changes nothing about that end. test_ni_standing runs the same stop with research on."""
     monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: wrap)
     monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", (lambda: search) if search else None)
     item_id = ni_flow.create_shell_item(store, request)
@@ -148,9 +146,14 @@ def test_exhausting_every_row_never_searches_the_web_and_stops_honestly(lib, mon
                         _fetcher(fetched, {_QUAKE_URL: {"x": 1}, WEATHER_URL: {"y": 2}}), search=search)
     assert fetched == [_QUAKE_URL, WEATHER_URL]  # only Library rows were fetched: no search result page
     assert search.queries == []  # v2 never searches the web before Keep
-    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"  # the honest end, at once
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"  # the honest end
+    assert "research is turned off" in out["_decline_card"]["line"], "why no search for another source ran"
+    assert out["_decline_card"]["look"] is False, "looking longer could not change this answer"
     assert store.get_item(item_id)["spec"].get("_shell") is True  # nothing was built
     assert not out.get("_auto_picked")
+    field = ni_flow.board_flow_field(store, item_id)
+    assert [t["host"] for t in field["tried"]] == ["earthquake.usgs.gov", "api.open-meteo.com"], "what it tried"
+    assert all(t["why"] and t["provider"] for t in field["tried"]), "each with its reason, on the card"
 
 
 def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) -> None:  # noqa: F811
@@ -158,19 +161,20 @@ def test_only_link_rows_is_the_honest_stop_and_builds_nothing(lib, monkeypatch) 
     wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL, format="html")])  # a web page is a link (a data row builds)
     search = _Search()
     item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), search=search)
-    assert fetched == [] and out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"
+    assert fetched == [] and out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"
     assert store.get_item(item_id)["spec"].get("_shell") is True
     assert search.queries == [] and not out.get("_ranked_search")  # no web search, no web pages
     field = ni_flow.board_flow_field(store, item_id)  # the decline draws no bar and offers no Cancel, but a way back
     assert "progress" not in field and "cancel" not in field["actions"] and "delete" in field["actions"]
     assert field["state"] == "declined" and field["decline"]["headline"] == "I couldn't build a reliable card for this"
-    assert len(field["decline"]["links"]) <= 3 and field["reopen"] == ["keep_looking", "retry", "pick_source"]
+    assert "research is turned off" in field["decline"]["line"] and "tried" not in field, "nothing was tried"
+    assert len(field["decline"]["links"]) <= 3 and field["reopen"] == ["retry", "pick_source"]
 
 
 def test_with_research_off_nothing_ready_never_offers_keep_looking(lib, monkeypatch) -> None:  # noqa: F811
     store, fetched = _store(), []
     wrap = _Wrap(lib, [_row("no-answers", _QUAKE_URL)])
-    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}), research=False)  # no tier can research
+    item_id, out = _run(store, wrap, monkeypatch, _fetcher(fetched, {}))  # no tier can research (the suite's setting)
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_answering_source"
     assert out["_decline_card"]["look"] is False  # looking longer could not change this answer
     field = ni_flow.board_flow_field(store, item_id)

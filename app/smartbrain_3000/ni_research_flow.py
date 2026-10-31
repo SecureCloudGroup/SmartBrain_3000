@@ -269,25 +269,24 @@ def research_blocker(store: ni.NIStore, item_id: str, record: dict) -> str | Non
 
 
 def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links: list | None = None) -> dict | None:
-    """Research before the honest stop, when the user asked for it. A card that is not a standing order (``_looking``,
-    release P2: the user tapped Keep looking) ends at once as the ``no_ready_source`` decline with ``links``, which
-    offers Keep looking, so an ask answers in seconds; it does so only when a run could research (``can_research``),
-    so the offer is one the card can keep. Otherwise the landed (held) card, the consent question, or (a run that
-    ended without a card) the declined card, as the flow record; None when research is off, unavailable, or the card
-    was cancelled (the caller then ends the ask itself). A run that could not finish (a fault) is the failed card,
-    retryable, never a declined one."""
+    """Research before the honest stop, under the consent the card holds. When the Library has nothing buildable or
+    every row it offered failed, research runs at once on the plan the card's own consent allows (``plan_for``:
+    the consent question named it — "if no ready-made source fits, it may also research one with the same
+    service"); a card with no consent yet is asked (the ``ask`` plan); research off, no model routed or no Library
+    reads None, and the caller ends the ask with the reason. Until 2026-10-31 a first run ended at once as the
+    ``no_ready_source`` decline and research ran only after the Keep looking tap, so an install whose Library rows
+    all failed never researched. A standing order (``_looking``, release P2) runs the same way; its ``free`` run
+    (a $0 re-match after a new kept source) reads None. Returns the landed (held) card, the consent question, or (a
+    run that ended without a card) the declined card, as the flow record, with ``links`` riding a decline the run
+    found no links for. A run that could not finish (a fault) is the failed card, retryable, never a declined one."""
     assert isinstance(intent, dict) and request, "intent and request required"
     assert store is not None and item_id, "args required"
     record = ni_flow._flow_read(store, item_id) or {}
     if record.get("_cancel"):
         return None
     looking = record.get("_looking")
-    if not isinstance(looking, dict):
-        if not can_research(store, item_id, record):
-            return None
-        return ni_flow._end(store, item_id, "no_ready_source", "", links=links)
     lib = ni_flow._resolve_library()
-    if lib is None or looking.get("free"):   # free: a $0 re-match after a new kept source, no model this run
+    if lib is None or (isinstance(looking, dict) and looking.get("free")):
         return None
     plan = plan_for(store, item_id, record)
     if plan.mode == "off":
@@ -295,6 +294,9 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links:
     if plan.mode == "ask":
         return ni_flow._ask_model_consent(store, item_id, plan.model or "", plan.local, research=True)
     now = ni._clock().astimezone(UTC)
+    if plan.mode == "cloud" and not ni_refresh.charge_phone_spend(store.conn, now):
+        # a run a phone started draws its unit before research spends (a cloud build drew it already): today's is gone
+        return ni_flow._fail(store, item_id, "research", ni_refresh.PHONE_SPEND_LINE)
     web = plan.mode == "cloud" and plan.web  # the closed-world local tier never has the web
     question = question_from_intent(request, intent)
     # a compare is searched one thing at a time: the intent's one place must not steer every search
@@ -324,7 +326,7 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links:
         ending = "compare_unbuildable"
     # P3: an address that asked for a key is offered as Use my key (one thing at a time: never for a compare)
     wall = ctx.key_walls[0] if ctx.key_walls and not question["entities"] else None
-    return ni_flow._end(store, item_id, ending, "", links=out.links, key_wall=wall)
+    return ni_flow._end(store, item_id, ending, "", links=out.links or links, key_wall=wall)
 
 
 def research_plan(store: ni.NIStore, item: dict) -> policy.Plan | None:

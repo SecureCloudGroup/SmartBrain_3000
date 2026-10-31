@@ -43,6 +43,22 @@ function cardOf(props: Record<string, unknown> = {}): HTMLElement {
 
 const labels = (root: HTMLElement) => Array.from(root.querySelectorAll("button")).map((b) => b.textContent?.trim());
 
+describe("DeclinedCard: what I tried", () => {
+  it("lists the sources the build dropped and why, in the backend's words", () => {
+    const root = cardOf({ tried: [
+      { host: "www.alphavantage.co", provider: "Alpha Vantage", why: "was skipped: you have no key for it" },
+      { host: "finnhub.io", provider: "Finnhub", why: "refused SmartBrain's request" },
+    ] });
+    const rows = Array.from(root.querySelectorAll(".tried li")).map((li) => li.textContent?.replace(/\s+/g, " ").trim());
+    expect(rows).toEqual(["Alpha Vantage was skipped: you have no key for it", "Finnhub refused SmartBrain's request"]);
+    expect(root.querySelector(".dc-line + .tried"), "right under the reason line").not.toBeNull();
+  });
+
+  it("shows no list when nothing was tried", () => {
+    expect(cardOf().querySelector(".tried")).toBeNull();
+  });
+});
+
 describe("DeclinedCard", () => {
   it("says it could not build a reliable card, gives the reason and the https links only", () => {
     const root = cardOf();
@@ -82,7 +98,7 @@ describe("DeclinedCard", () => {
 
   it("offers Keep looking, and once looking says so and offers to stop", () => {
     const onKeepLooking = vi.fn();
-    const ready = cardOf({ decline: { ...DECLINE, reason: "no_ready_source" }, canKeepLooking: true, canPick: true,
+    const ready = cardOf({ decline: { ...DECLINE, reason: "research_gave_up" }, canKeepLooking: true, canPick: true,
                            onKeepLooking });
     expect(labels(ready)).toEqual(["Keep looking", "Paste a link"]);
     expect(ready.querySelector(".dc-looking")).toBeNull();

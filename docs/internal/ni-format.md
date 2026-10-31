@@ -1379,7 +1379,6 @@ act.
 
 | ending | lands in | code |
 |---|---|---|
-| `no_ready_source` (no Library row or kept source fits, and the card is not a standing order: nothing researched) | `declined` | `no_ready_source` |
 | `research_declined_checks` (the verifier refused the card twice) | `declined` | `verify_refused` |
 | `research_declined_budget` (budget or steps spent, or the model stopped without a card) | `declined` | `research_gave_up` |
 | `research_declined_no_source` (the closed-world tier found no Library source) | `declined` | `no_answering_source` |
@@ -1400,14 +1399,19 @@ not finish (the model route raised, a reply or tool raised) ends `fault` and bec
 never a decline; the eval reads it as `error`, so an outage cannot earn the decline credit. Re-research records a
 fault as `repair_research_fault` (no back-off streak).
 
-**Nothing ready: answer at once, then keep looking (release P2).** An ask answers in seconds from what is ready (a
-source the user kept, a Library row that declares its answers). When nothing is and a run could research
-(`ni_research_flow.can_research`: the Library is there and the tier is not off), `ni_research_flow.fallback` ends
-the card at once as `no_ready_source` with the Library's link pages, and runs no research: a standing order is the
-only way research starts. When no run could research, the card ends `no_source_research_off` and offers no Keep
-looking. **Keep looking** (`POST /items/{id}/flow/keep-looking`, audited `ni_keep_looking`) is offered only on a
-shell whose decline sealed `look: true`: its ending is in `ni_master.LOOKABLE` (`no_ready_source` and the three
-research declines), read by `ni_master.lookable`. It seals `_looking = {since, runs, next_at}` on the flow record (one of the card's own answers,
+**Nothing ready: research at once under the card's consent, then keep looking (release P2, amended 2026-10-31).**
+An ask answers in seconds from what is ready (a source the user kept, a Library row that declares its answers, a
+data row the mapping fits). When nothing is, or every row tried was dropped, `ni_research_flow.fallback` runs
+research at once on the plan the card's own consent allows (`plan_for`: the consent question named it); a card
+with no consent is asked first (the `ask` plan); with research off, no model routed or no Library the card ends
+`no_source_research_off` / `no_source_rows_exhausted` with the line naming why, and offers no Keep looking. (Until
+2026-10-31 a first run ended `no_ready_source` before any research and the Keep looking tap was the only way
+research started; that ending is retired, and an old record sealed with it reads as `no_answering_source`, still
+lookable.) Every row the build dropped rides the record as `_tried: [{host, provider, why}]` (at most six), which
+`board_flow_field` exposes as `tried` in every state, so the key pause and the declined card list what was tried
+and why. **Keep looking** (`POST /items/{id}/flow/keep-looking`, audited `ni_keep_looking`) is offered only on a
+shell whose decline sealed `look: true`: its ending is in `ni_master.LOOKABLE` (the three research declines), read
+by `ni_master.lookable`. It seals `_looking = {since, runs, next_at}` on the flow record (one of the card's own answers,
 so it rides every fresh start) and runs the sealed request again with the intent it was understood under (no model
 reads the words again), research allowed, asking for model consent first when the card has none. While the order
 is open the card stays `declined`, says when it started, and offers **Stop looking** (`/flow/stop-looking`,
@@ -1426,7 +1430,7 @@ as any card from outside the Library; the scheduler runs only declined cards, an
 looking under the same order.
 The eval harnesses tap Keep looking on a lookable decline, as a person would.
 
-**Codes.** `ni_master.DECLINE_REASONS`: `no_ready_source`, `no_answering_source`, `research_gave_up`, `verify_refused`,
+**Codes.** `ni_master.DECLINE_REASONS`: `no_answering_source`, `research_gave_up`, `verify_refused`,
 `compare_unbuildable`, `source_cant_answer`, `ask_unsupported`. `DECLINE_LINES` holds a default line per code (a
 caller may pass a more specific one, cut to 200 characters); `DECLINE_HEADLINE` is "I couldn't build a reliable
 card for this". The record's `error` is `"<code>: <line>"`. The line is built only from code copy, the intent's

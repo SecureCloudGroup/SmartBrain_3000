@@ -206,6 +206,7 @@ PHONE_OK = frozenset({
     "POST /api/ni/items/{item_id}/flow/cancel",
     "POST /api/ni/items/{item_id}/flow/fix",
     "POST /api/ni/items/{item_id}/flow/keep-looking",
+    "POST /api/ni/items/{item_id}/flow/skip-source",
     "POST /api/ni/items/{item_id}/flow/reopen",
     "POST /api/ni/items/{item_id}/flow/retry",
     "POST /api/ni/items/{item_id}/flow/stop-looking",
@@ -251,6 +252,7 @@ PHONE_OK_NI = [
     # T's four fixed-choice consent taps ("yes taps", 2026-10-26 10:46Z)
     ("POST", "/api/ni/items/nope/activate", None),
     ("POST", "/api/ni/items/nope/flow/keep-looking", None),
+    ("POST", "/api/ni/items/nope/flow/skip-source", None),
     ("POST", "/api/ni/items/nope/repair-policy", {"l1": True}),
     ("POST", "/api/ni/items/nope/flow/answer", {"kind": "model_consent", "value": "allow"}),
 ]
