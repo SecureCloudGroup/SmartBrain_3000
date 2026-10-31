@@ -178,10 +178,10 @@ def _refusal_body(url: str, headers: dict | None) -> object:
         return response.text[:4000]
 
 
-def write(entry: dict, got: dict, out_dir: pathlib.Path, *, captured: bool) -> pathlib.Path:
-    """Write one fixture file; the URL is redacted and the body is as served."""
+def write(entry: dict, got: dict, out_dir: pathlib.Path, *, captured: bool, secret: str | None = None) -> pathlib.Path:
+    """Write one fixture file; the URL is redacted and the body is as served. ``secret``: the user's key for this
+    entry (never a demo key): a body that carries it is refused, not written (ValueError)."""
     path = out_dir / entry["host"] / f"{entry['name']}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
     record = {"name": entry["name"], "host": entry["host"], "url": redact_url(entry["url"].replace("{key}", "k"),
                                                                               entry.get("key")),
               "key": entry.get("key"), "status": got["status"], "content_type": got["content_type"],
@@ -189,6 +189,9 @@ def write(entry: dict, got: dict, out_dir: pathlib.Path, *, captured: bool) -> p
               "note": entry["note"], "body": got["body"]}
     text = json.dumps(record, indent=2, ensure_ascii=False) + "\n"
     assert REDACTED in text or not entry.get("key"), "a keyed fixture names where the key went, never its value"
+    if secret and secret in text:
+        raise ValueError(f"{entry['name']}: the provider's body carries the key, so it is not written")
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -200,6 +203,7 @@ def main() -> int:
     ap.add_argument("--key", action="append", default=[], metavar="PROVIDER=KEY")
     ap.add_argument("--provisional", action="store_true", help="write the documented shapes (captured: false)")
     args = ap.parse_args()
+    logredact.install()  # a request line names the full address, key included: never printed
     keys: dict[str, str] = {}
     for spec in args.key:  # bounded: a few providers
         provider, _, value = spec.partition("=")
@@ -220,13 +224,14 @@ def main() -> int:
             path = write(entry, got, args.out, captured=False)
             print(f"provisional {path}")
             continue
+        secret = None if entry.get("force_demo") or not entry.get("key") else keys.get(entry["provider"])
         try:
             got = fetch(entry, keys)
+            path = write(entry, got, args.out, captured=True, secret=secret)
         except Exception as exc:  # one provider's refusal never stops the others
             failures += 1
             print(f"FAILED     {entry['name']}: {type(exc).__name__}: {logredact.redact(str(exc))[:200]}")
             continue
-        path = write(entry, got, args.out, captured=True)
         print(f"captured   {path} (HTTP {got['status']}, {got['content_type']})")
     return 1 if failures else 0
 
