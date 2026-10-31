@@ -401,22 +401,32 @@ How a card comes to life:
    While it works the card shows its progress, with a **Cancel** button. Sources
    that work without a key come first; one that needs a free key from its
    provider (or, for the SEC and BLS, your contact email) is tried last and the
-   card asks you for it before anything is fetched. A Library source that
+   card asks you for it before anything is fetched. While it asks, the card lists
+   what it already tried and why each was dropped, and **Skip this source** goes
+   on without it (to the next source, then to research; no other source that
+   needs the same site's key asks again). A Library source that
    describes its answers (which of its values answer which questions) builds the
    card from them; a data source that doesn't is sampled and mapped the way a
    pasted link is, checked the same way, and held until you tap Keep. A web page
-   is only ever a link. When nothing ready answers, the card says so at once — *"No ready
-   source answers this yet"* — and offers **Keep looking**. Keep looking lets a
-   cloud model you allow research a source (see the privacy page for what that
-   sends): now, then again over the next two weeks, less often each time, and
+   is only ever a link. When nothing ready answers (no source fits, or every
+   source it tried was dropped), the card **researches** one at once with the
+   model you allowed when the card asked; that question says research may run
+   and what it sends (see the privacy page). With research switched off in
+   Settings, or no model routed for it, nothing is researched and the card says
+   which. When research finds nothing it can trust, the card says so — *"I
+   couldn't build a reliable card for this"* — with one plain line on why
+   (what stopped the search: its time limit, its model budget, its steps, or
+   the model), a **What I tried** list (each source it tried and why it was
+   dropped, then what research searched for and each site it read, with what
+   came of it), and up to three links to pages that may help. A site you
+   skipped for want of a key is not offered again by research, nor linked, and
+   Keep looking does not ask for its key again; **Retry** does, in case you
+   have one by then. Those links open in a new tab;
+   SmartBrain shows nothing it read off them. The card then offers **Keep
+   looking**: research again over the next two weeks, less often each time, and
    at once (with no model) whenever you keep a new source. The card says it is
-   still looking until it finds one or you tap **Stop looking**. With research
-   switched off in Settings, the card does not offer Keep looking. When research
-   finds nothing it can trust, or Keep looking ends without a source, the card
-   says so — *"I couldn't build a reliable card for this"* —
-   with one plain line on why and up to three links to pages that may help. Those links open in
-   a new tab; SmartBrain shows nothing it read off them. Pasting your own link
-   always works. If the link needs your own key, tick **It needs my key** (a
+   still looking until it finds one or you tap **Stop looking**. Pasting your
+   own link always works. If the link needs your own key, tick **It needs my key** (a
    link that answers "unauthorized" asks by itself): the card asks where the
    key goes, in the address or in a header, by the name the provider's docs
    give, and then for the key. It is stored encrypted, sent only to that site
@@ -700,9 +710,9 @@ all of them, including engines with no filter of their own (Tavily). There is
 no setting to turn this off.
 
 Searches happen when the assistant uses the web tools in a turn, and when a
-Neural Interface card researches a source after you tap **Keep looking** (up to 3
-searches, with the model consent the card asks for). Creating a card searches nothing by
-itself. See [Privacy & security](07-privacy-security.md) for exactly what leaves your machine.
+Neural Interface card researches a source because nothing ready answers it (up to 3
+searches a run, under the model consent the card asks for; Keep looking runs it again
+later). A card whose own or Library source answers searches nothing. See [Privacy & security](07-privacy-security.md) for exactly what leaves your machine.
 
 ## Self-improvement
 

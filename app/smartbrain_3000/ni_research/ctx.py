@@ -99,6 +99,7 @@ class ResearchCtx:
     resolver: Callable[[str, str], dict] | None = None
     searcher: Callable[[str, int], dict] | None = None   # (query, limit) -> {"results": [{title,url,snippet}]}
     turns: int = 0
+    calls: dict = field(default_factory=dict)       # tool -> the calls of it that spent a turn (they sum to ``turns``)
     fetches: int = 0
     searches: int = 0
     tokens: int = 0
@@ -134,7 +135,7 @@ class ResearchCtx:
         if ready and tool in PROPOSE_TOOLS:   # proposing runs no model, fetch or search: it may use the last of the time and tokens
             if self.turns >= self.max_turns:
                 return error("budget_exhausted", "turns budget is used up")
-            self.turns += 1
+            self._spent(tool)
             return None
         if ready and self.max_turns - self.turns <= 1:   # the last tool call is kept for the proposal
             return error("budget_exhausted", "the last tool call is kept for propose_card with the draft that passed")
@@ -144,9 +145,17 @@ class ResearchCtx:
                 return error("budget_exhausted", f"{name} budget is used up")
         if kind == "search" and self.searches >= self.max_searches:
             return error("budget_exhausted", f"searches budget is used up ({self.max_searches})")
-        self.turns += 1
+        self._spent(tool)
         self.searches += kind == "search"
         return None
+
+    def _spent(self, tool: str) -> None:
+        """One turn spent on ``tool``, counted by tool too: the app log names every call (on T's Mac, 2026-10-31, 10
+        tool calls, 3 searches and 6 fetches left one call unnamed)."""
+        assert tool in ni_recipe.TOOLS, "a known tool"
+        self.turns += 1
+        self.calls[tool] = self.calls.get(tool, 0) + 1
+        assert sum(self.calls.values()) == self.turns, "every turn is one tool's call"
 
     def mark_tried(self, draft: object) -> None:
         """A proposal of the held pass failed: it is not waiting any more (proposing it again could only fail again)."""

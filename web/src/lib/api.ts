@@ -1888,6 +1888,13 @@ export const api = {
       `/api/ni/items/${encodeURIComponent(id)}/flow/use-key`, {
         method: "POST",
       }),
+  // 2026-10-31: skip the Library source the card paused on for a key (the user has none); the build goes on with
+  // the next source, then research under the card's consent, then the honest decline.
+  niFlowSkipSource: (id: string) =>
+    req<{ ok: boolean; started: boolean }>(
+      `/api/ni/items/${encodeURIComponent(id)}/flow/skip-source`, {
+        method: "POST",
+      }),
   niFlowFix: (id: string) =>
     req<{ ok: boolean; started: boolean }>(
       `/api/ni/items/${encodeURIComponent(id)}/flow/fix`, {

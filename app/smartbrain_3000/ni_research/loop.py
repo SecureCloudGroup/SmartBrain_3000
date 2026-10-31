@@ -47,6 +47,7 @@ class Outcome:
     reasons: list = field(default_factory=list)
     links: list = field(default_factory=list)
     ending: str = ""                 # a declined run's row of ``ni_master.ENDINGS`` (how the flow ends it)
+    stop: str = ""                   # what stopped a declined run: one of ``STOPS`` ("" for a closed-world decline)
     usage: dict = field(default_factory=lambda: {"calls": 0, "prompt": 0, "completion": 0, "cache_read": 0,
                                                  "cache_write": 0})
 
@@ -84,10 +85,21 @@ def _fault(out: Outcome, reasons: list) -> Outcome:
     return out
 
 
-def _decline(ctx: ResearchCtx, out: Outcome, reasons: list, ending: str = "research_declined_budget") -> Outcome:
+# what stopped a run that ended without a card: its time, its model tokens or its tool calls (``_budget_stop``), the
+# loop's own step bound, the model replying without a tool call, or two failed proposals. The declined card names it
+# (``ni_master.gave_up_line``): one line for all said "ran out of steps" when the token cap stopped T's first run.
+STOPS = ("time", "tokens", "turns", "steps", "model_stopped", "checks")
+_BUDGET_STOPS = {"the time budget ran out": "time", "the model tokens budget ran out": "tokens",
+                 "the tool calls budget ran out": "turns"}
+
+
+def _decline(ctx: ResearchCtx, out: Outcome, reasons: list, ending: str = "research_declined_budget",
+             stop: str = "") -> Outcome:
     assert isinstance(reasons, list), "reasons are a list"
     assert out.status in ("declined", "proposed"), "a status"
     assert ni_master.ENDINGS[ending][0] == "declined", "an ending that declines (a fault is ``_fault``)"
+    assert stop in STOPS or stop == "", "a closed stop"
+    out.stop = stop
     out.ending = ending
     out.status = "declined"
     out.proposal = None
@@ -328,12 +340,13 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
                 return out
             fails, why = fails + 1, reasons
             if fails >= MAX_VERIFY_FAILS:
-                return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks")
+                return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks",
+                                stop="checks")
             _say(turns, one_line("Your draft that passed was proposed for you because the "
                                  "budget is nearly used up, and failed: " + "; ".join(reasons), 600))
             stop = _budget_stop(ctx)
         if stop:
-            return _decline(ctx, out, [stop, *why])
+            return _decline(ctx, out, [stop, *why], stop=_BUDGET_STOPS.get(stop, ""))
         response = _ask_model(chat, prompt.build_messages(base, turns), prompt.openai_tools("search" in ctx.allowed_origins))
         _count(ctx, out, response)
         msg, calls = _message(response), _calls(_message(response))
@@ -345,10 +358,11 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
                     return out
                 fails, why = fails + 1, reasons
                 if fails >= MAX_VERIFY_FAILS:
-                    return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks")
+                    return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks",
+                                    stop="checks")
             nudges += 1
             if nudges > MAX_NUDGES:
-                return _decline(ctx, out, ["the model stopped without proposing a card", *why])
+                return _decline(ctx, out, ["the model stopped without proposing a card", *why], stop="model_stopped")
             turns += [{"role": "assistant", "content": str(msg.get("content") or "")[:2000]},
                       {"role": "user", "content": _nudge(ctx, why)}]
             continue
@@ -366,14 +380,15 @@ def _research_turns(ctx: ResearchCtx, chat: ChatFn, out: Outcome, place: str, ac
                     fails += 1
                     why = [one_line(r, 200) for r in result.get("reasons") or [result.get("detail")]]
                     if fails >= MAX_VERIFY_FAILS:
-                        return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks")
+                        return _decline(ctx, out, ["the card failed its checks twice", *why], "research_declined_checks",
+                                        stop="checks")
             hint = NEXT.get(str(result.get("error"))) if not result.get("ok") else None
             shown = {**result, **({"next": hint} if hint else {}), "budget": _left(ctx)}
             turns.append({"role": "tool", "tool_call_id": call["id"], "content": prompt.result_text(shown)})
         for call in calls[MAX_CALLS_PER_TURN:]:  # a call beyond the cap still gets its (refusal) result
             turns.append({"role": "tool", "tool_call_id": call["id"],
                           "content": prompt.result_text(error("too_many_calls", f"{MAX_CALLS_PER_TURN} per reply"))})
-    return _decline(ctx, out, ["the research ran out of steps", *why])
+    return _decline(ctx, out, ["the research ran out of steps", *why], stop="steps")
 
 
 def _say(turns: list, text: str) -> None:

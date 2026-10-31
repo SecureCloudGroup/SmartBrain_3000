@@ -10,7 +10,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 ActionKind = Literal[
     "activate", "activate_sites", "add_credential", "allow_model", "answer_date", "cancel", "delete",
     "dismiss", "edit", "fill_param", "fix", "give_access", "keep", "keep_looking", "pause", "pick_source",
-    "refine", "resume", "retry", "review_fix", "run", "stop_looking", "use_key", "use_local"
+    "refine", "resume", "retry", "review_fix", "run", "skip_source", "stop_looking", "use_key", "use_local"
 ]
 
 Author = Literal[
@@ -49,8 +49,8 @@ class DeclineLink(TypedDict):
     host: str
 
 DeclineReason = Literal[
-    "ask_unsupported", "compare_unbuildable", "no_answering_source", "no_ready_source", "research_gave_up",
-    "source_cant_answer", "verify_refused"
+    "ask_unsupported", "compare_unbuildable", "no_answering_source", "research_gave_up", "source_cant_answer",
+    "verify_refused"
 ]
 
 Dir = Literal[
@@ -120,6 +120,11 @@ FlowState = Literal[
 class FlowTap(TypedDict):
     render_notice: bool
     site_cap: int
+
+class FlowTried(TypedDict):
+    host: str
+    provider: str
+    why: str
 
 class FlowTry(TypedDict):
     n: int
@@ -261,6 +266,7 @@ class Flow(TypedDict):
     tap: NotRequired[FlowTap]
     browser: NotRequired[FlowBrowser]
     decline: NotRequired[FlowDecline]
+    tried: NotRequired[list[FlowTried]]
 
 class BoardRow(TypedDict):
     id: str

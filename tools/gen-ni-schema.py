@@ -98,9 +98,10 @@ def _flow_defs() -> dict[str, dict]:
     flow = obj({"state": ref("FlowState"), "error": STR, "actions": arr(ref("ActionKind")),
                 "progress": ref("FlowProgress"), "suggestions": arr(ref("Suggestion")), "reason": STR,
                 "question": ref("FlowQuestion"), "reopen": arr(ref("ReopenKind")), "access": ref("FlowAccess"),
-                "tap": ref("FlowTap"), "browser": ref("FlowBrowser"), "decline": ref("FlowDecline")},
+                "tap": ref("FlowTap"), "browser": ref("FlowBrowser"), "decline": ref("FlowDecline"),
+                "tried": arr(ref("FlowTried"), maxItems=ni_flow._TRIED_MAX)},
                opt=("error", "actions", "progress", "suggestions", "reason", "question", "reopen", "access",
-                    "tap", "browser", "decline"),
+                    "tap", "browser", "decline", "tried"),
                desc="The flow field of a board row: present while a card builds or after it ended abnormally.")
     return {
         "Suggestion": suggestion, "FlowProgress": progress, "FlowTry": obj({"n": INT, "of": INT, "host": STR}),
@@ -118,6 +119,9 @@ def _flow_defs() -> dict[str, dict]:
                                 "line, up to three links, its open standing order, if any, and the host of a source "
                                 "that asked for a key (Use my key). Present only on a declined flow."),
         "FlowKeyWall": obj({"host": text(253)}, desc="A source the run met that asked for a key: its host only."),
+        "FlowTried": obj({"host": text(253), "provider": text(120), "why": text(200)},
+                         desc="A source this build tried and dropped: its host, its provider and the reason, in "
+                              "the card's words. The key pause and the declined card both list them."),
         "FlowLooking": obj({"since": text(40), "next_at": nullable(text(40))},
                            desc="An open standing order (Keep looking): when it began and when it looks next."),
         "DeclineLink": obj({"title": text(120), "url": text(500), "host": text(120)}),

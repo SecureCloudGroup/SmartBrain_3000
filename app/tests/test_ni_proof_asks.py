@@ -20,6 +20,9 @@ What T's Mac showed on 2026-10-30 and each test here pins:
 * the Alpha Vantage key on the card made the key check skip the pause for the Finnhub row, whose fetch the loader
   then refused: the key check compares hosts, and the card asks for Finnhub's key.
 * the daily series files its values under each day's date: it is refused with that reason, never mapped.
+* research never ran: the card ended ``no_ready_source`` and research waited for a Keep looking tap nobody knew to
+  make, while the consent question had promised research "with the same service" since 0.27.0; research now runs
+  at once under that consent when every row is gone, and the card lists what it tried and why.
 
 What the first capture showed on 2026-10-31:
 * a second request inside one second gets a 200 OK "1 request per second" sentence, which a build read as "No ready
@@ -45,8 +48,8 @@ import pytest
 from test_ni_answers import WEATHER_URL, lib  # noqa: F401  (lib is a fixture: the real Library shape with answers)
 from test_ni_auto_pick import _row
 
-from smartbrain_3000 import db as dbmod
 from smartbrain_3000 import (
+    auth,
     gateway,
     netguard,
     ni,
@@ -54,7 +57,11 @@ from smartbrain_3000 import (
     ni_master,
     ni_message,
     ni_polite,
+    ni_refresh,
+    ni_research_flow,
+    ni_standing,
 )
+from smartbrain_3000 import db as dbmod
 from smartbrain_3000.secrets import SecretStore, gen_master_key
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
@@ -202,6 +209,34 @@ class _Model:
         return out
 
 
+class _Research:
+    """The researcher's model seam on the consented route, scripted: every reply is prose with no tool call, so the
+    run ends in its own verdict (``research_gave_up``), never a fault. Records each call, so a test can assert that
+    research ran at all (T's install never researched: the tap was the gate), and on which route."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def __call__(self, model: str, messages: list, tools: list | None) -> dict:
+        assert model == "claudecode/opus", f"research runs on the route the card's consent names; got {model}"
+        self.seen.append(model)
+        return {"choices": [{"message": {"role": "assistant", "content": "still looking"}}],
+                "usage": {"prompt_tokens": 50, "completion_tokens": 20}}
+
+
+def _researcher() -> _Research:
+    """Install the research seam for claudecode/opus; the card's own consent decides whether it may run."""
+    seam = _Research()
+    ni_research_flow.set_research_chat(seam, cloud="claudecode/opus")
+    return seam
+
+
+def _tried(store: ni.NIStore, item_id: str) -> list[tuple[str, str]]:
+    """What the card shows it tried: (host, why), in order."""
+    field = ni_flow.board_flow_field(store, item_id, read_only=True) or {}
+    return [(t["host"], t["why"]) for t in field.get("tried") or []]
+
+
 @pytest.fixture(autouse=True)
 def _t_install(monkeypatch):
     """T's install: every route Claude Code and no local model, research on its default (Automatic: the suite's
@@ -226,6 +261,7 @@ def _t_install(monkeypatch):
     yield clock
     ni_flow.set_secrets_provider(None)
     ni_flow.set_library_provider(None)
+    ni_research_flow.set_research_chat(None)
     monkeypatch.undo()
     if hasattr(time, "tzset"):
         time.tzset()
@@ -729,23 +765,252 @@ def test_a_row_with_no_host_and_a_card_with_no_key_is_no_match() -> None:
 
 # ---- a series filed under dates ----------------------------------------------------------------------------------
 
-def test_the_daily_series_is_refused_for_its_dated_paths_with_no_model_call(monkeypatch) -> None:
+def test_the_daily_series_is_refused_for_its_dated_paths_and_research_then_runs_under_the_consent(monkeypatch) -> None:
     """``["Time Series (Daily)"]["2026-10-30"]["4. close"]`` is today's close today and the same day's close for
     ever: a card bound to it goes stale silently. With only such paths (and the series' meta names beside them)
-    the row moves on with that reason before any model call, and the ask ends declined, offering Keep looking."""
+    the row moves on with that reason before any model call. With no row left, research runs AT ONCE on the route
+    the card's consent names (no Keep looking tap: on T's install that tap was the gate and research never ran),
+    and the ask ends as research's own decline, lookable, listing the row it tried and why."""
     rows = [ROWS_NVDA["rows"][2]]
     replay = _Replay({AV_DAILY: "alphavantage-time-series-daily"}, {"www.alphavantage.co": AV_KEY})
-    model = _Model()
+    model, research = _Model(), _researcher()
     store, item_id, secrets = _card(monkeypatch, rows, replay)
     ni_flow.run_flow(store, item_id, gateway_call=model)
     ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
     out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_DAILY)
     assert replay.fetched == [f"{AV_DAILY}&apikey={AV_KEY}"] and model.calls["mapping"] == 0
-    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source", out
+    assert research.seen == ["claudecode/opus"] * len(research.seen) and research.seen, "research ran, no tap"
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up", out
     assert out["_decline_card"]["look"] is True
-    assert "files its values under the day's date" in _notes(store, item_id), _notes(store, item_id)
+    assert _tried(store, item_id) == [("www.alphavantage.co", ni_flow._DATED_WHY)], "the card says what it tried"
+    field = ni_flow.board_flow_field(store, item_id, read_only=True)
+    assert field["tried"][0]["provider"] == rows[0]["provider"] and "keep_looking" in field["actions"]
     cands = ni_flow.derive_paths(fixture("alphavantage-time-series-daily")["body"])
     assert any(ni_flow._dated_path(c["path"]) for c in cands), "the walker offers the dated paths; the flow refuses them"
+
+
+# ---- no key: skip ---------------------------------------------------------------------------------------------------
+
+def test_skipping_each_keyed_host_goes_on_to_the_next_and_then_to_research(monkeypatch) -> None:
+    """The user has no key for a source the build paused on: Skip drops that row with that reason, and with it the
+    host's other rows that need the same key (review of #570: the daily row asked for Alpha Vantage's key again), and
+    the build goes on from the rows it had left (never a second ranking, which would offer the rows again): Finnhub
+    pauses; skipped, nothing is left and research runs at once under the card's consent. Every pause and the decline
+    list what was tried. Nothing is ever fetched and no mapping call is made."""
+    replay, model, research = _Replay({}, {}), _Model(), _researcher()
+    store, item_id, _secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    started: list[dict] = []
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda store_, item_id_, **kw: started.append(kw) or True)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co"
+    field = ni_flow.board_flow_field(store, item_id, read_only=True)
+    assert "skip_source" in field["actions"] and "give_access" in field["actions"] and "tried" not in field
+    assert ni_flow.skip_source(store, item_id) is True and started == [{}], "the skip resumes the build itself"
+    left = [r["url"] for r in ni_flow._flow_read(store, item_id).get("_ranked_library") or []]
+    assert AV_DAILY not in left and FINNHUB in left, left
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)   # the worker the skip started
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io"
+    assert _tried(store, item_id) == [("www.alphavantage.co", ni_flow._SKIP_WHY)]
+    assert ni_flow.skip_source(store, item_id) is True
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert research.seen, "nothing left: research ran at once under the consent"
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up", out
+    assert [h for h, _w in _tried(store, item_id)] == ["www.alphavantage.co", "finnhub.io"]
+    field = ni_flow.board_flow_field(store, item_id, read_only=True)
+    assert "skip_source" not in field["actions"] and "keep_looking" in field["actions"]
+    assert replay.fetched == [] and model.calls["mapping"] == 0 and model.calls["intent"] == 1
+    with pytest.raises(ValueError, match="skip"):
+        ni_flow.skip_source(store, item_id)   # a declined card has nothing to skip
+
+
+def _tool_reply(name: str, args: dict, prompt: int) -> dict:
+    """A research model reply on the Claude Code route: one tool call, and the usage a new CLI process reports for a
+    prompt it was sent whole (no cache share)."""
+    call = {"id": "c0", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
+    return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [call]}}],
+            "usage": {"prompt_tokens": prompt, "completion_tokens": 200,
+                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+
+
+def test_research_after_both_skips_offers_neither_site_again_and_the_card_says_what_it_searched_and_read(
+        monkeypatch, caplog) -> None:
+    """Run B on T's Mac (2026-10-31, #570 at f80b265): no keys, both keyed sites skipped, research at once on
+    claudecode/opus; it declined after 11 calls, and nothing said what it had searched or read, its line said "ran
+    out of steps" for the token cap, and its three links were the two sites just skipped. Here, on the real gateway
+    path of T's route: research is one CLI session, closed at the end; the Library offers research neither skipped
+    site's keyed rows, so neither is read, offered as Use my key or linked; the card lists the skips, then the run's
+    searches and reads in its own words; the line names the model budget; the app log has one line for the run with
+    its cache share and no address."""
+    replay, model = _Replay({}, {}), _Model()
+    store, item_id, _secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    monkeypatch.setattr(ni_research_flow, "_CHAT", None)   # the gateway path T's install runs, not a seam
+    opened: list = []
+
+    class _Session:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(ni_research_flow.claudecli, "open_turn_session", lambda: opened.append(_Session()) or opened[-1])
+    page = "https://quotes.example.com/nvda"
+    searched: list[str] = []
+    monkeypatch.setattr(ni_research_flow, "_SEARCH", lambda query, limit: searched.append(query) or {
+        "results": [{"title": "NVDA quote", "url": page, "snippet": "NVIDIA stock price today"}]})
+    read: list[str] = []
+    monkeypatch.setattr(ni_research_flow.tools, "_fetch_and_digest", lambda ctx, url, fmt, robots=True: read.append(url)
+                        or {"ok": False, "error": "not_data", "detail": "a web page with no data table (page text is not read)"})
+    # uncached prompts, as a new CLI process per call reports them: the fourth call takes the run past its token cap
+    # (60,000), so its own tool call is refused and the run stops there
+    script = [_tool_reply("library_search", {"query": "NVDA stock price"}, 20_000),
+              _tool_reply("web_search", {"query": "NVDA stock price api"}, 20_000),
+              _tool_reply("fetch_sample", {"url": page}, 19_000),
+              _tool_reply("library_search", {"query": "NVIDIA quote"}, 1_000)]
+    calls: list[dict] = []
+
+    def chat(conn, purpose, messages, model_, tools_, **kw):
+        calls.append({"model": model_, "session": kw.get("session"), "messages": copy.deepcopy(messages),
+                      "progress": ni_flow.build_progress(ni_flow._flow_read(store, item_id) or {})})
+        return script.pop(0)
+
+    monkeypatch.setattr(gateway, "chat_with_tools_recorded", chat)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co"
+    assert ni_flow.skip_source(store, item_id) is True
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io"
+    assert ni_flow.skip_source(store, item_id) is True
+    with caplog.at_level("INFO", logger="smartbrain_3000.ni_research_flow"):
+        out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "declined", out
+    assert len(calls) == 4 and {c["model"] for c in calls} == {"claudecode/opus"}
+    assert len(opened) == 1 and all(c["session"] is opened[0] for c in calls) and opened[0].closed, \
+        "one CLI session for the run, on every call, wiped when it ended"
+    assert {json.dumps(c["progress"]) for c in calls} == {json.dumps({"step": 2, "of": 4, "label": "Finding a source"})}, \
+        "while research runs the card names no Library row (it named finnhub.io, just skipped, on T's Mac)"
+    shown = json.dumps([m for c in calls for m in c["messages"] if m.get("role") == "tool"])
+    assert "alphavantage" not in shown and "finnhub" not in shown, "research was offered neither skipped site"
+    assert searched == ["NVDA stock price api"] and read == [page] and replay.fetched == []
+    card = out["_decline_card"]
+    assert card["reason"] == "research_gave_up" and card["line"] == ni_master.GAVE_UP_LINES["tokens"], card
+    assert [link["url"] for link in card["links"]] == [page] and card.get("key_wall") is None
+    assert _tried(store, item_id) == [
+        ("www.alphavantage.co", ni_flow._SKIP_WHY), ("finnhub.io", ni_flow._SKIP_WHY),
+        ("web search", 'searched for "NVDA stock price api"'),
+        ("research", "read quotes.example.com (no data file or table)")]
+    view = ni_master.terminal_surface("declined", ni_flow._flow_read(store, item_id), shell=True)
+    assert view["reason"] == ni_master.GAVE_UP_LINES["tokens"] and "use_key" not in view["reopen"]
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("ni_research: cloud run ")]
+    assert len(lines) == 1 and "ended declined (tokens)" in lines[0] and "cache read 0, write 0" in lines[0], lines
+    assert "reads: quotes.example.com no data file or table" in lines[0]
+    assert "; 3 tool calls (library_search 1, web_search 1, fetch_sample 1), 1 searches, 1 fetches" in lines[0], \
+        "every tool call is named; the one its budget refused is not one"
+    assert "https://" not in lines[0] and "NVDA stock price api" not in lines[0], "no address and no search words"
+
+
+def _skip_both(monkeypatch) -> tuple[ni.NIStore, str, SecretStore, _Model, _Research, _Replay]:
+    """The NVDA card with no keys: both keyed sites skipped, research declined, the card lookable."""
+    replay, model, research = _Replay({}, {}), _Model(), _researcher()
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    for host in ("www.alphavantage.co", "finnhub.io"):
+        out = ni_flow.run_flow(store, item_id, gateway_call=model)
+        assert out["state"] == "awaiting_access" and out["_access"]["host"] == host, out
+        assert ni_flow.skip_source(store, item_id) is True
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "declined" and out["_decline_card"]["look"] is True, out
+    return store, item_id, secrets, model, research, replay
+
+
+def test_keep_looking_after_both_skips_looks_again_without_asking_for_either_key(monkeypatch) -> None:
+    """Keep looking on the card research declined after both keyed sites were skipped. Each look runs the ask again,
+    and before, it paused for Alpha Vantage's key again: the order stopped there, asking for a key the user had said
+    they don't have. The skips ride the order: a look drops both sites' keyed rows with the skip's reason and goes
+    on to research, fetching nothing. A key for a skipped site given since on another card is offered on the card,
+    as any same-host key is (the user's tap, nothing copied)."""
+    store, item_id, secrets, model, research, replay = _skip_both(monkeypatch)
+    runs = len(research.seen)
+    assert ni_standing.seal(store, item_id, ni_flow._flow_read(store, item_id)) is not None   # the Keep looking tap
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "declined" and isinstance(out.get("_looking"), dict), out
+    assert len(research.seen) > runs, "the look went on to research"
+    assert _tried(store, item_id) == [("www.alphavantage.co", ni_flow._SKIP_WHY), ("finnhub.io", ni_flow._SKIP_WHY)]
+    assert ni_flow.skipped_sites(ni_flow._flow_read(store, item_id)) == {"www.alphavantage.co", "finnhub.io"}
+    assert replay.fetched == [] and model.calls["mapping"] == 0
+    # a key for Alpha Vantage given on another card since: the next look (a free re-match) offers it on this card
+    ni.put_credential(secrets, "another-card", ni_flow.KEY_PARAM, AV_KEY, "www.alphavantage.co")
+    assert ni_standing.rematch(store) == 1 and ni_standing.run_due(store) == item_id
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co", out
+    assert out["_access"].get("reuse") is True, "offered for one tap"
+    assert secrets.get(f"ni:{item_id}:{ni_flow.KEY_PARAM}") is None and replay.fetched == [], "nothing copied or sent"
+
+
+def test_a_retry_after_a_skip_asks_for_the_key_again(monkeypatch) -> None:
+    """A Retry starts a fresh record without the skips (the user may have a key by then; it is the one way to bring
+    one later), so the build pauses for the first site's key again."""
+    store, item_id, _secrets, model, _research, replay = _skip_both(monkeypatch)
+    assert ni_flow.reseed_for_retry(store, item_id, ni_flow._flow_read(store, item_id), ASK) is True
+    assert ni_flow.skipped_sites(ni_flow._flow_read(store, item_id)) == frozenset()
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co", out
+    assert replay.fetched == []
+
+
+def test_a_skip_keeps_the_hosts_rows_that_need_no_key() -> None:
+    """A key is the host's, so a skip takes the host's keyed rows; a row of the same host that needs no key is still
+    worth trying (a multi-tenant host can serve both), and another host's rows are untouched."""
+    keyless = {**ROWS_NVDA["rows"][2], "source_id": "av-keyless", "url": AV_DAILY + "&datatype=json",
+               "needs_key": None}
+    host = "www.alphavantage.co"
+    assert ni_flow._goes_with(ROWS_NVDA["rows"][2], host, host_wide=False), "the same host's keyed row goes"
+    assert not ni_flow._goes_with(keyless, host, host_wide=False), "its keyless row stays"
+    assert not ni_flow._goes_with(ROWS_NVDA["rows"][1], host, host_wide=False), "another host's row stays"
+    assert ni_flow._goes_with(keyless, host, host_wide=True), "a host-wide refusal takes every row of the host"
+
+
+def test_a_cloud_build_a_phone_started_draws_the_allowance_before_its_first_model_call(monkeypatch) -> None:
+    """A Retry, Fix, Refine or Skip from a paired phone runs a cloud build: it draws one unit of the daily allowance
+    before its first model call, once a run. With today's spent, the card fails with the allowance's own line
+    (review of #570: it read "No model is routed") and nothing reaches the model or a source. The Desktop's own run
+    is never counted."""
+    monkeypatch.setenv(ni_refresh.ENV_DAILY, "1")
+    replay, model = _Replay({}, {}), _Model()
+    store, first, _secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+
+    def card(ask: str) -> str:   # another card for the same ask (a card's name is unique)
+        item_id = ni_flow.create_shell_item(store, ask)
+        ni_flow._flow_write(store, item_id, {**ni_flow._make_record(ask, "intent"),
+                                             "_model_consent": "claudecode/opus", "_model_consent_web": True})
+        return item_id
+
+    with auth.serving_via(auth.PHONE_VIA), ni_refresh.paid_scope(False):
+        out = ni_flow.run_flow(store, first, gateway_call=model)
+    assert out["state"] == "awaiting_access" and model.calls["intent"] == 1, "the phone's run built on its unit"
+    with auth.serving_via(auth.PHONE_VIA), ni_refresh.paid_scope(False):
+        refused = ni_flow.run_flow(store, card(ASK + ", from the phone again"), gateway_call=model)
+    assert refused["state"] == "failed" and refused["error"] == f"phone_allowance: {ni_refresh.PHONE_SPEND_LINE}"
+    assert model.calls["intent"] == 1 and replay.fetched == [], "nothing reached the model or a source"
+    line = ni_master.terminal_surface("failed", refused, shell=True)["reason"]
+    assert line.startswith("Today's allowance for cloud model use started from a phone is spent"), line
+    assert "No model is routed" not in line
+    out = ni_flow.run_flow(store, card(ASK + ", at the desk"), gateway_call=model)   # the Desktop's own run
+    assert out["state"] == "awaiting_access" and model.calls["intent"] == 2, "the owner at the desk is not counted"
+
+
+def test_an_address_the_user_named_cannot_be_skipped(monkeypatch) -> None:
+    """Skip is for a row the build picked; the one address the user pasted is theirs, so the card offers no skip
+    and the route's helper refuses."""
+    replay, model = _Replay({}, {}), _Model()
+    store, item_id, _secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    ni_flow.run_flow(store, item_id, gateway_call=model)
+    ni_flow.ask_for_key(store, item_id, FINNHUB)   # the user's own address asks for a key (P3)
+    field = ni_flow.board_flow_field(store, item_id, read_only=True)
+    assert field["state"] == "awaiting_access" and "skip_source" not in field["actions"]
+    with pytest.raises(ValueError, match="skip"):
+        ni_flow.skip_source(store, item_id)
+    assert replay.fetched == []
 
 
 # ---- the budget --------------------------------------------------------------------------------------------------

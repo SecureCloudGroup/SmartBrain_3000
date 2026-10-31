@@ -128,11 +128,15 @@ number you can check:
   it asks, **up to an hour**. Cards read only ports 80 and 443, unless a Library
   source or an address you kept names its own port; your own network may use
   any port.
-- **Keep looking** researches when you tap it, then again after 1, 2 and 4 days,
-  then weekly, and stops after **14 days**. Those later runs and background
+- **Research** runs at once when nothing ready answers an ask (under the model
+  answer the card asked for), at most 3 searches and 8 reads a run. **Keep
+  looking** runs it again when you tap it, then after 1, 2 and 4 days, then
+  weekly, and stops after **14 days**. Those later runs and background
   re-research share a ceiling of **10 research runs a day** across all cards (at
-  most one re-research a day per card); the run your tap starts at the Desktop is not
-  counted, while a tap from a paired phone (Keep looking, or allowing a cloud model) is.
+  most one re-research a day per card). A run you start at the Desktop is not
+  counted. Anything a paired phone starts that uses a cloud model is counted,
+  once per run: allowing a cloud model, Keep looking, and a Retry, Fix, Refine or
+  Skip this source on a card that builds or researches with one.
 - **A source you kept, or one SmartBrain checked, is set aside after 3 failed
   reads in a row**, so a dead source stops costing every ask a fetch.
 - **An alert's cooldown is at least 5 minutes** (an hour unless you set one).

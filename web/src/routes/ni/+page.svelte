@@ -12,6 +12,7 @@
   import CardShell from "$lib/components/CardShell.svelte";
   import BuildProgress from "$lib/components/BuildProgress.svelte";
   import DeclinedCard from "$lib/components/DeclinedCard.svelte";
+  import TriedList from "$lib/components/TriedList.svelte";
   import LinksStop from "$lib/components/LinksStop.svelte";
   import Chip from "$lib/components/Chip.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -273,6 +274,23 @@
       await load();
     } catch (err) {
       flowActionError = { ...flowActionError, [item.id]: describeError(err) || "That didn’t work — try again." };
+    } finally {
+      busyId = null;
+    }
+  }
+
+  // 2026-10-31: the user has no key for the source the build paused on. Skip drops it, and the build goes on
+  // with the next source, then research under the card's consent, then the honest decline.
+  async function skipSource(item: NiBoardItem): Promise<void> {
+    console.assert(item.flow?.state === "awaiting_access", "skipSource: pause required");
+    busyId = item.id;
+    flowActionError = { ...flowActionError, [item.id]: "" };
+    try {
+      const out = await api.niFlowSkipSource(item.id);
+      toast(out.started ? "Skipped — trying the next source." : "Skipped.");
+      await load();
+    } catch (err) {
+      flowActionError = { ...flowActionError, [item.id]: describeError(err) || "Couldn’t skip that source." };
     } finally {
       busyId = null;
     }
@@ -1423,6 +1441,7 @@
                      It never builds or fetches on its own. -->
                 <DeclinedCard
                   decline={item.flow.decline}
+                  tried={item.flow.tried}
                   busy={busyId === item.id}
                   error={flowActionError[item.id] ?? ""}
                   canFix={hasAction(item, "fix")}
@@ -1554,6 +1573,8 @@
                   class="ni-commission ni-pick-url"
                   onsubmit={(e) => { e.preventDefault(); void giveAccess(item); }}
                 >
+                  <!-- what the build tried before this pause, and why each source was dropped -->
+                  <TriedList tried={item.flow.tried} />
                   {#if access.key?.reuse}
                     <!-- Release P3: a key the user gave another card for this host. Different owners can share
                          a host, so it is only sent to this address when the user taps. -->
@@ -1649,6 +1670,11 @@
                       || (!!access.key?.place && cardText(accessNameText, item.id).trim().length === 0)
                       || (access.contact && cardText(accessEmailText, item.id).trim().length < 6)}
                   >{busyId === item.id ? "Saving…" : "Continue"}</button>
+                  {#if hasAction(item, "skip_source")}
+                    <!-- no key for this source: the build goes on with the next one (a link you pasted has no skip) -->
+                    <button type="button" class="ghost" disabled={busyId === item.id}
+                      onclick={() => void skipSource(item)}>Skip this source</button>
+                  {/if}
                   {#if flowActionError[item.id]}
                     <p class="error ni-note">{flowActionError[item.id]}</p>
                   {/if}

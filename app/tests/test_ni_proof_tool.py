@@ -13,6 +13,7 @@ import json
 import pathlib
 import sys
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +21,7 @@ from test_ni_proof_asks import (
     ASK,
     AV_KEY,
     AV_QUOTE,
+    FH_KEY,
     ROWS_NVDA,
     T_ROUTES,
     _Library,
@@ -137,9 +139,9 @@ def test_the_nvda_ask_is_observed_from_the_words_to_a_refreshed_card(tool, app, 
     assert "SB_PROOF_AV" in markdown and "End: **built**" in markdown
 
 
-def test_a_daily_ask_that_cannot_build_is_reported_with_its_decline(tool, app, monkeypatch, tmp_path) -> None:
+def test_a_daily_ask_that_cannot_build_is_reported_with_what_was_tried(tool, app, monkeypatch, tmp_path) -> None:
     """The daily series files its values under each day's date: the card moves on and declines (research is off
-    here), and the report carries the card's decline, the reason the user would read."""
+    here), and the report carries the card's own tried line and decline, the reason the user would read."""
     replay = _Replay({AV_DAILY: "alphavantage-time-series-daily"}, {"www.alphavantage.co": AV_KEY})
     _wire(monkeypatch, [ROWS_NVDA["rows"][2]], replay)
     code, report, markdown = _run(tool, app, tmp_path / "out", "--key", "www.alphavantage.co=SB_PROOF_AV",
@@ -147,19 +149,37 @@ def test_a_daily_ask_that_cannot_build_is_reported_with_its_decline(tool, app, m
     assert code == 0 and report["end"] == "declined", (report.get("end"), report["events"])
     last = report["events"][-1]
     assert last["decline"]["reason"] and last["decline"]["line"]
+    assert any(t.startswith("www.alphavantage.co: ") for t in last["tried"]), last
+    assert "## Sources tried" in markdown and "www.alphavantage.co: " in markdown
     assert "## Decline" in markdown and last["decline"]["line"] in markdown
     assert AV_KEY not in json.dumps(report) + markdown
 
 
 def test_a_card_waiting_on_a_key_the_run_was_not_given_times_out_and_says_so(tool, app, monkeypatch,
                                                                              tmp_path) -> None:
-    """No key for the first row: the card waits for a person, the run reports that and ends at its timeout
-    (exit 3), sending nothing to the provider."""
+    """No key for the first row and no skip: the card waits for a person, the run reports that and ends at its
+    timeout (exit 3), sending nothing to the provider."""
     replay = _Replay({AV_QUOTE: "alphavantage-global-quote"})
     _wire(monkeypatch, ROWS_NVDA["rows"], replay)
     code, report, _ = _run(tool, app, tmp_path / "out", "--timeout", "1.5")
     assert code == 3 and report["end"] == "timeout"
     assert report["events"][-1]["flow"] == "awaiting_access" and replay.fetched == []
+    assert "skip_source" in report["events"][-1]["actions"], "the card offers the skip this run did not take"
+
+
+def test_skip_keyless_goes_past_a_row_with_no_key_to_the_one_it_has(tool, app, monkeypatch, tmp_path) -> None:
+    """Given only Finnhub's key, the run skips the Alpha Vantage quote at its pause and the build goes on to
+    Finnhub, whose key it then gives: the card builds from finnhub.io and the tried list names the skip."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote", ROWS_NVDA["rows"][1]["url"]: "finnhub-quote"},
+                     {"finnhub.io": FH_KEY})
+    _wire(monkeypatch, ROWS_NVDA["rows"][:2], replay)
+    code, report, _ = _run(tool, app, tmp_path / "out", "--key", "finnhub.io=SB_PROOF_FH", "--skip-keyless",
+                           "--expect", "built", environ={"SB_PROOF_FH": FH_KEY})
+    assert code == 0 and report["card"]["built_from"]["host"] == "finnhub.io", report["events"]
+    assert [t["tap"] for t in report["taps"]] == ["consent", "skip:www.alphavantage.co", "key:finnhub.io"]
+    assert any("www.alphavantage.co: " in t for e in report["events"] for t in e.get("tried") or [])
+    assert replay.fetched and all(urlsplit(u).hostname == "finnhub.io" for u in replay.fetched), \
+        "nothing was sent to the source it skipped"
 
 
 def test_consent_stop_reports_the_question_and_sends_nothing(tool, app, monkeypatch, tmp_path) -> None:

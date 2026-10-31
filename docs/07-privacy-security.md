@@ -81,10 +81,10 @@ not. Being precise about the line matters more than claiming everything:
   and local self-repair run on a local model or not at all.) **Building** a card
   reads your request and samples of its source, so if that routing points off this
   computer, the new card asks you first: build with that model (this card only; a
-  later Fix or refine doesn't ask again) or with your local model. When no source you kept
-  and no ready-made Library source answers, the card offers **Keep looking**; only when you tap
-  it does SmartBrain **research** one, and the same question then says what leaves this
-  computer if you allow a cloud model: your exact question, the
+  later Fix or refine doesn't ask again) or with your local model. The same question says
+  that when no source you kept and no ready-made Library source answers, SmartBrain
+  **researches** one with that model, under that same answer and with no further tap, and
+  what that sends if you allow a cloud model: your exact question, the
   titles and details of Library sources, the web search results it gets back (titles,
   snippets and addresses), digests of up to 8 pages or data files it reads, today's date,
   your time zone and the place you named, and the research steps so far. Never your email,
@@ -121,8 +121,9 @@ not. Being precise about the line matters more than claiming everything:
   under your own Claude sign-in, exactly like a cloud provider — configured beside the
   local servers, but not local in the privacy sense. SmartBrain drives the `claude`
   command with an empty tool set and session persistence off, so the CLI itself cannot
-  read files, run commands, or keep the conversation on disk; the conversation text
-  still goes to Anthropic. See [Connect a model](02-models.md#claude-code-sends-your-chats-to-anthropic).
+  read files, run commands, or keep the conversation on disk (a chat turn or a research
+  run keeps one session for its own calls in a private folder, deleted when it ends); the
+  conversation text still goes to Anthropic. See [Connect a model](02-models.md#claude-code-sends-your-chats-to-anthropic).
 - **Email.** If you connect Gmail, the app talks to Google's APIs to read/send your
   mail — over a loopback OAuth flow, with your own OAuth client.
 - **Remote access (only if you enable it).** Phone access is **off by default**. When
@@ -200,10 +201,10 @@ not. Being precise about the line matters more than claiming everything:
   SmartBrain checked and ships with the app, or a Library source. It uses the same
   network guard as any fetch, an address filled from your own words, and your key only
   if you typed one, and shows the result as a preview. It reads nothing more and does
-  not refresh the card until you tap **Keep**. When none of them answers, nothing is
-  searched or fetched: the card says *No ready source answers this yet* and offers a
-  paste box and **Keep looking**. What research sends, if you tap Keep looking and allow
-  it, is described under "Cloud model calls" above.
+  not refresh the card until you tap **Keep**. When none of them answers, research runs
+  under the model answer the card asked for; what it sends is described under "Cloud
+  model calls" above. With research switched off, or no model routed for it, nothing is
+  searched or fetched: the card says why and offers a paste box.
 - **The card template library (only if you connect one).** A connected library is
   checked at the URL you pinned about once a day (plus your manual "Check now").
   The check downloads the signed template pack; nothing about you or your cards is

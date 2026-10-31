@@ -1,8 +1,11 @@
-"""P2 (release plan, T 2026-10-24): an ask answers in seconds, and when nothing is ready it says so at once and
-offers Keep looking. Keep looking is a standing order: it looks now with research allowed, then on a backoff under
-the shared daily ceiling and whenever the user keeps a new source (for free), and closes after 14 days."""
+"""P2 (release plan, T 2026-10-24): an ask answers in seconds; when nothing is ready, research runs at once under the
+consent the card holds (2026-10-31: until then the Keep looking tap was the only way research started) and, when it
+finds nothing it can trust, the card says so and offers Keep looking. Keep looking is a standing order: it looks
+again with research allowed, on a backoff under the shared daily ceiling and whenever the user keeps a new source
+(for free), and closes after 14 days."""
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 
 from test_ni_answers import lib  # noqa: F401  (a fixture)
@@ -21,6 +24,7 @@ from test_ni_research_loop import (  # noqa: F401  (_v2 is an autouse fixture, c
 )
 
 from smartbrain_3000 import (
+    auth,
     ni,
     ni_flow,
     ni_intake,
@@ -34,8 +38,9 @@ NOW = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
 
 
 def _declined(monkeypatch, lib_, **kw):
-    """An ask with nothing ready: the flow as it ends without a standing order."""
-    seam = Script()   # any model call would find no scripted reply
+    """An ask with nothing ready: research runs at once under the card's consent and finds nothing, so the flow ends
+    declined (lookable) without a standing order."""
+    seam = stalls()   # the researcher searches once, then stops calling tools: its own verdict, never a fault
     store, item_id, out, _net = _flow(monkeypatch, _wrap(lib_), seam=seam, looking=False, cloud="anthropic/x",
                                       consented=True, **kw)
     out = {**out, "intent": dict(_INTENT)}   # sealed by the intent step, which ``_flow`` runs past
@@ -56,14 +61,33 @@ def _order(store, item_id, **looking) -> None:
 
 # --- the fast answer ------------------------------------------------------------------------------------------------
 
-def test_nothing_ready_declines_at_once_with_no_model_and_offers_keep_looking(lib, monkeypatch) -> None:  # noqa: F811
+def test_nothing_ready_researches_at_once_under_the_cards_consent_and_offers_keep_looking(lib, monkeypatch) -> None:  # noqa: F811
+    """The consent question has promised since 0.27.0 that "if no ready-made source fits, it may also research one
+    with the same service"; until 2026-10-31 the code ran research only after the Keep looking tap, so an install
+    whose Library rows all failed never researched. Now the one row fails, research runs at once on the consented
+    route, and its own verdict is the decline, which offers Keep looking and lists what was tried."""
     store, item_id, out, seam = _declined(monkeypatch, lib)
-    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source"
-    assert seam.seen == [], "no research ran"
+    assert len(seam.seen) == 4, "research ran, with no tap, under the consent the card holds"
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up"
+    assert "_looking" not in out, "not a standing order yet"
     field = ni_flow.board_flow_field(store, item_id)
     assert field["actions"] == ["keep_looking", "retry", "pick_source", "delete"]
     assert field["decline"]["looking"] is None
-    assert field["decline"]["line"] == ni_master.DECLINE_LINES["no_ready_source"]
+    # the line names what stopped the run: this model replied without a tool call (2026-10-31: one line for all)
+    assert field["decline"]["line"] == ni_master.GAVE_UP_LINES["model_stopped"]
+    assert [t["host"] for t in field["tried"]] == ["data.example.org"], "what the build tried rides the decline"
+    assert field["tried"][0]["why"] and field["tried"][0]["provider"]
+
+
+def test_a_card_without_consent_is_asked_before_research_runs(lib, monkeypatch) -> None:  # noqa: F811
+    """No consent sealed on the card: the first run stops at the consent question (the research wording) instead of
+    researching, and nothing leaves the device."""
+    seam = Script()
+    store, item_id, out, _net = _flow(monkeypatch, _wrap(lib), seam=seam, looking=False, cloud="anthropic/x",
+                                      consented=False)
+    assert seam.seen == [] and out["state"] == "unsupported"
+    field = ni_flow.board_flow_field(store, item_id)
+    assert field["question"]["kind"] == "model_consent" and "research" in field["question"]["prompt"]
 
 
 def test_a_standing_order_researches_and_lands_the_card_held_for_keep(lib, monkeypatch) -> None:  # noqa: F811
@@ -85,6 +109,29 @@ def test_an_order_research_cannot_answer_stays_open_and_offers_to_stop(lib, monk
     assert field["actions"] == ["stop_looking", "pick_source", "delete"]
     assert field["decline"]["looking"] == {"since": LOOKING["since"], "next_at": None}
 
+
+
+def test_a_card_an_older_version_sealed_no_ready_source_still_reads_and_its_keep_looking_researches(lib, monkeypatch) -> None:  # noqa: F811
+    """Replay of shipped data: 0.27.0 to 0.27.3 ended a first run that found nothing ready as ``no_ready_source``
+    (look true) before any research ran. That code is gone. Such a card on an install still reads as a closed decline
+    with its own sealed line and keeps its Keep looking way out, and the order that tap starts researches and lands
+    the card held for Keep."""
+    store, item_id, out, _seam = _declined(monkeypatch, lib)
+    line = "No ready source answers this yet. Paste a link to one, or I can keep looking."
+    old = {k: v for k, v in out.items() if k != "_tried"}   # 0.27.x wrote no tried list
+    old.update(error=f"no_ready_source: {line}",
+               _decline_card={"reason": "no_ready_source", "line": line, "links": [], "look": True})
+    ni_flow._flow_write(store, item_id, old)
+    field = ni_flow.board_flow_field(store, item_id)
+    assert field["decline"]["reason"] == "no_answering_source" and field["decline"]["line"] == line
+    assert field["actions"] == ["keep_looking", "retry", "pick_source", "delete"] and "tried" not in field
+    seam = Script(*good_run())
+    ni_research_flow.set_research_chat(lambda model, messages, tools: seam(messages, tools),
+                                       cloud="anthropic/x", consented=True)
+    assert ni_standing.seal(store, item_id, ni_flow._flow_read(store, item_id))["state"] == "source"
+    landed = ni_flow.run_flow(store, item_id, gateway_call=lambda m, p: "{}", ni_route_model="mlx/test-local")
+    assert landed["state"] == "ready" and ni.awaits_yes(store.get_item(item_id))
+    assert len(seam.seen) == len(good_run()), "the order researched"
 
 # --- the routes -----------------------------------------------------------------------------------------------------
 
@@ -309,3 +356,65 @@ def test_keep_looking_from_a_phone_draws_the_daily_ceiling(client, lib, monkeypa
     assert r.status_code == 429 and "from your Mac" in r.json()["detail"], r.text
     assert "_looking" not in (ni_flow._flow_read(store2, item2) or {})
     assert client.post(f"/api/ni/items/{item2}/flow/keep-looking").json()["started"] is True
+
+
+def test_a_run_a_phone_started_draws_the_ceiling_before_its_research_spends(lib, monkeypatch) -> None:  # noqa: F811
+    """Since 2026-10-31 research runs at once under the card's consent, so any run a phone starts can reach cloud
+    research (Retry, Skip this source, Fix), not only the Allow and Keep looking taps that draw at the tap. Such a run
+    draws one unit when its research is about to spend; with today's allowance spent it fails with that reason before
+    anything reaches the model. A run its tap already paid for, and the Desktop's own run, draw nothing. (Each run is
+    served as its worker serves it: the request's origin, and whether its tap paid.)"""
+    monkeypatch.setattr(ni, "_clock", lambda: NOW)
+    monkeypatch.setenv(ni_refresh.ENV_DAILY, "1")
+    with auth.serving_via(auth.PHONE_VIA), ni_refresh.paid_scope(False):
+        store, _item, out, seam = _declined(monkeypatch, lib)
+    assert len(seam.seen) == 4 and out["state"] == "declined", "the phone's run researched on its unit"
+    assert not ni_refresh.budget_left(store.conn, NOW)
+    with auth.serving_via(auth.PHONE_VIA), ni_refresh.paid_scope(False):
+        _s, _i, refused, seam = _declined(monkeypatch, lib, store=store, ask="rain in Lisbon tomorrow")
+    assert seam.seen == [] and refused["state"] == "failed", "nothing reached the model"
+    assert refused["error"] == f"phone_allowance: {ni_refresh.PHONE_SPEND_LINE}"
+    line = ni_master.terminal_surface("failed", refused, shell=True)["reason"]   # what the card says (review of #570)
+    assert line.startswith("Today's allowance for cloud model use started from a phone is spent"), line
+    assert "No model is routed" not in line and "model was unavailable" not in line
+    with auth.serving_via(auth.PHONE_VIA), ni_refresh.paid_scope(True):   # its Allow tap drew the unit already
+        _s, _i, paid, seam = _declined(monkeypatch, lib, store=store, ask="wind in Oslo tomorrow")
+    assert len(seam.seen) == 4 and paid["state"] == "declined"
+    with ni_refresh.paid_scope(False):
+        _s, _i, desk, seam = _declined(monkeypatch, lib, store=store, ask="snow in Bergen tomorrow")
+    assert len(seam.seen) == 4 and desk["state"] == "declined", "the owner at the desk is never counted"
+
+
+def _joined(item_id: str) -> None:
+    deadline = time.monotonic() + 10
+    while ni_flow.is_working(item_id) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not ni_flow.is_working(item_id), "the worker finished"
+
+
+def test_the_worker_serves_the_origin_and_the_payment_of_the_tap_that_started_it(client, lib, monkeypatch) -> None:  # noqa: F811
+    """A new thread carries no context variables: before 2026-10-31 every flow worker read as the Desktop's own, so
+    the research a phone's Retry reached could never be counted. The worker now runs with the origin of the request
+    that started it, and with the unit its tap drew (Allow from a phone), so that run's research is not charged twice."""
+    from smartbrain_3000.auth import relay_headers
+    phone = relay_headers("phone-under-test")
+    seen: list[tuple] = []
+    monkeypatch.setattr(ni_flow, "run_flow",
+                        lambda store, item_id, **kw: seen.append((item_id, auth.request_via(), ni_refresh.phone_paid())))
+    store, item_id, _out, _ = _declined(monkeypatch, lib, store=client.app.state.ni)
+    declined = ni_flow._flow_read(store, item_id)
+    assert client.post(f"/api/ni/items/{item_id}/flow/retry", headers=phone).status_code == 200
+    _joined(item_id)
+    ni_flow._flow_write(store, item_id, declined)   # the stub ran nothing: the card is declined again
+    assert client.post(f"/api/ni/items/{item_id}/flow/retry").status_code == 200   # the Desktop's own
+    _joined(item_id)
+    assert seen == [(item_id, auth.PHONE_VIA, False), (item_id, None, False)]
+    seen.clear()
+    _s, asked, out, _net = _flow(monkeypatch, _wrap(lib), store=store, seam=Script(), looking=False,
+                                 cloud="anthropic/x", consented=False, ask="hail in Denver tomorrow")
+    assert out["state"] == "unsupported" and out["_question"]["kind"] == "model_consent"
+    r = client.post(f"/api/ni/items/{asked}/flow/answer", headers=phone, json={"kind": "model_consent", "value": "allow"})
+    assert r.status_code == 200, r.text
+    _joined(asked)
+    assert seen == [(asked, auth.PHONE_VIA, True)], "the Allow tap drew the unit for the run it started"
+

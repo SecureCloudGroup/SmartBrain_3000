@@ -119,11 +119,6 @@ def _drive_research_declined_no_source(lib_fixture, monkeypatch):
     return _research_flow(monkeypatch, lib_fixture, Script(text_reply('{"pick": null}')), local=True)
 
 
-def _drive_no_ready_source(lib_fixture, monkeypatch):
-    wrap = _Wrap(lib_fixture, [_row("no-answers", _QUAKE_URL)])  # a source that declares no answers is only a link
-    return _run(_store(), wrap, monkeypatch, _fetcher([], {}))[1]   # not a standing order: it ends at once
-
-
 def _drive_no_source_research_off(lib_fixture, monkeypatch):
     wrap = _Wrap(lib_fixture, [_row("no-answers", _QUAKE_URL, format="html")])  # a web page is only a link
     return _run(_store(), wrap, monkeypatch, _fetcher([], {}), looking=True)[1]
@@ -392,11 +387,12 @@ def test_a_declined_card_is_never_due_and_the_tick_fetches_nothing(lib, monkeypa
 def test_the_manual_run_and_activate_routes_refuse_a_declined_shell(client, lib, monkeypatch) -> None:  # noqa: F811
     store = client.app.state.ni
     item_id = ni_flow.create_shell_item(store, _REQUEST)
-    ni_flow._flow_write(store, item_id, {**_drive_no_ready_source(lib, monkeypatch), "state": "declined"})
+    out = _drive_research_declined_budget(lib, monkeypatch)   # the research flow helper runs as a standing order
+    ni_flow._flow_write(store, item_id, {**out, "state": "declined", "_looking": None})   # here: a first run's decline
     assert client.post(f"/api/ni/items/{item_id}/run").status_code == 409
     assert client.post(f"/api/ni/items/{item_id}/commission").status_code == 409
     row = next(r for r in client.get("/api/ni/board").json()["items"] if r["id"] == item_id)
-    assert row["flow"]["state"] == "declined" and row["flow"]["decline"]["reason"] == "no_ready_source"
+    assert row["flow"]["state"] == "declined" and row["flow"]["decline"]["reason"] == "research_gave_up"
     assert row["actions"] == ["keep_looking", "retry", "pick_source", "delete"] and "run" not in row["actions"]
 
 
@@ -405,7 +401,8 @@ def test_the_manual_run_and_activate_routes_refuse_a_declined_shell(client, lib,
 def _declined_shell(client, lib, monkeypatch) -> str:  # noqa: F811
     store = client.app.state.ni
     item_id = ni_flow.create_shell_item(store, _REQUEST)
-    ni_flow._flow_write(store, item_id, {**_drive_no_ready_source(lib, monkeypatch), "state": "declined"})
+    out = _drive_research_declined_budget(lib, monkeypatch)
+    ni_flow._flow_write(store, item_id, {**out, "state": "declined", "_looking": None})
     return item_id
 
 

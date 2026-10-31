@@ -95,7 +95,7 @@ ACTION_KINDS: frozenset[str] = frozenset({
     "keep", "dismiss", "cancel", "retry", "fix", "refine", "run", "pause", "resume",
     "edit", "delete", "activate", "activate_sites", "give_access", "answer_date",
     "allow_model", "use_local", "fill_param", "add_credential", "review_fix", "pick_source",
-    "keep_looking", "stop_looking", "use_key",
+    "keep_looking", "stop_looking", "use_key", "skip_source",
 })
 
 # ---- the declined card state (plan G6, P6, 6.1, 6.2: "a decline is acceptable, a wrong card is the failure") ----
@@ -105,7 +105,6 @@ ACTION_KINDS: frozenset[str] = frozenset({
 # card is a row of ``ENDINGS`` below, the only place the rule lives: which flow state it lands in and, for a
 # decline, which code. ``ni_flow._end`` reads this table; nothing else decides.
 DECLINE_REASONS: frozenset[str] = frozenset({
-    "no_ready_source",       # nothing the user has or the Library holds answers it now; the user may ask to keep looking
     "no_answering_source",   # no source we can read declares an answer for this ask (and research found none)
     "research_gave_up",      # the researcher ran and ended without a card: the budget or the steps ran out, or the model stopped, with no card
     "verify_refused",        # a card was built and the verifier refused it twice
@@ -116,7 +115,6 @@ DECLINE_REASONS: frozenset[str] = frozenset({
 DECLINE_LINKS = 3
 DECLINE_HEADLINE = "I couldn't build a reliable card for this"
 DECLINE_LINES: dict[str, str] = {
-    "no_ready_source": "No ready source answers this yet. Paste a link to one, or I can keep looking.",
     "no_answering_source": "No source I can read answers this.",
     "research_gave_up": "I looked for a source and ran out of steps before finding one I could trust.",
     "verify_refused": "I found a source, but the card built from it failed its checks twice, so I won't show it.",
@@ -124,15 +122,36 @@ DECLINE_LINES: dict[str, str] = {
     "source_cant_answer": "That source can't answer this ask.",
     "ask_unsupported": "This kind of ask isn't supported yet.",
 }
+# research_gave_up's line says what stopped the run (``loop.STOPS``): one line for all said "ran out of steps" when it
+# was the token cap that stopped T's first research run (2026-10-31). A run its checks refused reads verify_refused.
+GAVE_UP_LINES: dict[str, str] = {
+    "time": "I looked for a source until this run's time limit and found none I could trust.",
+    "tokens": "I looked for a source until this run's model budget was used up and found none I could trust.",
+    "turns": DECLINE_LINES["research_gave_up"],
+    "steps": DECLINE_LINES["research_gave_up"],
+    "model_stopped": "I looked for a source, but the model stopped before finding one I could trust.",
+}
+
+
+def gave_up_line(stop: str) -> str:
+    """The declined card's line for a research run that stopped without a card, naming what stopped it; the
+    sealed code stays ``research_gave_up``. An unknown or empty stop reads the code's own line."""
+    assert isinstance(stop, str), "a stop"
+    line = GAVE_UP_LINES.get(stop, DECLINE_LINES["research_gave_up"])
+    assert len(line) <= 200, "a sealed line fits its bound"
+    return line
+
+
 # The user's ways back from a decline: keep looking (a standing order, release P2), run the same ask again, or
 # re-enter the source pick (paste a link). A shell already looking offers to stop instead of the first two.
 DECLINE_REOPEN: tuple[str, ...] = ("keep_looking", "retry", "pick_source")
 LOOKING_REOPEN: tuple[str, ...] = ("stop_looking", "pick_source")
-# The endings a standing order can answer: nothing was ready while research could run, or research ran and found
-# no source it could trust. Research that cannot run (off, or no model for it), a pasted source that cannot answer,
-# a compare no source reads and an ask kind that is not built would decline the same way however long it looked.
-# The decline seals the answer (``look``), so the offer and the order read one rule.
-LOOKABLE: frozenset[str] = frozenset({"no_ready_source", "research_declined_budget", "research_declined_no_source",
+# The endings a standing order can answer: research ran and found no source it could trust. Research that cannot
+# run (off, or no model for it), a pasted source that cannot answer, a compare no source reads and an ask kind that
+# is not built would decline the same way however long it looked. The decline seals the answer (``look``), so the
+# offer and the order read one rule. (Until 2026-10-31 a first run ended ``no_ready_source`` before any research
+# and the Keep looking tap was the only way research started; research now runs at once under the card's consent.)
+LOOKABLE: frozenset[str] = frozenset({"research_declined_budget", "research_declined_no_source",
                                       "research_declined_checks"})
 
 # One row per ending of the v2 flow that is not a card: (flow state it lands in, decline code or None).
@@ -140,7 +159,6 @@ LOOKABLE: frozenset[str] = frozenset({"no_ready_source", "research_declined_budg
 # can still act (pick a link, add a key, answer a question, retry a fault) keeps its own state.
 ENDINGS: dict[str, tuple[str, str | None]] = {
     # -- declined: nothing the card can ask the user would change the answer --
-    "no_ready_source": ("declined", "no_ready_source"),  # no Library row or kept source fits; research not asked for
     "research_declined_checks": ("declined", "verify_refused"),
     "research_declined_budget": ("declined", "research_gave_up"),
     "research_declined_no_source": ("declined", "no_answering_source"),
@@ -212,6 +230,9 @@ def actions_for(state: str, record: dict, *, shell: bool, awaiting_yes: bool,
             out += ("delete",) if shell else ("fix", "refine", "delete")
         else:
             out += _GATE_ACTIONS.get(state, ())
+            access = record.get("_access") if isinstance(record.get("_access"), dict) else {}
+            if state == "awaiting_access" and record.get("_auto_picked") and not access.get("named"):
+                out.append("skip_source")  # a row the build picked can be skipped; an address the user named is theirs
             if not (state == "source" and record.get("error") == PARKED_MARKER):
                 out.append("cancel")
     elif awaiting_yes:
@@ -327,6 +348,10 @@ _REASONS: dict[str, str] = {
     "model_budget": ("The build spent its model-call budget before a source fit — retry runs it again with a "
                      "fresh one."),
     "research": "The research couldn't finish (the model was unavailable) — retry runs it again.",
+    # a run a paired phone started met a spent daily allowance (``ni_refresh.charge_phone_spend``): its own line,
+    # never "no model is routed" (review of #570); the Mac's own tap is never counted
+    "phone_allowance": ("Today's allowance for cloud model use started from a phone is spent. Retry from your "
+                        "Mac, or tomorrow."),
     # Claims audit 2026-09-21: classes the flow actually writes that the map
     # missed — the card showed the blind sentence for each of these.
     "assembly": "The card couldn't be assembled from the mapped fields.",

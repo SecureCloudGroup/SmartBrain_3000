@@ -132,6 +132,11 @@ does not use it that way: it drives the `claude` command in plain-text mode with
 **custom agent whose tool set is empty** (`"tools": []`) and **session persistence
 off**. That combination turns the CLI into a pure language-model endpoint — it cannot
 read your files, run commands, browse the web, or keep the conversation on disk.
+The one exception is a single chat turn or a single Neural Interface research run:
+it keeps one session for its own calls, so each call after the first sends only
+what is new instead of the whole conversation, and SmartBrain deletes that
+session (its private folder and the CLI's copy) as soon as the turn or the run
+ends.
 SmartBrain's own tools keep working exactly as with any other model, with every
 action parked for your approval as usual. SmartBrain also tells the CLI to load
 none of your Claude Code settings or `CLAUDE.md` files, so nothing you've written

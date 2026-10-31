@@ -24,7 +24,6 @@ from starlette.responses import JSONResponse, Response
 
 from . import (
     account,
-    auth,
     gateway,
     library_client,
     library_index,
@@ -1334,6 +1333,29 @@ def give_flow_access(request: Request, item_id: str, body: AccessIn) -> dict:
     return {"ok": True, "started": bool(started), "needs": missing}
 
 
+@router.post("/api/ni/items/{item_id}/flow/skip-source")
+def skip_flow_source(request: Request, item_id: str) -> dict:
+    """Skip the Library source the card paused on for a key (the user has none): the build goes on with the next
+    source, then research under the card's consent, then the honest decline. A fixed-choice tap that carries no
+    value, so a paired phone may make it (it drives a card the phone already has, as Retry does); audited with the
+    host only. 409 when the card is not paused on a source it can skip."""
+    store = _store(request)
+    if store.get_item(item_id) is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    record = ni_flow._flow_read(store, item_id) or {}
+    access = record.get("_access") if isinstance(record.get("_access"), dict) else {}
+    try:
+        started = ni_flow.skip_source(store, item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    request.app.state.audit.append(
+        "user", "ni_flow_skip_source", "reviewed", "executed", True,
+        args_summary=tools.summarize({"item_id": item_id, "host": access.get("host")}),
+        result_summary=tools.summarize({"started": bool(started)}),
+    )
+    return {"ok": True, "started": bool(started)}
+
+
 @router.post("/api/ni/items/{item_id}/flow/fix")
 def fix_item_flow(request: Request, item_id: str) -> dict:
     """P3: the card's Fix — re-derive this card against its OWN frozen source
@@ -1491,7 +1513,7 @@ def _charge_phone_spend(request: Request, store: ni.NIStore) -> None:
     re-research ceiling (``SMARTBRAIN_NI_RERESEARCH_DAILY``); 429 when the day's budget is spent.
     The Desktop's own taps are the owner at the desk and stay uncounted. This bounds what the
     phone app's origin (the signaling node) can charge to the owner's key (SECURITY.md)."""
-    if auth.request_via() and not ni_refresh.take_budget(store.conn, datetime.now(UTC)):
+    if not ni_refresh.charge_phone_spend(store.conn, datetime.now(UTC)):  # marks the run it starts as paid
         raise HTTPException(status_code=429, detail=PHONE_SPEND_DETAIL)
 
 

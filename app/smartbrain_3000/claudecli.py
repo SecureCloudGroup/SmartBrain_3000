@@ -739,6 +739,12 @@ def _event_usage(event: dict) -> dict | None:
     """Map the result event's token usage to the OpenAI shape (None when absent) —
     without it, Claude Code turns never appear in Usage & cost.
 
+    ``prompt_tokens`` is the whole prompt, cache included; the cache's share rides along under
+    Anthropic's own names (``usage.cache_tokens`` reads them), so a budget that charges only new
+    tokens sees what was read from the cache. Until 2026-10-31 the share was folded away, and the
+    research loop charged every cached read as new: its token cap stopped T's first research run
+    after 11 calls.
+
     ``cost_usd`` rides along when the CLI reports ``total_cost_usd``: the API-equivalent
     value of the call, priced by the CLI itself — no price table for us to let drift."""
     assert isinstance(event, dict), "event must be a dict"
@@ -746,12 +752,14 @@ def _event_usage(event: dict) -> dict | None:
     if not isinstance(usage, dict):
         return None
     try:
-        prompt = int(usage.get("input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0) \
-            + int(usage.get("cache_read_input_tokens") or 0)
+        created = int(usage.get("cache_creation_input_tokens") or 0)
+        read = int(usage.get("cache_read_input_tokens") or 0)
+        prompt = int(usage.get("input_tokens") or 0) + created + read
         completion = int(usage.get("output_tokens") or 0)
     except (TypeError, ValueError):
         return None
-    out = {"prompt_tokens": prompt, "completion_tokens": completion}
+    out = {"prompt_tokens": prompt, "completion_tokens": completion,
+           "cache_creation_input_tokens": max(created, 0), "cache_read_input_tokens": max(read, 0)}
     cost = event.get("total_cost_usd")
     if isinstance(cost, (int, float)) and cost >= 0:
         out["cost_usd"] = float(cost)

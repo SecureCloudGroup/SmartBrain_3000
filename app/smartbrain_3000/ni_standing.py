@@ -1,7 +1,8 @@
 """Standing orders: an ask no source answers yet that the user asked SmartBrain to keep looking for (release P2).
 
-An ask answers in seconds from the Library and the user's own sources; when nothing fits, the card declines at once
-(``no_ready_source``) and offers **Keep looking**. Keep looking seals an order on the card's flow record,
+An ask answers in seconds from the Library and the user's own sources; when nothing fits, research runs at once under
+the card's consent (``ni_research_flow.fallback``) and, when it finds nothing it can trust, the card declines and
+offers **Keep looking**. Keep looking seals an order on the card's flow record,
 ``_looking = {since, runs, next_at, free?, free_at?}``, and runs the ask again with research allowed. While the order
 is open the card stays declined and says it is still looking; the scheduler runs the ask again when ``next_at``
 comes (1, 2, 4, then every 7 days, each research run under the shared daily ceiling ``ni_refresh.take_budget``),
@@ -68,6 +69,9 @@ def _reseed(store: ni.NIStore, item_id: str, record: dict, looking: dict, note: 
         return None
     state = "source" if isinstance(record.get("intent"), dict) else "intent"
     fresh = {**ni_flow._fresh_record(record, request, state, note, keep_named=True), "_looking": looking}
+    skipped = sorted(ni_flow.skipped_sites(record))
+    if skipped:  # a site skipped for want of a key stays skipped while the card looks: each look asked for it again
+        fresh["_skipped"] = skipped
     ni_flow._flow_write(store, item_id, fresh, revive=True)
     return fresh
 
