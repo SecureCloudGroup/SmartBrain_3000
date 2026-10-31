@@ -414,9 +414,14 @@ How a card comes to life:
    and what it sends (see the privacy page). With research switched off in
    Settings, or no model routed for it, nothing is researched and the card says
    which. When research finds nothing it can trust, the card says so — *"I
-   couldn't build a reliable card for this"* — with one plain line on why, a
-   **What I tried** list (each source it tried and why it was dropped), and up
-   to three links to pages that may help. Those links open in a new tab;
+   couldn't build a reliable card for this"* — with one plain line on why
+   (what stopped the search: its time limit, its model budget, its steps, or
+   the model), a **What I tried** list (each source it tried and why it was
+   dropped, then what research searched for and each site it read, with what
+   came of it), and up to three links to pages that may help. A site you
+   skipped for want of a key is not offered again by research, nor linked, and
+   Keep looking does not ask for its key again; **Retry** does, in case you
+   have one by then. Those links open in a new tab;
    SmartBrain shows nothing it read off them. The card then offers **Keep
    looking**: research again over the next two weeks, less often each time, and
    at once (with no model) whenever you keep a new source. The card says it is

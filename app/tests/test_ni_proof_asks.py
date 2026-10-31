@@ -59,6 +59,7 @@ from smartbrain_3000 import (
     ni_polite,
     ni_refresh,
     ni_research_flow,
+    ni_standing,
 )
 from smartbrain_3000 import db as dbmod
 from smartbrain_3000.secrets import SecretStore, gen_master_key
@@ -820,6 +821,136 @@ def test_skipping_each_keyed_host_goes_on_to_the_next_and_then_to_research(monke
     assert replay.fetched == [] and model.calls["mapping"] == 0 and model.calls["intent"] == 1
     with pytest.raises(ValueError, match="skip"):
         ni_flow.skip_source(store, item_id)   # a declined card has nothing to skip
+
+
+def _tool_reply(name: str, args: dict, prompt: int) -> dict:
+    """A research model reply on the Claude Code route: one tool call, and the usage a new CLI process reports for a
+    prompt it was sent whole (no cache share)."""
+    call = {"id": "c0", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
+    return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [call]}}],
+            "usage": {"prompt_tokens": prompt, "completion_tokens": 200,
+                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+
+
+def test_research_after_both_skips_offers_neither_site_again_and_the_card_says_what_it_searched_and_read(
+        monkeypatch, caplog) -> None:
+    """Run B on T's Mac (2026-10-31, #570 at f80b265): no keys, both keyed sites skipped, research at once on
+    claudecode/opus; it declined after 11 calls, and nothing said what it had searched or read, its line said "ran
+    out of steps" for the token cap, and its three links were the two sites just skipped. Here, on the real gateway
+    path of T's route: research is one CLI session, closed at the end; the Library offers research neither skipped
+    site's keyed rows, so neither is read, offered as Use my key or linked; the card lists the skips, then the run's
+    searches and reads in its own words; the line names the model budget; the app log has one line for the run with
+    its cache share and no address."""
+    replay, model = _Replay({}, {}), _Model()
+    store, item_id, _secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    monkeypatch.setattr(ni_research_flow, "_CHAT", None)   # the gateway path T's install runs, not a seam
+    opened: list = []
+
+    class _Session:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(ni_research_flow.claudecli, "open_turn_session", lambda: opened.append(_Session()) or opened[-1])
+    page = "https://quotes.example.com/nvda"
+    searched: list[str] = []
+    monkeypatch.setattr(ni_research_flow, "_SEARCH", lambda query, limit: searched.append(query) or {
+        "results": [{"title": "NVDA quote", "url": page, "snippet": "NVIDIA stock price today"}]})
+    read: list[str] = []
+    monkeypatch.setattr(ni_research_flow.tools, "_fetch_and_digest", lambda ctx, url, fmt, robots=True: read.append(url)
+                        or {"ok": False, "error": "not_data", "detail": "a web page with no data table (page text is not read)"})
+    # uncached prompts, as a new CLI process per call reports them: the fourth call takes the run past its token cap
+    # (60,000), so its own tool call is refused and the run stops there
+    script = [_tool_reply("library_search", {"query": "NVDA stock price"}, 20_000),
+              _tool_reply("web_search", {"query": "NVDA stock price api"}, 20_000),
+              _tool_reply("fetch_sample", {"url": page}, 19_000),
+              _tool_reply("library_search", {"query": "NVIDIA quote"}, 1_000)]
+    calls: list[dict] = []
+
+    def chat(conn, purpose, messages, model_, tools_, **kw):
+        calls.append({"model": model_, "session": kw.get("session"), "messages": copy.deepcopy(messages)})
+        return script.pop(0)
+
+    monkeypatch.setattr(gateway, "chat_with_tools_recorded", chat)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co"
+    assert ni_flow.skip_source(store, item_id) is True
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io"
+    assert ni_flow.skip_source(store, item_id) is True
+    with caplog.at_level("INFO", logger="smartbrain_3000.ni_research_flow"):
+        out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "declined", out
+    assert len(calls) == 4 and {c["model"] for c in calls} == {"claudecode/opus"}
+    assert len(opened) == 1 and all(c["session"] is opened[0] for c in calls) and opened[0].closed, \
+        "one CLI session for the run, on every call, wiped when it ended"
+    shown = json.dumps([m for c in calls for m in c["messages"] if m.get("role") == "tool"])
+    assert "alphavantage" not in shown and "finnhub" not in shown, "research was offered neither skipped site"
+    assert searched == ["NVDA stock price api"] and read == [page] and replay.fetched == []
+    card = out["_decline_card"]
+    assert card["reason"] == "research_gave_up" and card["line"] == ni_master.GAVE_UP_LINES["tokens"], card
+    assert [link["url"] for link in card["links"]] == [page] and card.get("key_wall") is None
+    assert _tried(store, item_id) == [
+        ("www.alphavantage.co", ni_flow._SKIP_WHY), ("finnhub.io", ni_flow._SKIP_WHY),
+        ("web search", 'searched for "NVDA stock price api"'),
+        ("research", "read quotes.example.com (no data file or table)")]
+    view = ni_master.terminal_surface("declined", ni_flow._flow_read(store, item_id), shell=True)
+    assert view["reason"] == ni_master.GAVE_UP_LINES["tokens"] and "use_key" not in view["reopen"]
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("ni_research: cloud run ")]
+    assert len(lines) == 1 and "ended declined (tokens)" in lines[0] and "cache read 0, write 0" in lines[0], lines
+    assert "reads: quotes.example.com no data file or table" in lines[0]
+    assert "https://" not in lines[0] and "NVDA stock price api" not in lines[0], "no address and no search words"
+
+
+def _skip_both(monkeypatch) -> tuple[ni.NIStore, str, SecretStore, _Model, _Research, _Replay]:
+    """The NVDA card with no keys: both keyed sites skipped, research declined, the card lookable."""
+    replay, model, research = _Replay({}, {}), _Model(), _researcher()
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    for host in ("www.alphavantage.co", "finnhub.io"):
+        out = ni_flow.run_flow(store, item_id, gateway_call=model)
+        assert out["state"] == "awaiting_access" and out["_access"]["host"] == host, out
+        assert ni_flow.skip_source(store, item_id) is True
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "declined" and out["_decline_card"]["look"] is True, out
+    return store, item_id, secrets, model, research, replay
+
+
+def test_keep_looking_after_both_skips_looks_again_without_asking_for_either_key(monkeypatch) -> None:
+    """Keep looking on the card research declined after both keyed sites were skipped. Each look runs the ask again,
+    and before, it paused for Alpha Vantage's key again: the order stopped there, asking for a key the user had said
+    they don't have. The skips ride the order: a look drops both sites' keyed rows with the skip's reason and goes
+    on to research, fetching nothing. A key for a skipped site given since on another card is offered on the card,
+    as any same-host key is (the user's tap, nothing copied)."""
+    store, item_id, secrets, model, research, replay = _skip_both(monkeypatch)
+    runs = len(research.seen)
+    assert ni_standing.seal(store, item_id, ni_flow._flow_read(store, item_id)) is not None   # the Keep looking tap
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "declined" and isinstance(out.get("_looking"), dict), out
+    assert len(research.seen) > runs, "the look went on to research"
+    assert _tried(store, item_id) == [("www.alphavantage.co", ni_flow._SKIP_WHY), ("finnhub.io", ni_flow._SKIP_WHY)]
+    assert ni_flow.skipped_sites(ni_flow._flow_read(store, item_id)) == {"www.alphavantage.co", "finnhub.io"}
+    assert replay.fetched == [] and model.calls["mapping"] == 0
+    # a key for Alpha Vantage given on another card since: the next look (a free re-match) offers it on this card
+    ni.put_credential(secrets, "another-card", ni_flow.KEY_PARAM, AV_KEY, "www.alphavantage.co")
+    assert ni_standing.rematch(store) == 1 and ni_standing.run_due(store) == item_id
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co", out
+    assert out["_access"].get("reuse") is True, "offered for one tap"
+    assert secrets.get(f"ni:{item_id}:{ni_flow.KEY_PARAM}") is None and replay.fetched == [], "nothing copied or sent"
+
+
+def test_a_retry_after_a_skip_asks_for_the_key_again(monkeypatch) -> None:
+    """A Retry starts a fresh record without the skips (the user may have a key by then; it is the one way to bring
+    one later), so the build pauses for the first site's key again."""
+    store, item_id, _secrets, model, _research, replay = _skip_both(monkeypatch)
+    assert ni_flow.reseed_for_retry(store, item_id, ni_flow._flow_read(store, item_id), ASK) is True
+    assert ni_flow.skipped_sites(ni_flow._flow_read(store, item_id)) == frozenset()
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co", out
+    assert replay.fetched == []
 
 
 def test_a_skip_keeps_the_hosts_rows_that_need_no_key() -> None:

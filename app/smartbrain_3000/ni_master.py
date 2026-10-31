@@ -122,6 +122,26 @@ DECLINE_LINES: dict[str, str] = {
     "source_cant_answer": "That source can't answer this ask.",
     "ask_unsupported": "This kind of ask isn't supported yet.",
 }
+# research_gave_up's line says what stopped the run (``loop.STOPS``): one line for all said "ran out of steps" when it
+# was the token cap that stopped T's first research run (2026-10-31). A run its checks refused reads verify_refused.
+GAVE_UP_LINES: dict[str, str] = {
+    "time": "I looked for a source until this run's time limit and found none I could trust.",
+    "tokens": "I looked for a source until this run's model budget was used up and found none I could trust.",
+    "turns": DECLINE_LINES["research_gave_up"],
+    "steps": DECLINE_LINES["research_gave_up"],
+    "model_stopped": "I looked for a source, but the model stopped before finding one I could trust.",
+}
+
+
+def gave_up_line(stop: str) -> str:
+    """The declined card's line for a research run that stopped without a card, naming what stopped it; the
+    sealed code stays ``research_gave_up``. An unknown or empty stop reads the code's own line."""
+    assert isinstance(stop, str), "a stop"
+    line = GAVE_UP_LINES.get(stop, DECLINE_LINES["research_gave_up"])
+    assert len(line) <= 200, "a sealed line fits its bound"
+    return line
+
+
 # The user's ways back from a decline: keep looking (a standing order, release P2), run the same ask again, or
 # re-enter the source pick (paste a link). A shell already looking offers to stop instead of the first two.
 DECLINE_REOPEN: tuple[str, ...] = ("keep_looking", "retry", "pick_source")

@@ -69,6 +69,9 @@ def _reseed(store: ni.NIStore, item_id: str, record: dict, looking: dict, note: 
         return None
     state = "source" if isinstance(record.get("intent"), dict) else "intent"
     fresh = {**ni_flow._fresh_record(record, request, state, note, keep_named=True), "_looking": looking}
+    skipped = sorted(ni_flow.skipped_sites(record))
+    if skipped:  # a site skipped for want of a key stays skipped while the card looks: each look asked for it again
+        fresh["_skipped"] = skipped
     ni_flow._flow_write(store, item_id, fresh, revive=True)
     return fresh
 

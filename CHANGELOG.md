@@ -21,6 +21,23 @@ to know when a release changes behavior.
   way still reads and still offers Keep looking.
 
 ### Fixed
+- Neural Interface: research on Claude Code gets the budget it was designed with. Each research call was a new CLI
+  process that sent the whole conversation again, and the Claude Code route's token counts folded the prompt
+  cache's share into new input, so the run's token cap charged every cached read as new: T's first research run (no
+  keys, both keyed sites skipped) stopped after 11 calls and 65,616 prompt tokens. A research run on Claude Code now
+  keeps one CLI session for its calls, as a chat turn does (each call after the first sends only the new tool
+  results; the session is deleted when the run ends), and the cache's share reaches the budget and Usage & cost.
+- Neural Interface: a card research could not build says what research did and what stopped it. Its **What I
+  tried** list adds the searches research made (in their own words) and each site it read with what came of it, and
+  its line names the time limit, the model budget, the steps or the model that stopped; before, the list showed only
+  the Library sources, and every research stop read "ran out of steps". The app log keeps one line per research run
+  with how it ended, its cache share and the sites it read (no address and no search words).
+- Neural Interface: after **Skip this source**, research no longer offers the skipped site's keyed sources again:
+  not as a read it cannot make, not as Use my key, not as the declined card's links. T's first research run linked
+  back to the two sites it had just been told had no key. **Keep looking** keeps the skips too: each look ran the
+  ask again and paused for the first skipped site's key, which stopped the order there. A key for the site given
+  since on another card is offered on the card, as before. A Retry starts without the skips and asks again, since
+  you may have a key by then.
 - Neural Interface: a cloud run a paired phone starts draws one unit of the daily phone allowance whichever tap
   started it (Retry, Fix, Refine, Skip this source, as Allow and Keep looking already did), and the build and the
   research it reaches draw it once between them. Before, only Allow and Keep looking drew, and a build's worker

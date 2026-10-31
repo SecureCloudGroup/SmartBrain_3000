@@ -314,9 +314,33 @@ def test_usage_reaches_the_openai_shape(monkeypatch) -> None:
     assert data["usage"] == {"prompt_tokens": 120, "completion_tokens": 30}
     event = {"type": "result", "usage": {"input_tokens": 5, "cache_read_input_tokens": 90,
                                          "cache_creation_input_tokens": 25, "output_tokens": 7}}
-    assert claudecli._event_usage(event) == {"prompt_tokens": 120, "completion_tokens": 7}
+    # the whole prompt, and the cache's share under Anthropic's names (2026-10-31: folding it away made the
+    # research budget charge every cached read as a new token)
+    assert claudecli._event_usage(event) == {"prompt_tokens": 120, "completion_tokens": 7,
+                                             "cache_creation_input_tokens": 25, "cache_read_input_tokens": 90}
     event["total_cost_usd"] = 0.0168  # the CLI prices its own call at current API rates
     assert claudecli._event_usage(event)["cost_usd"] == 0.0168
+
+
+def test_the_cache_share_of_a_claude_code_call_reaches_the_budget_and_usage_counts() -> None:
+    """A research run on T's route charges only new tokens to its cap (``loop._count``), and Usage & cost keeps the
+    whole prompt: the CLI's cached reads are read, never folded into new input."""
+    from smartbrain_3000 import usage as usage_mod
+    from smartbrain_3000.ni_research import loop
+    from smartbrain_3000.ni_research.ctx import ResearchCtx
+
+    event = {"type": "result", "usage": {"input_tokens": 400, "cache_read_input_tokens": 5200,
+                                         "cache_creation_input_tokens": 300, "output_tokens": 150}}
+    mapped = claudecli._event_usage(event)
+    assert usage_mod.prompt_total(mapped) == 5900  # Usage & cost: the whole prompt, as before
+    assert usage_mod.cache_tokens(mapped) == (300, 5200)
+    ctx = ResearchCtx(request="NVDA stock price every 30 minutes", question={})
+    out = loop.Outcome("declined", "cloud")
+    for _ in range(12):  # a whole run of research calls on the Claude Code route
+        loop._count(ctx, out, {"usage": mapped})
+    assert ctx.tokens == 12 * (400 + 300 + 150)  # new tokens only: the cached 5,200 a call are not charged
+    assert loop._budget_stop(ctx) is None, "a run of cached calls stays inside the token cap"
+    assert out.usage["cache_read"] == 12 * 5200 and out.usage["prompt"] == 12 * 5900
 
 
 def test_rate_limit_window_capture() -> None:

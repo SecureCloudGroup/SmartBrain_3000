@@ -4224,6 +4224,8 @@ def _auto_continue(store: ni.NIStore, item_id: str, request: str, intent: dict,
             # user did not pick (#549 review B1; #566 review); the card's own key (given, then a NO moved on to
             # another row of the same host) lets the build go on.
             missing = missing_access(store, item_id, _resolve_secrets_store(), copy=False)
+            if missing and _skipped_again(store, item_id, rec, url, missing):
+                continue
             if missing:
                 _transition(store, item_id, "source", error=None, _auto_picked=True, _try=mark)
                 return pause_for_access(store, item_id, url, missing)
@@ -7699,8 +7701,9 @@ def _note_waited(store: ni.NIStore, item_id: str, url: str, said: str) -> None:
     _flow_write(store, item_id, {**record, "_waited": waited})
 
 
-_TRIED_MAX = 6  # the sources one build can report it tried: the auto-pick's five rows and a kept source
+_TRIED_MAX = 6  # the lines of what one build tried: the auto-pick's rows, a kept source, research's searches and reads
 _SKIP_WHY = "was skipped: you have no key for it"
+_MAX_SKIPPED = 6  # the sites one build can skip (the auto-pick tries five rows)
 
 
 def _tried_entry(row: dict, url: str, why: str) -> dict:
@@ -7708,6 +7711,47 @@ def _tried_entry(row: dict, url: str, why: str) -> dict:
     assert isinstance(row, dict) and isinstance(why, str), "a row and its reason"
     host = str(row.get("host") or _host_hint(url))[:253]
     return {"host": host, "provider": str(row.get("provider") or host)[:120], "why": " ".join(why.split())[:200]}
+
+
+def note_tried(store: ni.NIStore, item_id: str, entries: list) -> None:
+    """Add lines to what this build tried, after the Library rows it dropped: research's searches and the sites it
+    read (``ni_research_flow._research_tried``), each bounded, the newest ``_TRIED_MAX`` kept."""
+    assert store is not None and item_id, "args required"
+    assert isinstance(entries, list), "entries are a list"
+    clean = [{"host": str(e["host"])[:253], "provider": str(e.get("provider") or e["host"])[:120],
+              "why": " ".join(str(e.get("why") or "").split())[:200]}
+             for e in entries[:_TRIED_MAX] if isinstance(e, dict) and isinstance(e.get("host"), str) and e["host"]]
+    if not clean:
+        return
+    record = _flow_read(store, item_id)
+    if record is None:
+        return
+    tried = [t for t in record.get("_tried") or [] if isinstance(t, dict)]
+    _flow_write(store, item_id, {**record, "_tried": (tried + clean)[-_TRIED_MAX:]})
+
+
+def skipped_sites(record: dict) -> frozenset[str]:
+    """The sites the user skipped on this card for want of a key (``skip_source``): research offers none of their
+    keyed rows again, and a standing order's runs skip them again (``_skipped_again``). Any other fresh record
+    (Retry) starts without them: the user may have a key by then."""
+    assert isinstance(record, dict), "a record"
+    return frozenset(h for h in record.get("_skipped") or [] if isinstance(h, str) and h)
+
+
+def _skipped_again(store: ni.NIStore, item_id: str, record: dict, url: str, missing: list[str]) -> bool:
+    """Drop again, without asking, a keyed row of a site the user skipped on this card for want of a key, when there
+    is still no key for it (none on offer from another card either): as Skip this source dropped it, with the same
+    reason. Only a standing order's runs carry the skips (``ni_standing._reseed``): before, each look Keep looking
+    took after both keyed sites were skipped paused for the first site's key again, and the order stopped there
+    (2026-10-31). A Retry starts without them and asks again: the one way to bring a key later."""
+    assert isinstance(record, dict) and isinstance(missing, list), "a record and what the row lacks"
+    host = (urlparse(url).hostname or "").lower()
+    if missing != ["key"] or not host or host not in skipped_sites(record):
+        return False
+    access = (_flow_read(store, item_id) or {}).get("_access")
+    if isinstance(access, dict) and access.get("reuse"):
+        return False   # a key for the site was given on another card since: the card offers it for one tap
+    return _repick_without(store, item_id, url, why=_SKIP_WHY, keyed_host=True) is not None
 
 
 def skip_source(store: ni.NIStore, item_id: str) -> bool:
@@ -7726,9 +7770,14 @@ def skip_source(store: ni.NIStore, item_id: str) -> bool:
     # the host's other rows that need its key go too: the next would ask for the same key (review of #570)
     if _repick_without(store, item_id, url, why=_SKIP_WHY, keyed_host=True) is None:
         raise ValueError("this card isn't paused on a Library source")
+    # research then offers none of the site's keyed rows either: not as a read it can't make, not as Use my key, not
+    # as the decline's links (T's first research run linked back to the two sites just skipped, 2026-10-31)
+    host = (urlparse(url).hostname or "").lower()[:253]
+    before = [h for h in record.get("_skipped") or [] if isinstance(h, str) and h and h != host]
+    skipped = before[-(_MAX_SKIPPED - 1):] + ([host] if host else [])
     # the worker reads no address of its own and goes on from the rows left (``_run_external_flow``)
     _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK, source_url=None, _auto_picked=True,
-                note=f"skipped {_host_hint(url)}: no key")
+                note=f"skipped {_host_hint(url)}: no key", _skipped=skipped)
     return start_flow_worker(store, item_id)
 
 

@@ -73,7 +73,8 @@ def test_nothing_ready_researches_at_once_under_the_cards_consent_and_offers_kee
     field = ni_flow.board_flow_field(store, item_id)
     assert field["actions"] == ["keep_looking", "retry", "pick_source", "delete"]
     assert field["decline"]["looking"] is None
-    assert field["decline"]["line"] == ni_master.DECLINE_LINES["research_gave_up"]
+    # the line names what stopped the run: this model replied without a tool call (2026-10-31: one line for all)
+    assert field["decline"]["line"] == ni_master.GAVE_UP_LINES["model_stopped"]
     assert [t["host"] for t in field["tried"]] == ["data.example.org"], "what the build tried rides the decline"
     assert field["tried"][0]["why"] and field["tried"][0]["provider"]
 

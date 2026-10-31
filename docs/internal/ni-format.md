@@ -1409,7 +1409,21 @@ with no consent is asked first (the `ask` plan); with research off, no model rou
 research started; that ending is retired, and an old record sealed with it reads as `no_answering_source`, still
 lookable.) Every row the build dropped rides the record as `_tried: [{host, provider, why}]` (at most six), which
 `board_flow_field` exposes as `tried` in every state, so the key pause and the declined card list what was tried
-and why. **Keep looking** (`POST /items/{id}/flow/keep-looking`, audited `ni_keep_looking`) is offered only on a
+and why. A research run that ends without a card adds up to two lines (`ni_flow.note_tried`, from the run's own
+trace, `ni_research_flow._research_tried`): `{host: "web search", provider: "Web search", why: 'searched for "..."'}`
+and `{host: "research", provider: "Research", why: "read <host> (<what came of it>), ..."}`, hosts only, never an
+address. Its decline line names what stopped it (`loop.Outcome.stop` in `loop.STOPS`, read by
+`ni_master.gave_up_line`; the code stays `research_gave_up`), and `ni_research_flow._log_run` writes one INFO line
+per run (how it ended, model calls, prompt tokens with the cache's read and write share, tool calls, searches,
+fetches, seconds, sites read). **Skip this source** also seals the site in `_skipped` (at most six hosts), and
+research's Library (`ni_research_flow._Library`) offers none of a skipped site's keyed rows: no read it can't make,
+no Use my key, no decline link back to it. `_skipped` is not one of the card's answers, so a Retry's fresh record
+starts without it and asks for the key again; a standing order's reseed (`ni_standing._reseed`) carries it, and
+`_auto_continue` drops a skipped site's keyed row again without the pause (`ni_flow._skipped_again`, the skip's own
+reason) unless a key for the site is now on offer from another card (`_access.reuse`), which the card offers. On the Claude Code route a research run keeps one CLI session for its calls
+(`ni_research_flow._cli_session`, a `claudecli.TurnSession` as a chat turn has), deleted when the run ends, and
+`claudecli._event_usage` keeps the cache's share (`cache_read_input_tokens`, `cache_creation_input_tokens`) beside
+the whole prompt, so `loop._count` charges only new tokens to `TOKEN_CAP`. **Keep looking** (`POST /items/{id}/flow/keep-looking`, audited `ni_keep_looking`) is offered only on a
 shell whose decline sealed `look: true`: its ending is in `ni_master.LOOKABLE` (the three research declines), read
 by `ni_master.lookable`. It seals `_looking = {since, runs, next_at}` on the flow record (one of the card's own answers,
 so it rides every fresh start) and runs the sealed request again with the intent it was understood under (no model

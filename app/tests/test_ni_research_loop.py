@@ -16,7 +16,15 @@ from test_ni_auto_pick import _store, _Wrap
 from test_ni_research_tools import QUAKES, FakeLibrary, Net, _ctx, _draft
 from test_ni_research_tools import _row as _lib_row
 
-from smartbrain_3000 import gateway, ni, ni_flow, ni_recipe, ni_research_flow, usage
+from smartbrain_3000 import (
+    gateway,
+    ni,
+    ni_flow,
+    ni_master,
+    ni_recipe,
+    ni_research_flow,
+    usage,
+)
 from smartbrain_3000.ni_research import loop, policy, prompt, schemas, tools
 from smartbrain_3000.ni_research.ctx import ResearchCtx
 
@@ -336,9 +344,70 @@ def test_the_cli_research_seam_sends_no_max_tokens_or_temperature(monkeypatch) -
     ni_research_flow._chat_for(store, "claudecode/opus", False)([{"role": "user", "content": "x"}], [{"x": 1}])
     ni_research_flow._chat_for(store, "anthropic/claude-sonnet-5-5", False)([{"role": "user", "content": "x"}], [{"x": 1}])
     ni_research_flow._chat_for(store, "mlx/local", True)([{"role": "user", "content": "x"}], None)
-    assert seen[0] == {"model": "claudecode/opus", "timeout": ni_research_flow.RESEARCH_TIMEOUT_S}
+    assert seen[0] == {"model": "claudecode/opus", "timeout": ni_research_flow.RESEARCH_TIMEOUT_S, "session": None}
     assert seen[1]["max_tokens"] == ni_research_flow.RESEARCH_MAX_TOKENS
     assert seen[2]["temperature"] == 0.0
+
+
+def test_a_claude_code_research_run_keeps_one_session_and_it_is_wiped_however_the_run_ends(monkeypatch) -> None:
+    """On the Claude Code route a research run is one CLI session (``claudecli.TurnSession``, as a chat turn is):
+    each call after the first resumes it, so the conversation is read from the prompt cache instead of sent and
+    charged again (2026-10-31: every call was a new process re-sending the transcript). The session is closed when
+    the run ends, a fault included; any other route, and an installed seam, opens none."""
+    opened: list = []
+
+    class _Session:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(ni_research_flow, "_CHAT", None)
+    monkeypatch.setattr(ni_research_flow.claudecli, "open_turn_session", lambda: opened.append(_Session()) or opened[-1])
+    seen: list = []
+    monkeypatch.setattr(gateway, "chat_with_tools_recorded", lambda conn, purpose, messages, model, tools_, **kw:
+                        seen.append(kw.get("session")) or text_reply("hi"))
+    store = _store()
+    with ni_research_flow._cli_session("claudecode/opus") as session:
+        chat = ni_research_flow._chat_for(store, "claudecode/opus", False, session)
+        chat([{"role": "user", "content": "x"}], [{"x": 1}])
+        chat([{"role": "user", "content": "x"}, {"role": "tool", "content": "y"}], [{"x": 1}])
+    assert len(opened) == 1 and seen == [opened[0], opened[0]] and opened[0].closed, "one session, every call, wiped"
+    with pytest.raises(RuntimeError), ni_research_flow._cli_session("claudecode/opus") as session:
+        raise RuntimeError("the run faulted")
+    assert len(opened) == 2 and opened[1].closed, "a run that faults still wipes its session"
+    for model in ("anthropic/claude-sonnet-5-5", ""):
+        with ni_research_flow._cli_session(model) as session:
+            assert session is None
+    monkeypatch.setattr(ni_research_flow, "_CHAT", lambda *a: text_reply("hi"))
+    with ni_research_flow._cli_session("claudecode/opus") as session:
+        assert session is None, "an installed seam opens no CLI session"
+    assert len(opened) == 2
+    monkeypatch.setattr(ni_research_flow, "_CHAT", None)
+    monkeypatch.setattr(ni_research_flow.claudecli, "open_turn_session",
+                        lambda: (_ for _ in ()).throw(OSError("no temp folder")))
+    with ni_research_flow._cli_session("claudecode/opus") as session:
+        assert session is None, "no private folder: the run goes stateless, as before, and does not fail"
+
+
+@pytest.mark.parametrize(("script", "over", "stop"), [
+    (lambda: [reply(call("library_search", query="quakes"), used={"prompt_tokens": 31_000, "completion_tokens": 10})] * 3,
+     {}, "tokens"),
+    (lambda: [reply(call("library_search", query="quakes"))] + [text_reply("still looking")] * 3, {}, "model_stopped"),
+    (lambda: [reply(call("library_search", query="quakes"))] * 3, {"max_turns": 1}, "turns"),
+    (lambda: [reply(call("library_search", query="quakes"))] * 3, {"max_seconds": 0.0}, "time"),
+], ids=["token-cap", "model-stopped", "tool-calls", "time"])
+def test_a_run_that_stops_says_what_stopped_it(monkeypatch, script, over, stop) -> None:
+    """The decline names what stopped the run, and its line says the same (2026-10-31: "ran out of steps" was said
+    for the token cap that stopped T's first research run)."""
+    ctx, _ = listed(monkeypatch, **over)
+    out = loop.run_research(ctx, Script(*script()))
+    assert out.status == "declined" and out.ending == "research_declined_budget" and out.stop == stop, out
+    line = ni_master.gave_up_line(out.stop)
+    assert line == ni_master.GAVE_UP_LINES[stop]
+    assert (line == ni_master.DECLINE_LINES["research_gave_up"]) == (stop in ("turns", "steps")), \
+        "the time, the model budget and a stopped model each say so; the step bounds keep the code's own line"
+    assert ni_master.gave_up_line("") == ni_master.DECLINE_LINES["research_gave_up"]
 
 
 # --- the v2 flow ----------------------------------------------------------------------------------------------

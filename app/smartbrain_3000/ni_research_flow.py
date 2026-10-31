@@ -14,12 +14,14 @@ the result as a proposal on the card (``_l2_proposal`` with a whole replacement 
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from . import (
@@ -28,6 +30,7 @@ from . import (
     ni,
     ni_compare,
     ni_flow,
+    ni_master,
     ni_models,
     ni_recipe,
     ni_refresh,
@@ -97,16 +100,23 @@ def question_from_intent(request: str, intent: dict) -> dict:
 
 class _Library:
     """The installed Library for the researcher: the intent's frame rides as the hint, a source the user said NO
-    to on this card is never offered, everything else (resolvers) passes through."""
+    to on this card is never offered, nor a source that needs the key of a site the user skipped on this build
+    (``no_key``: Skip this source says the user has no key for that site), everything else (resolvers) passes
+    through."""
 
-    def __init__(self, lib: object, hint: dict, declined: set) -> None:
+    def __init__(self, lib: object, hint: dict, declined: set, no_key: frozenset = frozenset()) -> None:
         assert isinstance(hint, dict), "a hint"
-        self._lib, self._hint, self._declined = lib, hint, declined
+        assert isinstance(no_key, frozenset), "the skipped sites"
+        self._lib, self._hint, self._declined, self._no_key = lib, hint, declined, no_key
 
     def candidates(self, ask: str, limit: int = 3):
         assert limit > 0, "a positive limit"
         rows, skipped = self._lib.candidates(ask, limit=limit, hint=self._hint)
-        return [r for r in rows if r.get("url") not in self._declined], skipped
+        # a skipped site's keyed rows would only ask again for the key the user said they don't have: as a read
+        # the run can't make, as Use my key, and as the decline's links (2026-10-31, T's first research run)
+        return [r for r in rows if r.get("url") not in self._declined
+                and not (r.get("needs_key")  # the run's own test of a keyed row (``tools.library_search``)
+                         and (urlsplit(str(r.get("url") or "")).hostname or "").lower() in self._no_key)], skipped
 
     def __getattr__(self, name: str):
         assert name, "a name"
@@ -193,9 +203,11 @@ def _land(store: ni.NIStore, item_id: str, request: str, ctx: ResearchCtx, propo
                              built_from=ni_flow._built_from_of(store, item_id, path, url, title))
 
 
-def _chat_for(store: ni.NIStore, model: str, local: bool) -> Callable[[list, list | None], dict]:
+def _chat_for(store: ni.NIStore, model: str, local: bool,
+              session: claudecli.TurnSession | None = None) -> Callable[[list, list | None], dict]:
     """The model seam bound to ``model``: the installed one, else the gateway's recorded path (tool use for the
-    cloud loop, a plain completion for the closed-world local mode)."""
+    cloud loop, a plain completion for the closed-world local mode). ``session``: the run's Claude Code session
+    (``_cli_session``), so each call after the first resumes it with only the new turns."""
     assert isinstance(local, bool), "local is a flag"
     assert model, "a model id"
     if _CHAT is not None:
@@ -207,9 +219,105 @@ def _chat_for(store: ni.NIStore, model: str, local: bool) -> Callable[[list, lis
         # the Claude Code route honours neither max_tokens nor temperature (it refuses them loudly); its tool
         # offers and calls ride the text protocol, which ``loop._text_calls`` reads back
         return lambda messages, tools_: gateway.chat_with_tools_recorded(
-            store.conn, ni_models.PURPOSES["research"], messages, model, tools_, timeout=RESEARCH_TIMEOUT_S)
+            store.conn, ni_models.PURPOSES["research"], messages, model, tools_, timeout=RESEARCH_TIMEOUT_S,
+            session=session)
     return lambda messages, tools_: gateway.chat_with_tools_recorded(
         store.conn, ni_models.PURPOSES["research"], messages, model, tools_, timeout=RESEARCH_TIMEOUT_S, max_tokens=RESEARCH_MAX_TOKENS)
+
+
+@contextlib.contextmanager
+def _cli_session(model: str) -> Iterator[claudecli.TurnSession | None]:
+    """One Claude Code session for one research run on that route (``claudecli.TurnSession``, as a chat turn has):
+    the first call sends the whole prompt and each later call resumes the session with only the new tool results,
+    so the conversation so far is read from the prompt cache instead of sent and charged again. Until 2026-10-31
+    each research call was a new CLI process that re-sent the whole transcript (T's first research run: 65,616
+    prompt tokens in 11 calls, then its token cap). Wiped when the run ends, however it ends; None for any other
+    route and under an installed seam."""
+    assert isinstance(model, str), "a model id"
+    session = None
+    if _CHAT is None and model and claudecli.is_claudecode(model):
+        try:
+            session = claudecli.open_turn_session()
+        except OSError as exc:  # no private folder for it: the run's calls go stateless, as before, never a failure
+            log.warning("ni_research: no Claude Code session for this run: %s", type(exc).__name__)
+    try:
+        yield session
+    finally:
+        if session is not None:
+            session.close()
+
+
+# what a read the run could not use was, in the card's words, from the tool's error kind (``tools.fetch_sample``)
+_READ_WORDS = {
+    "not_data": "no data file or table",
+    "fetch_failed": "could not be read",
+    "robots": "its robots.txt asks readers to stay out",
+    "redirect": "it redirects",
+    "needs_key": "it needs a key",
+    "needs_access": "it needs a key or email",
+}
+# a trace entry that is no read of a source: the model's repeat, an address nothing handed over, a spent budget
+_NOT_A_READ = ("repeat", "provenance", "budget_exhausted", "invalid_args")
+
+
+def _reads(ctx: ResearchCtx) -> dict[str, str]:
+    """Each site the run read or tried to read, with what came of it in the card's words (the last word for a site
+    wins), in the order first tried. From the run's own trace: hosts only, never an address."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    out: dict[str, str] = {}
+    for entry in ctx.trace[: ni_recipe.MAX_TURNS]:  # bounded: the trace's own cap
+        outcome = str(entry.get("outcome") or "")
+        if entry.get("tool") != "fetch_sample" or outcome.startswith(_NOT_A_READ):
+            continue
+        host = (urlsplit(str(entry.get("arg") or "")).hostname or "").lower()[:253]
+        if host:
+            out[host] = ("read, but no card was built from it" if outcome == "ok"
+                         else _READ_WORDS.get(outcome.split(":", 1)[0], "could not be used"))
+    return out
+
+
+def _research_tried(ctx: ResearchCtx) -> list[dict]:
+    """What the run tried, as at most two lines of the card's "What I tried" (``ni_flow.note_tried``): its web
+    searches, in their own words, and each site it read with what came of it. Before 2026-10-31 a run that ended
+    without a card left only its stop reason, in a note no route showed: T's first research run declined after 11
+    calls and nothing said what it had searched or read."""
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    searches = [e for e in ctx.trace[: ni_recipe.MAX_TURNS] if e.get("tool") == "web_search"]
+    done = [str(e.get("arg") or "") for e in searches if e.get("outcome") == "ok"]
+    failed = len(searches) - len(done)
+    out = []
+    if searches:
+        words = ("searched for " + ", ".join(f'"{one_line(s, 60)}"' for s in done)) if done else "searched"
+        lost = f"{failed} search failed" if failed == 1 else f"{failed} searches failed" if failed else ""
+        out.append({"host": "web search", "provider": "Web search",
+                    "why": one_line(words + (f"; {lost}" if done and lost else f": {lost}" if lost else ""), 200)})
+    reads = _reads(ctx)
+    if reads:
+        parts, shown = [], 0
+        for host, word in reads.items():  # bounded by the trace
+            part = f"{host} ({word})"
+            if len(", ".join([*parts, part])) > 170:
+                break
+            parts.append(part)
+            shown += 1
+        rest = len(reads) - shown
+        out.append({"host": "research", "provider": "Research",
+                    "why": one_line("read " + ", ".join(parts) + (f", and {rest} more" if rest else ""), 200)})
+    return out
+
+
+def _log_run(plan: policy.Plan, ctx: ResearchCtx, out: loop.Outcome) -> None:
+    """One line in the app log for every research run: how it ended and why, what it spent (the cache's share
+    named, so a budget that binds can be told from one that only counted cached reads), and what it read, by
+    host. No address and no search words: those are the card's, not the log's."""
+    assert isinstance(out, loop.Outcome), "an outcome"
+    assert isinstance(ctx, ResearchCtx), "a research ctx"
+    u = out.usage
+    reads = "; ".join(f"{host} {word}" for host, word in _reads(ctx).items()) or "none"
+    log.info("ni_research: %s run on %s ended %s (%s): %d model calls, prompt %d tokens (cache read %d, write %d), "
+             "completion %d; %d tool calls, %d searches, %d fetches, %ds; reads: %s", plan.mode, plan.model,
+             out.status, out.stop or out.ending or "-", u["calls"], u["prompt"], u["cache_read"], u["cache_write"],
+             u["completion"], ctx.turns, ctx.searches, ctx.fetches, int(ctx.elapsed()), reads)
 
 
 def _audit(item_id: str, plan: policy.Plan) -> bool:
@@ -301,21 +409,26 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links:
     question = question_from_intent(request, intent)
     # a compare is searched one thing at a time: the intent's one place must not steer every search
     hint = {**ni_flow._library_hint(intent), **({"place": None} if question["entities"] else {})}
+    library = _Library(lib, hint, set(record.get("_declined") or []), ni_flow.skipped_sites(record))
     ctx = ResearchCtx(request=request, question=question, now=now, window=_window_of(request, intent),
                       zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=ORIGINS_WEB if web else ORIGINS_LIBRARY,
-                      searcher=_searcher() if web else None, library=_Library(lib, hint, set(record.get("_declined") or [])))
+                      searcher=_searcher() if web else None, library=library)
     ni_flow._transition(store, item_id, record.get("state") or "source", error=record.get("error"),
                         note=f"researching ({plan.mode}) for a Library source" if not web
                         else "researching (cloud) in the Library and on the web")
     _audit(item_id, plan)
-    chat = _chat_for(store, plan.model or "", plan.mode == "local")
     declined = _declined_of(record)
     accept = lambda proposal: _can_land(ctx, item_id, request, proposal, declined)
     place = "" if question["entities"] else str(intent.get("place") or "")
-    out = (loop.run_research(ctx, chat, place=place, accept=accept) if plan.mode == "cloud"
-           else loop.run_closed_world(ctx, chat, accept=accept))
+    with _cli_session((plan.model or "") if plan.mode == "cloud" else "") as session:
+        chat = _chat_for(store, plan.model or "", plan.mode == "local", session)
+        out = (loop.run_research(ctx, chat, place=place, accept=accept) if plan.mode == "cloud"
+               else loop.run_closed_world(ctx, chat, accept=accept))
+    _log_run(plan, ctx, out)
     if out.status == "proposed" and out.proposal is not None:
         return _land(store, item_id, request, ctx, out.proposal, out)
+    # a run that ended without a card says what it searched and read, beside the Library rows the build dropped
+    ni_flow.note_tried(store, item_id, _research_tried(ctx))
     if out.status == "fault":  # the run could not finish: a fault the user retries, never a verdict about the ask
         return ni_flow._fail(store, item_id, "research", one_line("; ".join(out.reasons), 160))
     ni_flow._append_note(store, item_id, one_line("researched, no card: " + "; ".join(out.reasons), 240))
@@ -326,7 +439,9 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links:
         ending = "compare_unbuildable"
     # P3: an address that asked for a key is offered as Use my key (one thing at a time: never for a compare)
     wall = ctx.key_walls[0] if ctx.key_walls and not question["entities"] else None
-    return ni_flow._end(store, item_id, ending, "", links=out.links or links, key_wall=wall)
+    # the line names what stopped the run (its time, its model budget, its steps, the model), never one for all
+    line = ni_master.gave_up_line(out.stop) if ending == "research_declined_budget" else ""
+    return ni_flow._end(store, item_id, ending, line, links=out.links or links, key_wall=wall)
 
 
 def research_plan(store: ni.NIStore, item: dict) -> policy.Plan | None:
@@ -405,7 +520,9 @@ def reresearch(store: ni.NIStore, item: dict, reason: str) -> dict | None:
                       library=_Library(ni_flow._resolve_library(), ni_flow._library_hint(hint), _sources_of(spec)))
     _audit(item["id"], plan)
     accept = lambda proposal: _can_land(ctx, item["id"], request, proposal)
-    out = loop.run_research(ctx, _chat_for(store, plan.model or "", False), place=place, accept=accept)
+    with _cli_session(plan.model or "") as session:
+        out = loop.run_research(ctx, _chat_for(store, plan.model or "", False, session), place=place, accept=accept)
+    _log_run(plan, ctx, out)
     if out.status == "fault":  # not a decline: no streak, no longer wait; the card keeps failing and tries again in a day
         ni_flow._try_journal(store, item["id"], "updated",
                              one_line("re-research could not finish: " + "; ".join(out.reasons), 240))
