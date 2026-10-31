@@ -3838,7 +3838,7 @@ def _run_flow(store: ni.NIStore, item_id: str, gateway_call: Callable[[str, str]
             # a run a phone started (Retry, Fix, Refine, Skip this source) spends on a cloud model: it draws one unit
             # of the daily ceiling first, once a run (an Allow or Keep looking tap drew it already), so the phone
             # app's origin cannot run up the owner's key with repeated taps (2026-10-31: only those two taps drew)
-            return _fail(store, item_id, "model", ni_refresh.PHONE_SPEND_LINE)
+            return _fail(store, item_id, "phone_allowance", ni_refresh.PHONE_SPEND_LINE)
 
     budget = ModelBudget()  # one build's model calls, across every row it tries
 
@@ -7638,7 +7638,7 @@ def apply_pick(store: ni.NIStore, item_id: str, url: str, record: dict, *,
 
 def _repick_without(store: ni.NIStore, item_id: str, url: str,
                     why: str = "refused SmartBrain's request",
-                    *, host_wide: bool = False) -> dict | None:
+                    *, host_wide: bool = False, keyed_host: bool = False) -> dict | None:
     """A tapped source (Library or web) refused SmartBrain's request (401/403/429 — a bot wall or rate limit):
     back to the pick with the other choices and an honest note, instead of a dead card (field
     2026-09-28: ESPN refused, the card failed). None when the refused URL wasn't a Library row.
@@ -7646,6 +7646,8 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
     FETCH-F6 (2026-10-04): ``host_wide`` drops EVERY row sharing the refused host; a plain 401 / 403
     with no host-wide signal drops just the one URL — a multi-tenant host (services.arcgis.com,
     s3.amazonaws.com, raw.githubusercontent.com) still has other tenants we can read.
+    ``keyed_host`` (Skip this source: the user has no key for the host) drops every row of the host that needs a
+    key, since a key is the host's and the next such row would ask for the same one; its keyless rows stay.
 
     R5-2 (2026-10-04): the pick row is matched by ``source_id`` first (the sealed
     ``_library_source``), then by literal URL — a midnight realign rebuilds ``_library_url`` and a
@@ -7661,9 +7663,9 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
         if gone is None:
             continue
         rest = [r for r in rows if r is not gone]
-        if host_wide:
+        if host_wide or keyed_host:
             host = (urlparse(url).hostname or "").lower()
-            rest = [r for r in rest if (urlparse(str(r.get("url") or "")).hostname or "").lower() != host]
+            rest = [r for r in rest if not _goes_with(r, host, host_wide=host_wide)]
         other = "_ranked_search" if slot == "_ranked_library" else "_ranked_library"
         # what this build tried, for the card (2026-10-31: the reasons lived only in the sealed record's notes,
         # and no route exposed them, so a decline read "no source answers this" over three dropped rows)
@@ -7673,6 +7675,14 @@ def _repick_without(store: ni.NIStore, item_id: str, url: str,
                            note=f"{gone.get('provider') or gone.get('host')} {why}",
                            **{slot: rest or None, other: None}, _access=None, _format=None, _tried=tried)
     return None
+
+
+def _goes_with(row: dict, host: str, *, host_wide: bool) -> bool:
+    """Does a row leave with a dropped source on ``host``: every row of the host (``host_wide``), else every row
+    of the host that needs a key (the user has none for the host)."""
+    assert isinstance(row, dict) and isinstance(host, str), "a row and a host"
+    same = (urlparse(str(row.get("url") or "")).hostname or "").lower() == host
+    return same and (host_wide or _clean_key_need(row.get("needs_key")) is not None)
 
 
 _MAX_WAITED = 3
@@ -7702,9 +7712,10 @@ def _tried_entry(row: dict, url: str, why: str) -> dict:
 
 def skip_source(store: ni.NIStore, item_id: str) -> bool:
     """Skip the Library source the card paused on for a key (the user has none): the row is dropped with that
-    reason and the build goes on as the auto-pick would — the next row, then research under the card's consent,
-    then the honest decline. Only a row the build picked can be skipped: an address the user named is the one
-    source they asked for. ValueError with the user-facing reason; else whether the worker started."""
+    reason, with every other row of its host that needs a key, and the build goes on as the auto-pick would — the
+    next row, then research under the card's consent, then the honest decline. Only a row the build picked can be
+    skipped: an address the user named is the one source they asked for. ValueError with the user-facing reason;
+    else whether the worker started."""
     assert store is not None and item_id, "args required"
     record = _flow_read(store, item_id) or {}
     access = record.get("_access")
@@ -7712,7 +7723,8 @@ def skip_source(store: ni.NIStore, item_id: str) -> bool:
             or access.get("named"):
         raise ValueError("this card isn't paused on a source it can skip")
     url = str(access.get("url") or "")
-    if _repick_without(store, item_id, url, why=_SKIP_WHY) is None:
+    # the host's other rows that need its key go too: the next would ask for the same key (review of #570)
+    if _repick_without(store, item_id, url, why=_SKIP_WHY, keyed_host=True) is None:
         raise ValueError("this card isn't paused on a Library source")
     # the worker reads no address of its own and goes on from the rows left (``_run_external_flow``)
     _transition(store, item_id, "source", error=AWAITING_SOURCE_PICK, source_url=None, _auto_picked=True,

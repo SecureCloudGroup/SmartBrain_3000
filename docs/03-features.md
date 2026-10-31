@@ -403,7 +403,8 @@ How a card comes to life:
    provider (or, for the SEC and BLS, your contact email) is tried last and the
    card asks you for it before anything is fetched. While it asks, the card lists
    what it already tried and why each was dropped, and **Skip this source** goes
-   on without it (to the next source, then to research). A Library source that
+   on without it (to the next source, then to research; no other source that
+   needs the same site's key asks again). A Library source that
    describes its answers (which of its values answer which questions) builds the
    card from them; a data source that doesn't is sampled and mapped the way a
    pasted link is, checked the same way, and held until you tap Keep. A web page

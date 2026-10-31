@@ -328,6 +328,10 @@ _REASONS: dict[str, str] = {
     "model_budget": ("The build spent its model-call budget before a source fit — retry runs it again with a "
                      "fresh one."),
     "research": "The research couldn't finish (the model was unavailable) — retry runs it again.",
+    # a run a paired phone started met a spent daily allowance (``ni_refresh.charge_phone_spend``): its own line,
+    # never "no model is routed" (review of #570); the Mac's own tap is never counted
+    "phone_allowance": ("Today's allowance for cloud model use started from a phone is spent. Retry from your "
+                        "Mac, or tomorrow."),
     # Claims audit 2026-09-21: classes the flow actually writes that the map
     # missed — the card showed the blind sentence for each of these.
     "assembly": "The card couldn't be assembled from the mapped fields.",

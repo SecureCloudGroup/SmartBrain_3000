@@ -84,8 +84,9 @@ to know when a release changes behavior.
   lived only in the sealed record, and a decline read "no source answers this" over three sources that each
   failed for a different reason.
 - Neural Interface: **Skip this source** on a key pause. When the card asks for a key you don't have for a source
-  SmartBrain picked, the build goes on to the next source, then research, then the honest decline; before, the
-  card stayed paused with no way past the source but Cancel. A source you named yourself is never skipped for you.
+  SmartBrain picked, the build goes on to the next source, then research, then the honest decline, and no other
+  source that needs the same site's key asks for it again; before, the card stayed paused with no way past the
+  source but Cancel. A source you named yourself is never skipped for you.
 - `tools/ni-proof.py` observes one ask on a running SmartBrain over its local API, the way the done gate for a
   fix requires: it types the ask, answers only what it is told to (the model consent, a key from an environment
   variable, the YES, one refresh), and writes every state the card passed through, what it tried and why, its

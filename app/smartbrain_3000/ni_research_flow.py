@@ -296,7 +296,7 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links:
     now = ni._clock().astimezone(UTC)
     if plan.mode == "cloud" and not ni_refresh.charge_phone_spend(store.conn, now):
         # a run a phone started draws its unit before research spends (a cloud build drew it already): today's is gone
-        return ni_flow._fail(store, item_id, "research", ni_refresh.PHONE_SPEND_LINE)
+        return ni_flow._fail(store, item_id, "phone_allowance", ni_refresh.PHONE_SPEND_LINE)
     web = plan.mode == "cloud" and plan.web  # the closed-world local tier never has the web
     question = question_from_intent(request, intent)
     # a compare is searched one thing at a time: the intent's one place must not steer every search

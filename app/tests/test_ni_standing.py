@@ -372,7 +372,10 @@ def test_a_run_a_phone_started_draws_the_ceiling_before_its_research_spends(lib,
     with auth.serving_via(auth.PHONE_VIA), ni_refresh.paid_scope(False):
         _s, _i, refused, seam = _declined(monkeypatch, lib, store=store, ask="rain in Lisbon tomorrow")
     assert seam.seen == [] and refused["state"] == "failed", "nothing reached the model"
-    assert refused["error"] == f"research: {ni_refresh.PHONE_SPEND_LINE}"
+    assert refused["error"] == f"phone_allowance: {ni_refresh.PHONE_SPEND_LINE}"
+    line = ni_master.terminal_surface("failed", refused, shell=True)["reason"]   # what the card says (review of #570)
+    assert line.startswith("Today's allowance for cloud model use started from a phone is spent"), line
+    assert "No model is routed" not in line and "model was unavailable" not in line
     with auth.serving_via(auth.PHONE_VIA), ni_refresh.paid_scope(True):   # its Allow tap drew the unit already
         _s, _i, paid, seam = _declined(monkeypatch, lib, store=store, ask="wind in Oslo tomorrow")
     assert len(seam.seen) == 4 and paid["state"] == "declined"
