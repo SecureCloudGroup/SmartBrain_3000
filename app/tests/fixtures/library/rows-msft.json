@@ -1,0 +1,105 @@
+{
+  "ask": "Microsoft stock price",
+  "intent": {
+    "subject": "Microsoft",
+    "wants": [
+      "price"
+    ],
+    "place": null,
+    "frame_kind": null
+  },
+  "limit": 5,
+  "pack_version": "v1.5.0",
+  "recorded_at": "2026-10-31T03:11:41+00:00",
+  "rows": [
+    {
+      "source_id": "alphavantage-quote",
+      "title": "Alpha Vantage global quote",
+      "host": "www.alphavantage.co",
+      "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=MSFT",
+      "provider": "Alpha Vantage",
+      "authority": "aggregator",
+      "label": "Microsoft Corporation (NASDAQ)",
+      "choice": false,
+      "format": "json",
+      "needs_key": {
+        "in": "query",
+        "name": "apikey",
+        "prefix": "",
+        "docs_url": "https://www.alphavantage.co/terms_of_service/"
+      },
+      "needs_contact": false,
+      "params": {
+        "ticker": "MSFT"
+      },
+      "url_template": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=MSFT",
+      "clock_params": {},
+      "categories": [
+        "markets/stocks",
+        "markets/funds"
+      ],
+      "scope": "global",
+      "lookup": null,
+      "answers": null
+    },
+    {
+      "source_id": "finnhub-quote",
+      "title": "Finnhub quote",
+      "host": "finnhub.io",
+      "url": "https://finnhub.io/api/v1/quote?symbol=MSFT",
+      "provider": "Finnhub",
+      "authority": "aggregator",
+      "label": "Microsoft Corporation (NASDAQ)",
+      "choice": false,
+      "format": "json",
+      "needs_key": {
+        "in": "query",
+        "name": "token",
+        "prefix": "",
+        "docs_url": "https://finnhub.io/terms-of-service"
+      },
+      "needs_contact": false,
+      "params": {
+        "ticker": "MSFT"
+      },
+      "url_template": "https://finnhub.io/api/v1/quote?symbol=MSFT",
+      "clock_params": {},
+      "categories": [
+        "markets/stocks",
+        "markets/indices"
+      ],
+      "scope": "global",
+      "lookup": null,
+      "answers": null
+    },
+    {
+      "source_id": "alphavantage-daily",
+      "title": "Alpha Vantage daily history",
+      "host": "www.alphavantage.co",
+      "url": "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=MSFT",
+      "provider": "Alpha Vantage",
+      "authority": "aggregator",
+      "label": "Microsoft Corporation (NASDAQ)",
+      "choice": false,
+      "format": "json",
+      "needs_key": {
+        "in": "query",
+        "name": "apikey",
+        "prefix": "",
+        "docs_url": "https://www.alphavantage.co/terms_of_service/"
+      },
+      "needs_contact": false,
+      "params": {
+        "ticker": "MSFT"
+      },
+      "url_template": "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=MSFT",
+      "clock_params": {},
+      "categories": [
+        "markets/stocks"
+      ],
+      "scope": "global",
+      "lookup": null,
+      "answers": null
+    }
+  ]
+}

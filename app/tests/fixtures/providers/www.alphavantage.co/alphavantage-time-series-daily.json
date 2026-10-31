@@ -1,0 +1,39 @@
+{
+  "name": "alphavantage-time-series-daily",
+  "host": "www.alphavantage.co",
+  "url": "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&apikey=[redacted]",
+  "key": {
+    "in": "query",
+    "name": "apikey"
+  },
+  "status": 200,
+  "content_type": "application/json",
+  "captured": false,
+  "captured_at": null,
+  "note": "the daily series the pack's alphavantage-daily row serves: values filed under each day's date",
+  "body": {
+    "Meta Data": {
+      "1. Information": "Daily Prices (open, high, low, close) and Volumes",
+      "2. Symbol": "IBM",
+      "3. Last Refreshed": "2026-10-30",
+      "4. Output Size": "Compact",
+      "5. Time Zone": "US/Eastern"
+    },
+    "Time Series (Daily)": {
+      "2026-10-30": {
+        "1. open": "289.5000",
+        "2. high": "292.3800",
+        "3. low": "287.1100",
+        "4. close": "291.2700",
+        "5. volume": "4213456"
+      },
+      "2026-10-29": {
+        "1. open": "286.0000",
+        "2. high": "290.1000",
+        "3. low": "285.2000",
+        "4. close": "288.9000",
+        "5. volume": "3987001"
+      }
+    }
+  }
+}

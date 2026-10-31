@@ -1,0 +1,17 @@
+{
+  "name": "alphavantage-demo-key-refused",
+  "host": "www.alphavantage.co",
+  "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=NVDA&apikey=[redacted]",
+  "key": {
+    "in": "query",
+    "name": "apikey"
+  },
+  "status": 200,
+  "content_type": "application/json",
+  "captured": false,
+  "captured_at": null,
+  "note": "a 200 OK sentence instead of data: the demo key on a symbol it does not cover (the same shape as the spent-quota 'Information' body)",
+  "body": {
+    "Information": "The **demo** API key is for demo purposes only. Please claim your free API key at (https://www.alphavantage.co/support/#api-key) to explore our full API offerings. It takes fewer than 20 seconds."
+  }
+}

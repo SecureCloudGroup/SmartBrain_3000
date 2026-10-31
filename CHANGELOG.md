@@ -11,6 +11,39 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+### Fixed
+- Neural Interface: cards build from Alpha Vantage, and from every other source whose field names the plain path
+  grammar can't spell. The path walker reported a key with a space, a dot or a leading digit ("Global Quote",
+  "05. price", a date) as unaddressable and offered nothing, so such a source dropped out of the pick in a fraction
+  of a second with no model call (the NVDA card on 0.27.1, 0.27.2 and 0.27.3). The walker now writes those keys as
+  the quoted keys the engine has resolved since 0.26 (`["Global Quote"]["05. price"]`); the field-name comparison,
+  the column labels and the list-row check read that spelling, and a mapped card's pipeline carries it.
+- Neural Interface: a source that answers with a sentence instead of its data (Alpha Vantage's spent-quota, demo-key
+  and bad-key bodies are 200 OK sentences) moves on at once with the provider's own words as the reason. Before,
+  the model spent five calls trying to map a price out of the sentence before the judge refused.
+- Neural Interface: the key check compares hosts. A key given on a card for one source (Alpha Vantage) no longer
+  counts as the key for another host's row (Finnhub) on the same card: the card asks for that host's key, instead of
+  fetching with the wrong one and dropping the row when the host-bound loader refused it.
+- Neural Interface: a source that files its values under each day's date (Alpha Vantage's daily series) is refused
+  with that reason, instead of being mapped to one day's value that would never change on the card.
+- Neural Interface: a build resumed after the key was given, whose last source then moved on, goes on to research
+  or to the honest decline; before, it stopped in a source pick with nothing to tap.
+- Neural Interface: one build spends at most 24 model calls across every source it tries; past that it fails with
+  its own reason, and a retry runs with a fresh budget.
+- Neural Interface: a sentence in a sample (a provider's note or description) no longer counts as evidence that a
+  numeric want is text.
+- Privacy: keys stay out of app.log. The HTTP client logged every request's full address at INFO, and a keyed
+  source's address carries the key in its query string. Those request lines are off, and every log line is redacted
+  of key-bearing query parameters and authorization headers before a handler writes it.
+- Deleting a card drops every secret stored under it, including a key the card asked for on its way to a source it
+  never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
+
+### Added
+- `tools/ni-capture-fixtures.py` records real provider bodies (Alpha Vantage, Finnhub, Open-Meteo) as test
+  fixtures through the app's guarded fetch, keys redacted; `tools/ni-library-rows.py` records the rows the
+  installed Library pack offers for an ask. `app/tests/test_ni_proof_asks.py` replays both through the production
+  fetch path on a Claude Code route table, and fails while any provider fixture is still a hand-typed shape.
+
 ## [0.27.3] - 2026-10-30
 
 **Upgrading from 0.27.2.** No migration and no change to your cards, sources or settings; the Global

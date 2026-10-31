@@ -1,0 +1,90 @@
+{
+  "name": "open-meteo-forecast",
+  "host": "api.open-meteo.com",
+  "url": "https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.01&current=temperature_2m%2Crelative_humidity_2m%2Cweather_code%2Cwind_speed_10m&daily=weather_code%2Ctemperature_2m_max%2Ctemperature_2m_min%2Cprecipitation_probability_max&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FNew_York",
+  "key": null,
+  "status": 200,
+  "content_type": "application/json",
+  "captured": false,
+  "captured_at": null,
+  "note": "the keyless forecast body the Global Library's weather sources read (current + daily blocks)",
+  "body": {
+    "latitude": 40.71,
+    "longitude": -74.01,
+    "generationtime_ms": 0.2,
+    "utc_offset_seconds": -14400,
+    "timezone": "America/New_York",
+    "timezone_abbreviation": "EDT",
+    "elevation": 10.0,
+    "current_units": {
+      "time": "iso8601",
+      "interval": "seconds",
+      "temperature_2m": "°F",
+      "relative_humidity_2m": "%",
+      "weather_code": "wmo code",
+      "wind_speed_10m": "mp/h"
+    },
+    "current": {
+      "time": "2026-10-30T14:00",
+      "interval": 900,
+      "temperature_2m": 61.3,
+      "relative_humidity_2m": 52,
+      "weather_code": 2,
+      "wind_speed_10m": 8.1
+    },
+    "daily_units": {
+      "time": "iso8601",
+      "weather_code": "wmo code",
+      "temperature_2m_max": "°F",
+      "temperature_2m_min": "°F",
+      "precipitation_probability_max": "%"
+    },
+    "daily": {
+      "time": [
+        "2026-10-30",
+        "2026-10-31",
+        "2026-11-01",
+        "2026-11-02",
+        "2026-11-03",
+        "2026-11-04",
+        "2026-11-05"
+      ],
+      "weather_code": [
+        2,
+        61,
+        3,
+        0,
+        95,
+        71,
+        45
+      ],
+      "temperature_2m_max": [
+        64.1,
+        58.0,
+        55.2,
+        56.9,
+        52.5,
+        49.0,
+        50.1
+      ],
+      "temperature_2m_min": [
+        50.0,
+        48.2,
+        45.1,
+        44.0,
+        41.7,
+        39.3,
+        40.8
+      ],
+      "precipitation_probability_max": [
+        10,
+        80,
+        20,
+        0,
+        90,
+        60,
+        5
+      ]
+    }
+  }
+}

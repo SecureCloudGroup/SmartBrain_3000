@@ -7,6 +7,7 @@ app with a real DuckDB + migrations (mirrors test_schedule_routes.py).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
@@ -477,6 +478,23 @@ def test_delete_cascades_snapshots_and_runs(client: TestClient) -> None:
             f"SELECT COUNT(*) FROM {table} WHERE {'id' if table == 'ni_items' else 'item_id'} = ?;",
             [iid],
         ).fetchone()[0] == 0
+
+
+def test_delete_drops_every_secret_under_the_cards_namespace(client: TestClient) -> None:
+    """A key the card asked for on its way to a source (``ni_flow.KEY_PARAM``, stored by ``give_access``) is in no
+    spec's params: until 2026-10-31 the delete cascade read the params only and such a key outlived its card
+    (T's Alpha Vantage key sat in the store after the card was deleted). The whole ``ni:<id>:`` namespace goes,
+    and another card's keys stay."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    other = _create_via_tool(client, title="Another card")
+    secrets = client.app.state.secret_store
+    ni.put_credential(secrets, iid, ni_flow.KEY_PARAM, "av-key-1", "www.alphavantage.co")
+    ni.put_credential(secrets, iid, "extra_token", "t-2", "finnhub.io")
+    ni.put_credential(secrets, other, ni_flow.KEY_PARAM, "keep-me", "www.alphavantage.co")
+    assert client.delete(f"/api/ni/items/{iid}").status_code == 200
+    assert [k for k in secrets.list_keys() if k.startswith(f"ni:{iid}:")] == []
+    assert json.loads(secrets.get(f"ni:{other}:{ni_flow.KEY_PARAM}"))["value"] == "keep-me"
 
 
 # --- credential PUT: desktop-local + never echoes value ------------------

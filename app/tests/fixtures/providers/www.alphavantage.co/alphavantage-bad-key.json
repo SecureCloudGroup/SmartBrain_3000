@@ -1,0 +1,17 @@
+{
+  "name": "alphavantage-bad-key",
+  "host": "www.alphavantage.co",
+  "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&apikey=[redacted]",
+  "key": {
+    "in": "query",
+    "name": "apikey"
+  },
+  "status": 200,
+  "content_type": "application/json",
+  "captured": false,
+  "captured_at": null,
+  "note": "a 200 OK sentence under a spaced key: an invalid key",
+  "body": {
+    "Error Message": "the parameter apikey is invalid or missing. Please claim your free API key on (https://www.alphavantage.co/support/#api-key). It should take less than 20 seconds."
+  }
+}

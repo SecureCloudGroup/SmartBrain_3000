@@ -1017,32 +1017,50 @@ def delete_item(request: Request, item_id: str) -> dict:
     """Permanent delete; cascades snapshots/revisions/runs in code (no FK — feeds precedent).
 
     L9 (audit 2026-09-12): also best-effort deletes every ``ni:<item_id>:<name>``
-    secret key stored under this item's namespace (from the sealed spec's secret
-    params). Without this, credentials outlive their owning item — unreachable by
-    the delete tool (no SecretStore in ToolContext by design) and invisible to the
-    Providers-only ``/api/secrets`` surface. Delete failures are swallowed so a
-    stuck secret never blocks the item cascade.
+    secret stored under this item's namespace. Without this, credentials outlive
+    their owning item — unreachable by the delete tool (no SecretStore in
+    ToolContext by design) and invisible to the Providers-only ``/api/secrets``
+    surface. The namespace is scanned (``list_keys``), not read off the sealed
+    spec: a key the card asked for on its way to a source it never built from
+    (``ni_flow.KEY_PARAM``, a flow that paused, moved on or was declined) is in no
+    spec's params and stayed behind until 2026-10-31. Delete failures are
+    swallowed so a stuck secret never blocks the item cascade.
     """
     store = _store(request)
     if store.get_item(item_id) is None:
         raise HTTPException(status_code=404, detail="item not found")
-    # Enumerate secret keys from the sealed spec BEFORE the item row disappears.
     item = store.get_item(item_id)
     if item is not None and ni.awaits_yes(item):  # P4: deleting a card held for Keep is a No to it
         ni_measure.record_best_effort(store, item, kept=False)
-    params = (item["spec"].get("params") or {}) if item is not None else {}
     secrets = getattr(request.app.state, "secret_store", None)
-    if secrets is not None and isinstance(params, dict):
-        for name, param in params.items():  # bounded by ni._MAX_PARAMS
-            if not (isinstance(param, dict) and param.get("kind") == "secret"):
-                continue
-            key = f"ni:{item_id}:{name}"
-            try:
-                secrets.delete(key)
-            except Exception as exc:  # best-effort: never block the item cascade
-                log.warning("ni delete: secret drop failed for %s: %s", key, exc)
+    for key in _item_secret_keys(secrets, item_id, item):  # bounded by the store
+        try:
+            secrets.delete(key)
+        except Exception as exc:  # best-effort: never block the item cascade
+            log.warning("ni delete: secret drop failed for %s: %s", key, exc)
     store.delete(item_id)
     return {"ok": True}
+
+
+def _item_secret_keys(secrets, item_id: str, item: dict | None) -> list[str]:
+    """Every secret stored under ``ni:<item_id>:`` — the whole namespace when the store lists its keys, else
+    the sealed spec's secret params (the shape older stores answer); [] without a store."""
+    assert isinstance(item_id, str) and item_id, "item id required"
+    if secrets is None:
+        return []
+    prefix = f"ni:{item_id}:"
+    try:
+        names = [k for k in secrets.list_keys() if isinstance(k, str) and k.startswith(prefix)]
+    except Exception as exc:  # a store that can't list: the spec's params are still dropped
+        log.warning("ni delete: secret scan failed for %s: %s", item_id, exc)
+        names = []
+    params = (item["spec"].get("params") or {}) if item is not None else {}
+    if isinstance(params, dict):
+        for name, param in params.items():  # bounded by ni._MAX_PARAMS
+            if isinstance(param, dict) and param.get("kind") == "secret" and f"{prefix}{name}" not in names:
+                names.append(f"{prefix}{name}")
+    assert all(k.startswith(prefix) for k in names), "only this item's namespace"
+    return names
 
 
 @router.put("/api/ni/items/{item_id}/credential", dependencies=[account.DESKTOP_ONLY])
