@@ -8,6 +8,7 @@ app with a real DuckDB + migrations (mirrors test_schedule_routes.py).
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
@@ -495,6 +496,27 @@ def test_delete_drops_every_secret_under_the_cards_namespace(client: TestClient)
     assert client.delete(f"/api/ni/items/{iid}").status_code == 200
     assert [k for k in secrets.list_keys() if k.startswith(f"ni:{iid}:")] == []
     assert json.loads(secrets.get(f"ni:{other}:{ni_flow.KEY_PARAM}"))["value"] == "keep-me"
+
+
+def test_a_key_that_will_not_drop_is_logged_by_item_and_error_class_only(client, monkeypatch, caplog) -> None:
+    """When a stored key won't drop, the cascade still deletes the card and logs the item id and the error's
+    class: never the key's name, never the store's error text, whatever a store puts in it (CodeQL clear-text
+    logging on the delete path, 2026-10-31)."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    secrets = client.app.state.secret_store
+    ni.put_credential(secrets, iid, ni_flow.KEY_PARAM, "av-key-1", "www.alphavantage.co")
+
+    def refuse(key: str) -> None:
+        raise RuntimeError(f"cannot drop {key}: av-key-1")
+
+    monkeypatch.setattr(secrets, "delete", refuse)
+    with caplog.at_level(logging.WARNING, logger=ni_routes.log.name):
+        assert client.delete(f"/api/ni/items/{iid}").status_code == 200
+    assert client.app.state.ni.get_item(iid) is None, "a stuck key never blocks the cascade"
+    lines = [r.getMessage() for r in caplog.records if r.name == ni_routes.log.name]
+    assert lines and all(iid in line and "RuntimeError" in line for line in lines)
+    assert not any("av-key-1" in line or f"ni:{iid}:" in line for line in lines)
 
 
 # --- credential PUT: desktop-local + never echoes value ------------------

@@ -1037,7 +1037,9 @@ def delete_item(request: Request, item_id: str) -> dict:
         try:
             secrets.delete(key)
         except Exception as exc:  # best-effort: never block the item cascade
-            log.warning("ni delete: secret drop failed for %s: %s", key, exc)
+            # The item id and the error's class only (CodeQL clear-text logging, 2026-10-31): a stored key's name
+            # and a store's error text stay out of the log, whatever a store puts in its message.
+            log.warning("ni delete: a stored key of item %s could not be dropped (%s)", item_id, type(exc).__name__)
     store.delete(item_id)
     return {"ok": True}
 
@@ -1052,7 +1054,7 @@ def _item_secret_keys(secrets, item_id: str, item: dict | None) -> list[str]:
     try:
         names = [k for k in secrets.list_keys() if isinstance(k, str) and k.startswith(prefix)]
     except Exception as exc:  # a store that can't list: the spec's params are still dropped
-        log.warning("ni delete: secret scan failed for %s: %s", item_id, exc)
+        log.warning("ni delete: the stored keys of item %s could not be listed (%s)", item_id, type(exc).__name__)
         names = []
     params = (item["spec"].get("params") or {}) if item is not None else {}
     if isinstance(params, dict):
