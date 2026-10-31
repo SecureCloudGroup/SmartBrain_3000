@@ -13,6 +13,7 @@ import json
 import pathlib
 import sys
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -177,7 +178,8 @@ def test_skip_keyless_goes_past_a_row_with_no_key_to_the_one_it_has(tool, app, m
     assert code == 0 and report["card"]["built_from"]["host"] == "finnhub.io", report["events"]
     assert [t["tap"] for t in report["taps"]] == ["consent", "skip:www.alphavantage.co", "key:finnhub.io"]
     assert any("www.alphavantage.co: " in t for e in report["events"] for t in e.get("tried") or [])
-    assert all("finnhub.io" in u for u in replay.fetched), "nothing was sent to the source it skipped"
+    assert replay.fetched and all(urlsplit(u).hostname == "finnhub.io" for u in replay.fetched), \
+        "nothing was sent to the source it skipped"
 
 
 def test_consent_stop_reports_the_question_and_sends_nothing(tool, app, monkeypatch, tmp_path) -> None:
