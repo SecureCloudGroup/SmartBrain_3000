@@ -7,6 +7,7 @@ import struct
 import uuid
 from collections.abc import Iterator
 
+import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
@@ -313,6 +314,14 @@ def test_open_db_pins_session_timezone_to_utc(tmp_path) -> None:
     conn = dbmod.open_db(tmp_path / "tz.duckdb")
     assert conn.execute("SELECT current_setting('TimeZone');").fetchone()[0] == "UTC"
     # Cursors (what ThreadLocalConn hands each thread) must inherit the pin.
+    assert conn.cursor().execute("SELECT current_setting('TimeZone');").fetchone()[0] == "UTC"
+
+
+def test_the_suites_own_databases_carry_the_same_utc_pin() -> None:
+    # 2026-10-31: the suite's ``duckdb.connect(":memory:")`` databases took the host's zone while the app's are
+    # pinned, so a test passed on CI's UTC runners and failed on T's Mac (America/New_York). conftest pins them.
+    conn = duckdb.connect(":memory:")
+    assert conn.execute("SELECT current_setting('TimeZone');").fetchone()[0] == "UTC"
     assert conn.cursor().execute("SELECT current_setting('TimeZone');").fetchone()[0] == "UTC"
 
 

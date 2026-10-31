@@ -35,6 +35,7 @@ import importlib.util
 import json
 import pathlib
 import re
+import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlencode, urlsplit
@@ -63,6 +64,7 @@ ROWS_NVDA = json.loads((FIXTURES / "library" / "rows-nvda.json").read_text(encod
 ASK = ROWS_NVDA["ask"]
 AV_QUOTE, FINNHUB, AV_DAILY = (r["url"] for r in ROWS_NVDA["rows"])
 T_ROUTES = {"ni": "claudecode/opus", "chat": "claudecode/sonnet", "agent": "claudecode/sonnet"}
+T_ZONE = "America/New_York"   # T's Mac (2026-10-31: a test that only failed off UTC)
 KEY_PARAMS = frozenset({"apikey", "token", "key", "api_key", "access_token"})
 AV_KEY, FH_KEY = "av-test-key-0A1B2C3D", "fh-test-key-9Z8Y7X6W"
 
@@ -204,9 +206,13 @@ class _Model:
 def _t_install(monkeypatch):
     """T's install: every route Claude Code and no local model, research on its default (Automatic: the suite's
     conftest turns it off for every other test), the card's consent for claudecode/opus sealed, the key store wired
-    as ``main`` wires it, no search provider. The politeness clock is a test clock: a wait moves it (``slept``)."""
+    as ``main`` wires it, no search provider, and T's Mac's zone (America/New_York; the databases keep production's
+    UTC pin, conftest). The politeness clock is a test clock: a wait moves it (``slept``)."""
     for name in ("SMARTBRAIN_NI_RESEARCH", "SMARTBRAIN_NI_RESEARCH_MODEL", "SMARTBRAIN_NI_RESEARCH_WEB"):
         monkeypatch.delenv(name, raising=False)
+    if hasattr(time, "tzset"):
+        monkeypatch.setenv("TZ", T_ZONE)
+        time.tzset()
     monkeypatch.setattr(gateway, "load_routes", lambda conn: dict(T_ROUTES))
     monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
     clock = SimpleNamespace(now=1000.0, slept=[])
@@ -220,6 +226,9 @@ def _t_install(monkeypatch):
     yield clock
     ni_flow.set_secrets_provider(None)
     ni_flow.set_library_provider(None)
+    monkeypatch.undo()
+    if hasattr(time, "tzset"):
+        time.tzset()
 
 
 def _card(monkeypatch, rows: list[dict], replay: _Replay, ask: str = ASK) -> tuple[ni.NIStore, str, SecretStore]:
@@ -252,6 +261,16 @@ def _notes(store: ni.NIStore, item_id: str) -> str:
 
 
 # ---- the fixtures themselves ----------------------------------------------------------------------------------
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="the zone is set with time.tzset")
+def test_these_tests_run_in_ts_zone_on_productions_utc_database() -> None:
+    """T's Mac runs America/New_York; a database the app opens is pinned to UTC (``db.open_db``) and so is every one
+    the suite opens (conftest). Both hold here, so a time the build writes reads back as it does on T's install."""
+    assert datetime.now().astimezone().tzname() in ("EDT", "EST")
+    conn = duckdb.connect(":memory:")
+    assert conn.execute("SELECT current_setting('TimeZone');").fetchone()[0] == "UTC"
+    assert conn.cursor().execute("SELECT current_setting('TimeZone');").fetchone()[0] == "UTC"
+
 
 def test_the_recorded_rows_are_the_packs_three_keyed_undeclared_quote_rows() -> None:
     """What the v1.5.0 pack offers for the NVDA ask (T's Mac ranked the same three, in this order), so the matrix
