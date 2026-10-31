@@ -870,7 +870,8 @@ def test_research_after_both_skips_offers_neither_site_again_and_the_card_says_w
     calls: list[dict] = []
 
     def chat(conn, purpose, messages, model_, tools_, **kw):
-        calls.append({"model": model_, "session": kw.get("session"), "messages": copy.deepcopy(messages)})
+        calls.append({"model": model_, "session": kw.get("session"), "messages": copy.deepcopy(messages),
+                      "progress": ni_flow.build_progress(ni_flow._flow_read(store, item_id) or {})})
         return script.pop(0)
 
     monkeypatch.setattr(gateway, "chat_with_tools_recorded", chat)
@@ -886,6 +887,8 @@ def test_research_after_both_skips_offers_neither_site_again_and_the_card_says_w
     assert len(calls) == 4 and {c["model"] for c in calls} == {"claudecode/opus"}
     assert len(opened) == 1 and all(c["session"] is opened[0] for c in calls) and opened[0].closed, \
         "one CLI session for the run, on every call, wiped when it ended"
+    assert {json.dumps(c["progress"]) for c in calls} == {json.dumps({"step": 2, "of": 4, "label": "Finding a source"})}, \
+        "while research runs the card names no Library row (it named finnhub.io, just skipped, on T's Mac)"
     shown = json.dumps([m for c in calls for m in c["messages"] if m.get("role") == "tool"])
     assert "alphavantage" not in shown and "finnhub" not in shown, "research was offered neither skipped site"
     assert searched == ["NVDA stock price api"] and read == [page] and replay.fetched == []
@@ -901,6 +904,8 @@ def test_research_after_both_skips_offers_neither_site_again_and_the_card_says_w
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("ni_research: cloud run ")]
     assert len(lines) == 1 and "ended declined (tokens)" in lines[0] and "cache read 0, write 0" in lines[0], lines
     assert "reads: quotes.example.com no data file or table" in lines[0]
+    assert "; 3 tool calls (library_search 1, web_search 1, fetch_sample 1), 1 searches, 1 fetches" in lines[0], \
+        "every tool call is named; the one its budget refused is not one"
     assert "https://" not in lines[0] and "NVDA stock price api" not in lines[0], "no address and no search words"
 
 

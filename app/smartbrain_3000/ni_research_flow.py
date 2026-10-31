@@ -315,9 +315,16 @@ def _log_run(plan: policy.Plan, ctx: ResearchCtx, out: loop.Outcome) -> None:
     u = out.usage
     reads = "; ".join(f"{host} {word}" for host, word in _reads(ctx).items()) or "none"
     log.info("ni_research: %s run on %s ended %s (%s): %d model calls, prompt %d tokens (cache read %d, write %d), "
-             "completion %d; %d tool calls, %d searches, %d fetches, %ds; reads: %s", plan.mode, plan.model,
+             "completion %d; %d tool calls (%s), %d searches, %d fetches, %ds; reads: %s", plan.mode, plan.model,
              out.status, out.stop or out.ending or "-", u["calls"], u["prompt"], u["cache_read"], u["cache_write"],
-             u["completion"], ctx.turns, ctx.searches, ctx.fetches, int(ctx.elapsed()), reads)
+             u["completion"], ctx.turns, _calls_by_tool(ctx), ctx.searches, ctx.fetches, int(ctx.elapsed()), reads)
+
+
+def _calls_by_tool(ctx: ResearchCtx) -> str:
+    """The run's tool calls by tool, in the order first made ("library_search 1, web_search 3, fetch_sample 6"),
+    summing to its tool calls (``ResearchCtx.calls``, counted where each turn is spent)."""
+    assert isinstance(ctx.calls, dict), "the calls by tool"
+    return ", ".join(f"{tool} {n}" for tool, n in ctx.calls.items()) or "none"
 
 
 def _audit(item_id: str, plan: policy.Plan) -> bool:
@@ -413,7 +420,9 @@ def fallback(store: ni.NIStore, item_id: str, request: str, intent: dict, links:
     ctx = ResearchCtx(request=request, question=question, now=now, window=_window_of(request, intent),
                       zone=ZoneInfo(ni.user_timezone_name()), allowed_origins=ORIGINS_WEB if web else ORIGINS_LIBRARY,
                       searcher=_searcher() if web else None, library=library)
-    ni_flow._transition(store, item_id, record.get("state") or "source", error=record.get("error"),
+    # the Library's try mark goes: the card's progress named the last row tried (on T's Mac, 2026-10-31: "finnhub.io,
+    # 2 of 2", the site just skipped) for the whole research run, and would on a card research builds
+    ni_flow._transition(store, item_id, record.get("state") or "source", error=record.get("error"), _try=None,
                         note=f"researching ({plan.mode}) for a Library source" if not web
                         else "researching (cloud) in the Library and on the web")
     _audit(item_id, plan)

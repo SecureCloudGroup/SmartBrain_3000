@@ -390,6 +390,19 @@ def test_a_claude_code_research_run_keeps_one_session_and_it_is_wiped_however_th
         assert session is None, "no private folder: the run goes stateless, as before, and does not fail"
 
 
+def test_every_tool_call_that_spends_a_turn_is_counted_by_its_tool(monkeypatch) -> None:
+    """The app log names each research call by tool, and the counts sum to the run's tool calls: a fetch its fetch
+    budget refused still spent its turn (T's Mac, 2026-10-31: 10 tool calls, 3 searches and 6 fetches left one
+    call unnamed)."""
+    ctx, _ = listed(monkeypatch)
+    loop.run_research(ctx, Script(*good_run()))
+    assert ctx.calls == {"library_search": 1, "fetch_sample": 1, "try_recipe": 1, "propose_card": 1} and ctx.turns == 4
+    assert ni_research_flow._calls_by_tool(ctx) == "library_search 1, fetch_sample 1, try_recipe 1, propose_card 1"
+    ctx, _ = listed(monkeypatch, max_fetches=0)
+    loop.run_research(ctx, Script(*good_run()))
+    assert ctx.fetches == 0 and ctx.calls.get("fetch_sample") == 1 and sum(ctx.calls.values()) == ctx.turns, ctx.calls
+
+
 @pytest.mark.parametrize(("script", "over", "stop"), [
     (lambda: [reply(call("library_search", query="quakes"), used={"prompt_tokens": 31_000, "completion_tokens": 10})] * 3,
      {}, "tokens"),

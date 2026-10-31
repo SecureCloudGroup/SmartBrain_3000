@@ -1414,8 +1414,10 @@ trace, `ni_research_flow._research_tried`): `{host: "web search", provider: "Web
 and `{host: "research", provider: "Research", why: "read <host> (<what came of it>), ..."}`, hosts only, never an
 address. Its decline line names what stopped it (`loop.Outcome.stop` in `loop.STOPS`, read by
 `ni_master.gave_up_line`; the code stays `research_gave_up`), and `ni_research_flow._log_run` writes one INFO line
-per run (how it ended, model calls, prompt tokens with the cache's read and write share, tool calls, searches,
-fetches, seconds, sites read). **Skip this source** also seals the site in `_skipped` (at most six hosts), and
+per run (how it ended, model calls, prompt tokens with the cache's read and write share, tool calls by tool
+(`ResearchCtx.calls`, counted where each turn is spent), searches, fetches, seconds, sites read). Research clears
+the auto-pick's `_try` mark as it starts, so the card's progress names no Library row while it runs. **Skip this
+source** also seals the site in `_skipped` (at most six hosts), and
 research's Library (`ni_research_flow._Library`) offers none of a skipped site's keyed rows: no read it can't make,
 no Use my key, no decline link back to it. `_skipped` is not one of the card's answers, so a Retry's fresh record
 starts without it and asks for the key again; a standing order's reseed (`ni_standing._reseed`) carries it, and

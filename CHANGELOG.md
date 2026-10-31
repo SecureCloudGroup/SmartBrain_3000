@@ -34,7 +34,8 @@ to know when a release changes behavior.
   with how it ended, its cache share and the sites it read (no address and no search words).
 - Neural Interface: after **Skip this source**, research no longer offers the skipped site's keyed sources again:
   not as a read it cannot make, not as Use my key, not as the declined card's links. T's first research run linked
-  back to the two sites it had just been told had no key. **Keep looking** keeps the skips too: each look ran the
+  back to the two sites it had just been told had no key, and while it ran the card's progress still named the
+  last site skipped ("finnhub.io, 2 of 2"); it now names none. **Keep looking** keeps the skips too: each look ran the
   ask again and paused for the first skipped site's key, which stopped the order there. A key for the site given
   since on another card is offered on the card, as before. A Retry starts without the skips and asks again, since
   you may have a key by then.
