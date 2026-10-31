@@ -1,0 +1,473 @@
+"""The proof asks: the Library the user has, the bodies the providers really send, the production fetch path, T's
+route table.
+
+Three releases were announced fixed on fixtures typed by hand (0.27.1, 0.27.2, 0.27.3) and each failed on T's Mac
+within the hour. These tests replay, through ``ni_flow.run_flow`` with its production fetcher, the rows the v1.5.0
+pack really ranks for "NVDA stock price every 30 minutes" (``fixtures/library/rows-nvda.json``, recorded with
+``tools/ni-library-rows.py``) against the bodies the providers serve (``fixtures/providers/<host>/<name>.json``,
+captured with ``tools/ni-capture-fixtures.py``). The only seams are the model (scripted, but it reads the real menu
+and copies a path from it) and ``netguard.safe_fetch_json`` (the one network call under ``ni_fetch._get``), so the
+key store, the host-bound credential loader, the request builder, the politeness layer and every build check run as
+they do on an install. ``test_every_provider_fixture_is_captured`` keeps the suite honest: a provisional fixture
+(the documented shape, ``captured: false``) fails it until the real body is captured.
+
+What T's Mac showed on 2026-10-30 and each test here pins:
+* Alpha Vantage's ``"Global Quote"`` / ``"05. price"`` keys yielded zero paths, so the row dropped with no model
+  call: the walker now writes them as quoted keys and the quote builds.
+* a 200 OK sentence (``{"Information": ...}``) was mapped by the model for five calls: it moves on at once.
+* the Alpha Vantage key on the card made the key check skip the pause for the Finnhub row, whose fetch the loader
+  then refused: the key check compares hosts, and the card asks for Finnhub's key.
+* the daily series files its values under each day's date: it is refused with that reason, never mapped.
+"""
+from __future__ import annotations
+
+import copy
+import json
+import pathlib
+import re
+from datetime import datetime, timedelta
+from urllib.parse import parse_qsl, urlencode, urlsplit
+
+import duckdb
+import pytest
+from test_ni_answers import WEATHER_URL, lib  # noqa: F401  (lib is a fixture: the real Library shape with answers)
+from test_ni_auto_pick import _row
+
+from smartbrain_3000 import db as dbmod
+from smartbrain_3000 import gateway, netguard, ni, ni_flow, ni_master
+from smartbrain_3000.secrets import SecretStore, gen_master_key
+
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+PROVIDERS = FIXTURES / "providers"
+ROWS_NVDA = json.loads((FIXTURES / "library" / "rows-nvda.json").read_text(encoding="utf-8"))
+ASK = ROWS_NVDA["ask"]
+AV_QUOTE, FINNHUB, AV_DAILY = (r["url"] for r in ROWS_NVDA["rows"])
+T_ROUTES = {"ni": "claudecode/opus", "chat": "claudecode/sonnet", "agent": "claudecode/sonnet"}
+KEY_PARAMS = frozenset({"apikey", "token", "key", "api_key", "access_token"})
+AV_KEY, FH_KEY = "av-test-key-0A1B2C3D", "fh-test-key-9Z8Y7X6W"
+
+
+def fixture(name: str) -> dict:
+    """One captured provider body by name."""
+    hits = list(PROVIDERS.glob(f"*/{name}.json"))
+    assert len(hits) == 1, f"one fixture named {name}: {hits}"
+    return json.loads(hits[0].read_text(encoding="utf-8"))
+
+
+def _store() -> ni.NIStore:
+    conn = duckdb.connect(":memory:")
+    dbmod.run_migrations(conn)
+    return ni.NIStore(conn, gen_master_key())
+
+
+class _Library:
+    """The pack's rows for the ask, as ``ni_flow._library_candidates`` would offer them (no declared answers:
+    every quote row of v1.5.0 is keyed and undeclared)."""
+
+    def __init__(self, rows: list[dict]) -> None:
+        self.rows = [dict(r) for r in rows]
+
+    def candidates(self, request: str, limit: int = 3, hint: dict | None = None):
+        return copy.deepcopy(self.rows[:limit]), []
+
+    def answers(self, source_id: str) -> list[dict]:
+        return []
+
+    def get(self, source_id: str) -> dict | None:
+        row = next((r for r in self.rows if r["source_id"] == source_id), None)
+        return None if row is None else {"access": {"docs_url": (row.get("needs_key") or {}).get("docs_url", "")},
+                                         "provider": {"url": f"https://{row['host']}"}}
+
+
+def _base(url: str) -> str:
+    """A request address with its key parameter left out, for matching a fixture to the address a row fetches."""
+    parts = urlsplit(url)
+    pairs = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k not in KEY_PARAMS)
+    return f"{parts.scheme}://{parts.netloc}{parts.path}?{urlencode(pairs)}"
+
+
+class _Replay:
+    """``netguard.safe_fetch_json`` as the providers answered: the fixture body for the address a row fetches, the
+    key checked the way the provider would (present, under the name the row declares, the value the user gave for
+    THIS host), a 4xx fixture raised as the guard raises it. Every request is recorded, keys included, so a test can
+    assert exactly what left this computer."""
+
+    def __init__(self, serves: dict[str, str], keys: dict[str, str] | None = None) -> None:
+        self.serves = {_base(url): fixture(name) for url, name in serves.items()}
+        self.keys = dict(keys or {})
+        self.fetched: list[str] = []
+
+    def __call__(self, url: str, headers: dict | None = None, allow_redirects: bool = True) -> object:
+        self.fetched.append(url)
+        parts = urlsplit(url)
+        fx = self.serves.get(_base(url))
+        assert fx is not None, f"fetched an address no fixture answers: {_base(url)}"
+        assert parts.hostname == fx["host"], "the fixture's own host"
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        if fx.get("key"):
+            name = fx["key"]["name"]
+            assert fx["key"]["in"] == "query" and query.get(name) == self.keys.get(parts.hostname), \
+                f"the key for {parts.hostname} rides as {name}=..., the one the user gave for that host"
+            assert allow_redirects is False, "a keyed request never follows a redirect"
+        else:
+            assert not (set(query) & KEY_PARAMS), "a keyless source is fetched with no key"
+        if int(fx["status"]) >= 400:
+            raise netguard.FetchError(f"upstream returned HTTP {fx['status']}", status=int(fx["status"]),
+                                      content_type=str(fx.get("content_type") or ""))
+        return copy.deepcopy(fx["body"])
+
+
+_MENU_LINE = re.compile(r"^- (?P<path>.+?)  \((?P<type>[a-z]+)", re.MULTILINE)
+_SHAPE_FIELD = re.compile(r'"(?P<name>[a-z0-9_]+)": "<(?P<type>number|string) path>"')
+_ALIASES = {"price": ("c", "last", "close", "price")}   # how the quote providers name a current price
+
+
+class _Model:
+    """The build's model, scripted by stage; the mapping stage READS the menu the flow printed and copies one
+    offered path per field (by name, then by the provider's own alias for it, then the first of the type), so a
+    spelling the flow cannot print or verify fails here as it would with a real model. Counts calls by stage."""
+
+    def __init__(self, picks: dict[str, str] | None = None) -> None:
+        self.calls: dict[str, int] = {"intent": 0, "mapping": 0, "judge": 0, "other": 0}
+        self.picks = picks  # a forced reply for the mapping stage (a test of invalid picks)
+
+    def __call__(self, model: str, prompt: str) -> str:
+        assert model == "claudecode/opus", f"T's build model, consented; got {model}"
+        if "Classify a dashboard-card request" in prompt:
+            self.calls["intent"] += 1
+            return json.dumps({"kind": "external_data", "subject": "NVDA", "cadence_minutes": 30,
+                               "wants": ["price"], "threshold": None, "display_hint": "value"})
+        if "Choose the best candidate path" in prompt:
+            self.calls["mapping"] += 1
+            if self.picks is not None:
+                return json.dumps(self.picks)
+            return json.dumps(self._pick(prompt))
+        if '"serves"' in prompt or "serves" in prompt and "wrong" in prompt:
+            self.calls["judge"] += 1
+            return json.dumps({"serves": True, "gaps": [], "wrong": []})
+        self.calls["other"] += 1
+        return "{}"
+
+    @staticmethod
+    def _pick(prompt: str) -> dict:
+        menu = [(m.group("path"), m.group("type")) for m in _MENU_LINE.finditer(prompt)]
+        assert menu, "the menu lists the offered paths"
+        out = {}
+        for m in _SHAPE_FIELD.finditer(prompt):  # bounded: the fields (≤4)
+            name, wanted = m.group("name"), m.group("type")
+            typed = [p for p, t in menu if t == wanted]
+            named = [p for p in typed if name in ni_flow._path_tail_slug(p)]
+            aliased = [p for p in typed if ni_flow._path_tail_slug(p) in _ALIASES.get(name, ())]
+            out[name] = (named or aliased or typed or [menu[0][0]])[0]
+        return out
+
+
+@pytest.fixture(autouse=True)
+def _t_install(monkeypatch):
+    """T's install: every route Claude Code and no local model, research on its default (Automatic: the suite's
+    conftest turns it off for every other test), the card's consent for claudecode/opus sealed, the key store wired
+    as ``main`` wires it, no search provider."""
+    for name in ("SMARTBRAIN_NI_RESEARCH", "SMARTBRAIN_NI_RESEARCH_MODEL", "SMARTBRAIN_NI_RESEARCH_WEB"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(gateway, "load_routes", lambda conn: dict(T_ROUTES))
+    monkeypatch.setattr(ni_flow, "_SEARCH_PROVIDER", None)
+    yield
+    ni_flow.set_secrets_provider(None)
+    ni_flow.set_library_provider(None)
+
+
+def _card(monkeypatch, rows: list[dict], replay: _Replay, ask: str = ASK) -> tuple[ni.NIStore, str, SecretStore]:
+    """A shell card for ``ask`` with claudecode/opus consented (the consent question is tested in
+    test_ni_route_matrix), over ``rows``, fetching through ``replay``."""
+    library = _Library(rows)
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: library)
+    monkeypatch.setattr(netguard, "safe_fetch_json", replay)
+    store = _store()
+    secrets = SecretStore(store.conn, gen_master_key())
+    ni_flow.set_secrets_provider(lambda: secrets)
+    item_id = ni_flow.create_shell_item(store, ask)
+    ni_flow._flow_write(store, item_id, {**ni_flow._make_record(ask, "intent"), "_model_consent": "claudecode/opus",
+                                         "_model_consent_web": True})
+    return store, item_id, secrets
+
+
+def _held(store: ni.NIStore, item_id: str, out: dict, url: str, path: str = "mapping") -> dict:
+    """The card SmartBrain's own pick built, held for the user's Keep."""
+    assert out["state"] == "ready", (out.get("state"), out.get("error"), out.get("notes"))
+    item = store.get_item(item_id)
+    assert item["spec"]["_built_from"]["path"] == path and ni.awaits_yes(item), "held for Keep"
+    assert item["spec"]["source"]["url"] == url and item["state"] == "commissioning"
+    assert item_id not in [i["id"] for i in store.due_items()], "nothing recurs before Keep"
+    return item
+
+
+def _notes(store: ni.NIStore, item_id: str) -> str:
+    return json.dumps((ni_flow._flow_read(store, item_id) or {}).get("notes"))
+
+
+# ---- the fixtures themselves ----------------------------------------------------------------------------------
+
+def test_the_recorded_rows_are_the_packs_three_keyed_undeclared_quote_rows() -> None:
+    """What the v1.5.0 pack offers for the NVDA ask (T's Mac ranked the same three, in this order), so the matrix
+    below runs over the Library the user has, not rows a test invented."""
+    assert ROWS_NVDA["pack_version"] == "v1.5.0"
+    rows = ROWS_NVDA["rows"]
+    assert [r["source_id"] for r in rows] == ["alphavantage-quote", "finnhub-quote", "alphavantage-daily"]
+    assert all(r["needs_key"] and r["needs_key"]["in"] == "query" and r["answers"] is None for r in rows)
+    assert [r["needs_key"]["name"] for r in rows] == ["apikey", "token", "apikey"]
+    assert [r["host"] for r in rows] == ["www.alphavantage.co", "finnhub.io", "www.alphavantage.co"]
+
+
+def test_every_provider_fixture_is_captured() -> None:
+    """A provisional fixture is the documented shape, typed by hand: the exact thing three releases were wrongly
+    cleared on. This fails until ``tools/ni-capture-fixtures.py`` has replaced each one with the body the provider
+    sent, on a machine that reaches the provider."""
+    provisional = sorted(p.stem for p in PROVIDERS.glob("*/*.json")
+                         if not json.loads(p.read_text(encoding="utf-8")).get("captured"))
+    assert provisional == [], f"still the documented shape, not a captured body: {provisional}"
+
+
+def test_no_fixture_carries_a_key() -> None:
+    files = sorted(PROVIDERS.glob("*/*.json"))
+    assert len(files) >= 7, "the catalogue"
+    for path in files:  # bounded: the fixture files
+        fx = json.loads(path.read_text(encoding="utf-8"))
+        query = dict(parse_qsl(urlsplit(fx["url"]).query, keep_blank_values=True))
+        if fx.get("key"):
+            assert query.get(fx["key"]["name"]) == "[redacted]", f"{path.name}: the key's value is redacted"
+        assert not any(v and k in KEY_PARAMS and v != "[redacted]" for k, v in query.items()), path.name
+        assert fx["host"] == urlsplit(fx["url"]).hostname and isinstance(fx["status"], int)
+
+
+# ---- the quote row: the real body through the production fetch path -----------------------------------------------
+
+def test_the_quote_row_builds_from_the_real_body_with_the_users_key_on_the_production_fetch_path(monkeypatch) -> None:
+    """The NVDA ask on T's install, end to end: the first row asks for its key before anything is fetched; the key
+    goes under this card bound to www.alphavantage.co; the build samples through ``ni_flow.default_fetcher`` →
+    ``_fetch_with_access`` → ``ni.http_request_parts`` → ``ni_fetch`` → ``netguard`` with ``apikey=`` on the
+    request and refuses redirects; the walker offers Alpha Vantage's spaced, numbered keys as quoted paths; the
+    model copies one from the menu; the price (sent as text) is converted; the card is held for Keep with the
+    quoted path in its sealed pipeline and the key only as a reference."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    model = _Model()
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["source_url"] == AV_QUOTE and replay.fetched == []
+    assert out["_access"]["host"] == "www.alphavantage.co" and out["_access"]["key"]["name"] == "apikey"
+    assert model.calls == {"intent": 1, "mapping": 0, "judge": 0, "other": 0}, "nothing but the intent before the key"
+    assert ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None) == []
+    assert json.loads(secrets.get(f"ni:{item_id}:api_key")) == {"value": AV_KEY, "host": "www.alphavantage.co"}
+    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)
+    item = _held(store, item_id, out, AV_QUOTE)
+    assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"], "one sample, the production request"
+    assert model.calls["mapping"] >= 1 and model.calls["intent"] == 1, "the sealed intent is reused after the pause"
+    body = fixture("alphavantage-global-quote")["body"]["Global Quote"]
+    extract = item["spec"]["pipeline"][0]
+    assert extract["op"] == "extract" and extract["paths"]["price"] == '["Global Quote"]["05. price"]', extract
+    assert item["spec"]["pipeline"][1] == {"op": "transform", "apply": [{"fn": "number", "field": "price"}]}
+    assert ni.run_pipeline(item["spec"]["pipeline"], fixture("alphavantage-global-quote")["body"]) == \
+        {"price": float(body["05. price"])}, "the sealed pipeline reads the quote's price as a number"
+    assert body["05. price"].rstrip("0") in json.dumps(store.read_snapshot(item_id, "preview")), "shown on the card"
+    assert item["spec"]["source"]["secret_query"] == {"apikey": {"$secret": f"ni:{item_id}:api_key"}}
+    sealed = json.dumps(item["spec"]) + json.dumps(ni_flow._flow_read(store, item_id))
+    assert AV_KEY not in sealed, "the key is stored once, host-bound, and referenced everywhere else"
+    ni.validate_spec(item["spec"])  # the sealed card is a valid card: its quoted path is grammar, not a hack
+
+
+def test_the_sealed_card_refreshes_through_the_same_request(monkeypatch) -> None:
+    """The engine's refresh (``ni.run_item``) reads the card's pipeline over a fresh fetch with the same key
+    reference: the quoted path resolves there too, with the price converted."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    ni_flow.run_flow(store, item_id, gateway_call=_Model())
+    ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
+    out = ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=AV_QUOTE)
+    _held(store, item_id, out, AV_QUOTE)
+    monkeypatch.setattr(ni, "_clock", lambda: datetime.now().astimezone() + timedelta(minutes=31))
+    ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
+    assert len(replay.fetched) == 2 and all(u == f"{AV_QUOTE}&apikey={AV_KEY}" for u in replay.fetched)
+    latest = store.read_snapshot(item_id, "latest")
+    price = fixture("alphavantage-global-quote")["body"]["Global Quote"]["05. price"]
+    assert latest["ok"] and price.rstrip("0") in json.dumps(latest["payload"]), latest
+    runs = store.conn.execute("SELECT status FROM ni_runs WHERE item_id = ?;", [item_id]).fetchall()
+    assert runs and runs[-1][0] == "ok", runs
+
+
+# ---- a sentence instead of data --------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", ["alphavantage-demo-key-refused", "alphavantage-bad-key"])
+def test_a_sentence_body_moves_on_at_once_with_no_model_call_and_the_reason_on_the_record(monkeypatch, name) -> None:
+    """Alpha Vantage's spent-quota / demo-key / bad-key bodies are 200 OK sentences. The row moves on with the
+    sentence's gist as its reason and not one mapping or judge call; the pick goes on to Finnhub, which asks for
+    its own key."""
+    replay = _Replay({AV_QUOTE: name}, {"www.alphavantage.co": AV_KEY})
+    model = _Model()
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    ni_flow.run_flow(store, item_id, gateway_call=model)
+    ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)
+    assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"]
+    assert model.calls["mapping"] == 0 and model.calls["judge"] == 0, "no model reads a sentence"
+    assert out["state"] == "awaiting_access" and out["source_url"] == FINNHUB, "on to the next row, which asks"
+    notes = _notes(store, item_id)
+    assert "answered with a message instead of data" in notes, notes
+    gist = fixture(name)["body"][next(iter(fixture(name)["body"]))]
+    assert " ".join(gist.replace("*", "").split())[:60] in notes, "the provider's own words are the reason"
+    assert "www.alphavantage.co" in notes or "Alpha Vantage" in notes
+
+
+def test_provider_message_tells_a_sentence_from_data() -> None:
+    for name in ("alphavantage-global-quote", "alphavantage-time-series-daily", "finnhub-quote", "open-meteo-forecast"):
+        assert ni_flow.provider_message(fixture(name)["body"]) is None, f"{name} is data"
+    for name in ("alphavantage-demo-key-refused", "alphavantage-bad-key"):
+        assert ni_flow.provider_message(fixture(name)["body"]), f"{name} is a sentence"
+    assert ni_flow.provider_message({"status": "ok", "note": "Data under a free license for personal use",
+                                     "price": "123.4"}) is None, "a number sent as text makes it data"
+    assert ni_flow.provider_message({"status": {"error_code": 429, "error_message": "You've exceeded the Rate Limit."}})
+    assert ni_flow.provider_message({"code": 429, "status": "error",
+                                     "message": "You have run out of API credits for the current minute."})
+    assert ni_flow.provider_message({"cod": "429", "message": "Your account is temporarily blocked"}), "a code as text"
+    assert ni_flow.provider_message({"message": "Unauthorized"}) is None, "one word is not a sentence to quote"
+    assert ni_flow.provider_message({"rows": [], "message": "no rows matched your query today"}) is None, "a list is data"
+    # a key that names data makes the body data, whatever text sits beside it
+    assert ni_flow.provider_message({"page": {"title": "text only", "note": "no number anywhere"}}) is None
+    assert ni_flow.provider_message({"status": {"indicator": "none", "description": "All Systems Operational"}}) is None
+    assert ni_flow.provider_message({"Global Quote": {}}) is None, "an empty quote is no sentence"
+    assert ni_flow.provider_message({"error": {"error": {"message": "nested three deep is not a message body"}}}) is None
+
+
+# ---- the card's key is for one host ------------------------------------------------------------------------------
+
+def test_the_cards_key_for_another_host_does_not_count_for_this_row(monkeypatch) -> None:
+    """T's Mac: once the Alpha Vantage key sat on the card, the key check saw "a key exists" and skipped the pause
+    for the Finnhub row; the host-bound loader then refused the key and the row dropped in 20 ms with no fetch. The
+    check compares the stored key's host with the row's: the card asks for Finnhub's key, nothing is fetched, and
+    the key the user then gives builds the card from Finnhub's flat body (``c``, the current price)."""
+    replay = _Replay({AV_QUOTE: "alphavantage-demo-key-refused", FINNHUB: "finnhub-quote"},
+                     {"www.alphavantage.co": AV_KEY, "finnhub.io": FH_KEY})
+    model = _Model()
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    ni_flow.run_flow(store, item_id, gateway_call=model)
+    ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)   # Alpha Vantage answers a sentence
+    assert out["state"] == "awaiting_access" and out["source_url"] == FINNHUB and out["_access"]["host"] == "finnhub.io"
+    assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"], "nothing fetched from Finnhub before its key"
+    assert ni_flow.missing_access(store, item_id, secrets) == ["key"], "the Alpha Vantage key is not Finnhub's"
+    assert ni_flow.board_flow_field(store, item_id, read_only=True)["access"]["key"]["reuse"] is False
+    assert ni_flow.give_access(store, item_id, secrets, key=FH_KEY, email=None) == []
+    assert json.loads(secrets.get(f"ni:{item_id}:api_key"))["host"] == "finnhub.io"
+    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=FINNHUB)
+    item = _held(store, item_id, out, FINNHUB)
+    assert replay.fetched[-1] == f"{FINNHUB}&token={FH_KEY}" and len(replay.fetched) == 2
+    assert item["spec"]["pipeline"][0]["paths"]["price"] == "c"
+    assert ni.run_pipeline(item["spec"]["pipeline"], fixture("finnhub-quote")["body"]) == \
+        {"price": fixture("finnhub-quote")["body"]["c"]}
+    assert str(fixture("finnhub-quote")["body"]["c"]) in json.dumps(store.read_snapshot(item_id, "preview"))
+    assert FH_KEY not in json.dumps(item["spec"]) and AV_KEY not in json.dumps(item["spec"])
+
+
+def test_missing_access_counts_only_a_key_bound_to_the_rows_host() -> None:
+    store = _store()
+    secrets = SecretStore(store.conn, gen_master_key())
+    item_id = ni_flow.create_shell_item(store, ASK)
+    ni_flow._flow_write(store, item_id, ni_flow._make_record(ASK, "source"))
+    ni_flow.seal_access(store, item_id, FINNHUB, ROWS_NVDA["rows"][1])
+    ni.put_credential(secrets, item_id, ni_flow.KEY_PARAM, AV_KEY, "www.alphavantage.co")
+    assert ni_flow.missing_access(store, item_id, secrets, copy=False) == ["key"]
+    ni.put_credential(secrets, item_id, ni_flow.KEY_PARAM, FH_KEY, "Finnhub.IO")   # stored normalized
+    assert ni_flow.missing_access(store, item_id, secrets, copy=False) == []
+    assert ni_flow._card_key_host(secrets, item_id) == "finnhub.io" and ni_flow._card_key_host(secrets, "none") is None
+
+
+# ---- a series filed under dates ----------------------------------------------------------------------------------
+
+def test_the_daily_series_is_refused_for_its_dated_paths_with_no_model_call(monkeypatch) -> None:
+    """``["Time Series (Daily)"]["2026-10-30"]["4. close"]`` is today's close today and the same day's close for
+    ever: a card bound to it goes stale silently. With only such paths (and the series' meta names beside them)
+    the row moves on with that reason before any model call, and the ask ends declined, offering Keep looking."""
+    rows = [ROWS_NVDA["rows"][2]]
+    replay = _Replay({AV_DAILY: "alphavantage-time-series-daily"}, {"www.alphavantage.co": AV_KEY})
+    model = _Model()
+    store, item_id, secrets = _card(monkeypatch, rows, replay)
+    ni_flow.run_flow(store, item_id, gateway_call=model)
+    ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_DAILY)
+    assert replay.fetched == [f"{AV_DAILY}&apikey={AV_KEY}"] and model.calls["mapping"] == 0
+    assert out["state"] == "declined" and out["_decline_card"]["reason"] == "no_ready_source", out
+    assert out["_decline_card"]["look"] is True
+    assert "files its values under the day's date" in _notes(store, item_id), _notes(store, item_id)
+    cands = ni_flow.derive_paths(fixture("alphavantage-time-series-daily")["body"])
+    assert any(ni_flow._dated_path(c["path"]) for c in cands), "the walker offers the dated paths; the flow refuses them"
+
+
+# ---- the budget --------------------------------------------------------------------------------------------------
+
+def test_a_build_stops_honestly_when_its_model_budget_is_spent(monkeypatch) -> None:
+    """A model that never copies an offered path (the failure class the mapping retries on) would otherwise spend
+    its calls on every row of the pick. The row that hits the cap moves on naming the budget, the build then fails
+    with its own class and line, and a retry runs with a fresh budget."""
+    monkeypatch.setattr(ni_flow, "_BUILD_MODEL_CALLS", 3)
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    model = _Model(picks={"price": "not.an.offered.path"})
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    ni_flow.run_flow(store, item_id, gateway_call=model)
+    ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)
+    assert out["state"] == "failed" and ni_master.error_class_of(out["error"]) == "model_budget", out["error"]
+    assert ni_master.reason_for("failed", out["error"]).startswith("The build spent its model-call budget")
+    assert model.calls["mapping"] == 3, "exactly the budget: the fourth call was never made"
+    assert ni_flow._BUDGET_WHY in out["error"] and "3 calls" in out["error"]
+    assert len(replay.fetched) == 1, "one row's sample; no second row is fetched once the budget is gone"
+
+
+# ---- a keyless declared row: Open-Meteo's real body through the declared-answers path ------------------------------
+
+def _weather_model(model: str, prompt: str) -> str:
+    assert model == "claudecode/opus"
+    if "Classify a dashboard-card request" in prompt:
+        return json.dumps({"kind": "external_data", "subject": "NYC temperature", "cadence_minutes": 30,
+                           "wants": ["temperature"], "threshold": None, "display_hint": "value"})
+    return json.dumps({"serves": True, "gaps": [], "wrong": []})
+
+
+def test_open_meteo_builds_from_its_captured_body_through_the_declared_answers_path(lib, monkeypatch) -> None:  # noqa: F811
+    """The Global Library's weather source (keyless, answers declared): the captured forecast body, re-dated to
+    today only in its daily ``time`` axis (the Library's window checks read it; nothing else is touched), through
+    the same production fetch path. The card is built from the declared answers with no mapping call."""
+    body = fixture("open-meteo-forecast")["body"]
+    today = datetime.now().date()
+    body["daily"]["time"] = [(today + timedelta(days=i)).isoformat() for i in range(len(body["daily"]["time"]))]
+    body["current"]["time"] = datetime.now().strftime("%Y-%m-%dT%H:00")
+
+    class _Wrap:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def candidates(self, request, limit=3, hint=None):
+            return copy.deepcopy(self.rows[:limit]), []
+
+        def answers(self, source_id):
+            return lib.answers(source_id)
+
+        def get(self, source_id):
+            return lib.get(source_id)
+
+    class _Weather(_Replay):
+        def __init__(self):
+            super().__init__({}, {})
+            self.serves = {_base(WEATHER_URL): {"host": "api.open-meteo.com", "key": None, "status": 200, "body": body}}
+
+    replay = _Weather()
+    monkeypatch.setattr(ni_flow, "_LIBRARY_PROVIDER", lambda: _Wrap([_row("open-meteo-forecast", WEATHER_URL)]))
+    monkeypatch.setattr(netguard, "safe_fetch_json", replay)
+    store = _store()
+    ask = "NYC temperature every 30 minutes"
+    item_id = ni_flow.create_shell_item(store, ask)
+    ni_flow._flow_write(store, item_id, {**ni_flow._make_record(ask, "intent"), "_model_consent": "claudecode/opus",
+                                         "_model_consent_web": True})
+    out = ni_flow.run_flow(store, item_id, gateway_call=_weather_model)
+    _held(store, item_id, out, WEATHER_URL, path="auto")
+    assert replay.fetched == [WEATHER_URL]
+    preview = json.dumps(store.read_snapshot(item_id, "preview")["payload"])
+    assert str(body["current"]["temperature_2m"]) in preview, preview
+    assert "declared answers" in _notes(store, item_id)

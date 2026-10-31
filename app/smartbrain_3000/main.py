@@ -29,6 +29,7 @@ from . import (
     devices,
     gateway,
     library_index,
+    logredact,
     mcp_server,
     ni_flow,
     runtime,
@@ -63,6 +64,8 @@ from .voice_routes import router as voice_router
 from .web_routes import router as web_router
 
 log = logging.getLogger(__name__)
+# before any request can be logged: a keyed source's URL never reaches app.log (found on T's Mac, 2026-10-30)
+logredact.install()
 
 _TICK_SECONDS = 30  # how often the background runner checks for due schedules
 # Loopback-only by default (D-15). Validating the Host header blocks DNS-rebinding:

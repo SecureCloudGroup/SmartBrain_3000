@@ -1,8 +1,8 @@
 """Deterministic-authoring backend (§26/§27/§28) tests.
 
 Covers:
-  * derive_ni_paths (nested walk, unaddressable-keys reporting, caps, JSON-string
-    input via the programmatic path);
+  * derive_ni_paths (nested walk, quoted keys for names outside the plain grammar,
+    unaddressable-keys reporting, caps, JSON-string input via the programmatic path);
   * journal append + prune + delete-cascade + writer sites;
   * read_ni_item ``state_explanation`` / ``user_next_action`` strings per state;
   * board rows carry ``needs_credentials`` as [{name, label}];
@@ -122,15 +122,30 @@ def test_derive_ni_paths_nested_sample_yields_leaves_with_types_and_examples() -
     assert first["type"] == "number"
 
 
-def test_derive_ni_paths_reports_unaddressable_keys() -> None:
-    """§27 grammar: keys with spaces / dots / punctuation are NOT §4.1-addressable —
-    the tool reports them so the model knows to pick a different source."""
+def test_derive_ni_paths_writes_keys_outside_the_plain_grammar_as_quoted_keys() -> None:
+    """Alpha Vantage spells its fields "Global Quote" / "05. price": until 2026-10-31 the walker reported
+    such keys as unaddressable and offered nothing, so every Alpha Vantage body built no card (T's Mac,
+    2026-10-30). The §4.1 grammar has spelled them as quoted keys since 0.26; the walker writes that
+    spelling, and the engine resolves the path it writes."""
     ctx = tools.ToolContext()
-    sample = {"Global Quote": {"05. price": "210.5"}, "clean": 1}
+    sample = {"Global Quote": {"05. price": "210.5", "07. latest trading day": "2026-10-30"}, "clean": 1}
     out = _tool_call("derive_ni_paths", ctx, {"sample": sample})
-    assert any("Global Quote" in u for u in out["unaddressable"])
-    # The addressable sibling still appears.
-    assert any(entry["path"] == "clean" for entry in out["paths"])
+    paths = {entry["path"]: entry for entry in out["paths"]}
+    assert '["Global Quote"]["05. price"]' in paths and paths['["Global Quote"]["05. price"]']["type"] == "string"
+    assert '["Global Quote"]["07. latest trading day"]' in paths and "clean" in paths
+    assert out["unaddressable"] == [], "a key the grammar can quote is addressable"
+    got = nimod.run_pipeline([{"op": "extract", "paths": {"price": '["Global Quote"]["05. price"]'}}], sample)
+    assert got == {"price": "210.5"}, "the path the walker writes is the path the engine reads"
+
+
+def test_derive_ni_paths_reports_keys_no_spelling_can_carry() -> None:
+    """A key holding a quote mark or a control character has no §4.1 spelling (``quote_path_key`` refuses it);
+    only such keys, and the denied prototype names, are reported as unaddressable."""
+    ctx = tools.ToolContext()
+    sample = {'say "hi"': 1, "tab\there": 2, "__proto__": 3, "clean": 4}
+    out = _tool_call("derive_ni_paths", ctx, {"sample": sample})
+    assert sorted(out["unaddressable"]) == sorted(['say "hi"', "tab\there", "__proto__"])
+    assert [entry["path"] for entry in out["paths"]] == ["clean"]
 
 
 def test_derive_ni_paths_accepts_json_string_via_programmatic_call() -> None:

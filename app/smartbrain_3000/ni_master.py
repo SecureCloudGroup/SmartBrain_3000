@@ -322,6 +322,8 @@ _REASONS: dict[str, str] = {
     "intent": "The request couldn't be understood well enough to build from.",
     "model": ("No model is routed for building cards. Settings > Models: the Neural Interface steps, "
               "or the ni / chat / agent routes."),
+    "model_budget": ("The build spent its model-call budget before a source fit — retry runs it again with a "
+                     "fresh one."),
     "research": "The research couldn't finish (the model was unavailable) — retry runs it again.",
     # Claims audit 2026-09-21: classes the flow actually writes that the map
     # missed — the card showed the blind sentence for each of these.
