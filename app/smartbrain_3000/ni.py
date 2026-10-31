@@ -80,6 +80,7 @@ _MAX_DUE_CANDIDATES = 50
 _MAX_RENDER_CANDIDATES = 3       # B3a: the page-browser cards' own due window (one handoff a pass)
 _MAX_REVISIONS = 10              # per-item revision history kept in ni_revisions
 _MAX_RUNS = 50                   # per-item ni_runs telemetry retained (pruned in code)
+_MAX_DURATION_MS = 2**31 - 1     # ni_runs.duration_ms is a 32-bit INTEGER
 _MAX_TITLE = 300
 _MAX_GOAL = 5000
 _MAX_URL = 2000
@@ -5163,13 +5164,15 @@ class NIStore:
 
     def record_run(self, item_id: str, status: str, *, duration_ms: int,
                    error: str | None, contract_ok: bool | None) -> None:
-        """Append one ni_runs row; prune to 50/item. ``error`` must be a host-free class."""
+        """Append one ni_runs row; prune to 50/item. ``error`` must be a host-free class. A duration past the
+        column's range is recorded as its largest value: the row, and the failure bookkeeping around it, never
+        fail on the clock (2026-10-31: a start of 0.0 against a Mac up for 31 days overflowed the column)."""
         assert item_id and status, "item id + status required"
         assert isinstance(duration_ms, int) and duration_ms >= 0, "duration_ms >= 0"
         self._conn.execute(
             "INSERT INTO ni_runs (item_id, status, duration_ms, error, contract_ok) "
             "VALUES (?, ?, ?, ?, ?);",
-            [item_id, status[:_MAX_STATUS], duration_ms, error, contract_ok],
+            [item_id, status[:_MAX_STATUS], min(duration_ms, _MAX_DURATION_MS), error, contract_ok],
         )
         self._prune_runs(item_id)
 

@@ -464,7 +464,9 @@ def test_the_startup_sweep_ends_a_stray_engine_by_its_executable_path(tmp_path) 
     engine_dir = tmp_path / "browsers" / "obscura" / "9.9.9"
     engine_dir.mkdir(parents=True)
     stray_exe = engine_dir / "obscura"
-    shutil.copy2(os.path.realpath(shutil.which("sleep")), stray_exe)
+    # copy, not copy2: macOS marks /bin/sleep ``restricted`` and refuses that flag on the copy (EPERM), so on T's
+    # Mac this test stopped in its setup and the sweep went untested on the platform it runs on (2026-10-31)
+    shutil.copy(os.path.realpath(shutil.which("sleep")), stray_exe)
     stray = subprocess.Popen([str(stray_exe), "30"])
     bystander = subprocess.Popen([shutil.which("sleep"), "30"])
     try:

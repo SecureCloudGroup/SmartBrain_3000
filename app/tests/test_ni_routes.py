@@ -258,6 +258,21 @@ def test_board_falls_back_to_last_good_when_degraded(client: TestClient) -> None
     assert row["payload"]["children"][0]["value"] == "good"
 
 
+def test_a_failure_is_recorded_whatever_the_monotonic_clock_reads(client: TestClient, monkeypatch) -> None:
+    """T's Mac, 2026-10-31: up 31.6 days, so a start of 0.0 measured 2.7 billion ms, past the 32-bit
+    ``ni_runs.duration_ms``; the insert raised and the failure's bookkeeping with it (CI's fresh runners never
+    reach 24.9 days). The run row records the column's largest value and the failure is counted."""
+    _unlock(client)
+    iid = _create_via_tool(client)
+    store = client.app.state.ni
+    store.set_state(iid, "live")
+    monkeypatch.setattr(ni.time, "monotonic", lambda: 31.6 * 86400)
+    ni._handle_failure(store, store.get_item(iid), ni.NIError("fetch_failed", "oops"), started=0.0)
+    runs = store.list_runs(iid)
+    assert runs and runs[0]["status"] == "error" and runs[0]["duration_ms"] == 2**31 - 1
+    assert store.get_item(iid)["consecutive_failures"] == 1
+
+
 # --- item detail: secret names, no values --------------------------------
 
 def test_get_item_returns_spec_with_secret_names_only(client: TestClient) -> None:
