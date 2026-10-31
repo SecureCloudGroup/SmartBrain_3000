@@ -3,9 +3,10 @@
 
 The flow's tests drove invented Library rows for a year while the real pack ranked three keyed, undeclared quote
 rows for "NVDA stock price every 30 minutes" (T's Mac, 2026-10-30), a shape no test had. This writes the rows the
-installed pack really offers (``ni_flow._library_candidates``: the same rows the auto-pick seals, keyless first),
-so a test runs the ask over the Library the user has. Re-run it when the pack version changes; the fixture names
-the pack it came from.
+installed pack really offers (``ni_flow._library_candidates``: the rows the auto-pick seals, in the Library's order,
+each with the free request limits its record documents; the auto-pick then tries them in the order of fit,
+``ni_flow._by_fit``), so a test runs the ask over the Library the user has. Re-run it when the pack version changes;
+the fixture names the pack it came from.
 
 Usage (any machine with the pack installed, or a scratch install of it):
     PYTHONPATH=app python3 tools/ni-library-rows.py --pack-dir <dir holding library/> \\

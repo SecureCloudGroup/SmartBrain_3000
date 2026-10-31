@@ -210,6 +210,11 @@ class RowRender(TypedDict):
     sites: list[str]
     unavailable: bool
 
+class RowWaiting(TypedDict):
+    host: str
+    until: str
+    said: str
+
 Scalar = bool | float | str
 
 class RecipeConstraint(TypedDict):
@@ -303,6 +308,8 @@ class BoardRow(TypedDict):
     draft: NotRequired[RowDraft | None]
     preview: NotRequired[RowPreview | None]
     brief: NotRequired[BriefState]
+    limit: NotRequired[str]
+    waiting: NotRequired[RowWaiting]
 
 class FlowPoll(TypedDict):
     id: str

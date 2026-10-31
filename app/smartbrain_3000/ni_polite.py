@@ -235,6 +235,20 @@ class Politeness:
             state = self._hosts.get(host)
             return state.said if state is not None else ""
 
+    def pause_of(self, host: str) -> tuple[float, str] | None:
+        """``(seconds left, the host's words)`` while ``host`` itself asked SmartBrain to wait (a 429 or 503, or a
+        body that is its limit message), else None. SmartBrain's own spacing is never a pause. A read only: the
+        board asks it for each card's source, so a card can say when it tries again (2026-10-31)."""
+        assert isinstance(host, str), "a host"
+        now = _clock()
+        with self._lock:
+            state = self._hosts.get(host.lower())
+            if state is None or state.paused_until <= now:
+                return None
+            left = state.paused_until - now
+            assert left > 0, "a pause still holding"
+            return left, state.said
+
     def _wait_out(self, seconds: float) -> bool:
         """Inside ``waiting()`` (a build someone is waiting on), sleep out a pause the host asked for when it is at
         most ``BURST_WAIT_S`` and within this thread's allowance, charged to it, and say so; False otherwise (a

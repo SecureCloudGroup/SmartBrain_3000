@@ -735,7 +735,16 @@ finishes its current fetch and seals nothing.
 2. A brief-shaped ask builds a headline card when the sample holds a list of titled, linked or dated items (§37).
 3. The Library is asked for up to 5 rows (`_library_candidates`, with the frame as a hint; a row whose lookup
    leaves its host is dropped). Rows whose source declares its answers are buildable; others ride along as
-   link rows. Keyless rows come first, then rows that need the user's key or contact email.
+   link rows. The buildable rows are tried in the order of fit (`_by_fit`, pack v1.6.0): first the rows whose
+   free request limit covers the card's cadence, then the rest, and within each the keyless rows before the ones
+   that need the user's key or contact email, in the Library's order. A row's `limits` are its record's
+   `access.limits`, 1 to 4 windows of `{requests, seconds}` (per key for a keyed source, per address for a
+   keyless one), cleaned by `ni_limits.clean` (all or nothing: one malformed window makes the field unknown). A card
+   refreshing every `m` minutes makes `ceil(W / 60m)` requests in a window of `W` seconds; the cadence that counts
+   is the intent's, held to the floor its refreshes run at (`ni_polite.cadence_floor_minutes`), and an ask with no
+   cadence is the default card's (15 minutes). An unknown limit counts as covering. For "NVDA stock price every 30
+   minutes" (48 a day) Finnhub's free key (60 a minute) goes before Alpha Vantage's (25 a day); from every 58
+   minutes Alpha Vantage covers it too and the Library's order holds.
 4. `_auto_continue` tries the buildable rows in order. Each try seals the pick, fetches the one address through
    the same netguard path as a tap (audited as `ni_auto_pick`, with the host), and builds from the declared
    answers; every post-fetch check is the gate, and a row that does not fit is dropped with its reason. A row
@@ -971,7 +980,8 @@ shape (the rest still serve).
 
 **Seal.** A Library pick (`seal_library_pick`, the auto-pick and the live harness alike) seals `_library_source`,
 `_library_url`, `_library_params`, `_library_format`, `_library_provider`, `_library_scope`, `_library_lookup`,
-`_library_label` and `_library_readings`.
+`_library_label`, `_library_readings` and, for a row whose limits are known, `_library_limits` (`ni_limits.block`:
+`{provider, keyed, windows}`; a re-pick of a row without them drops it).
 
 **Sampling.** A sealed same-host lookup runs first (`library_resolve.resolve_lookup`); a step off the host, or a
 lookup that fails, moves on. A row that promised JSON and answers with a page moves on: it never becomes a page
@@ -1013,11 +1023,25 @@ declared build never renders in the page browser: a row that answers with a page
 Every confidently wrong card came from the two open paths: a model-mapped dataset and a page. A card built from
 a path other than a Library source's declared answers is held until the user keeps it.
 
-- **Seal.** `_finalize` seals `_built_from: {path, host, title}` (closed, `ni._validate_built_from`). `path` is
+- **Seal.** `_finalize` seals `_built_from: {path, host, title, limits?}` (closed, `ni._validate_built_from`). `path` is
   `declared` (a Library source's declared answers), `auto` (the same build picked by the auto-pick), `page`
   (an `http_page` card), `mapping` (a pasted or harvested JSON link, a Fix, a remap), `research` (a
   researcher's recipe) or `kept` (a source the user kept before, §30) or `seed` (a bundled seed source, §30). `host` is the fetched host; `title` is the page's own title, else the picked row's.
-  Export strips it and packs refuse it.
+  `limits` (pack v1.6.0) is the sealed `_library_limits` of the Library row the card was built from, only when the
+  fetched address is that row's `_library_url` (a pasted link or a researched source never inherits one), and only
+  in the exact shape `ni_limits.block` writes. Export strips it and packs refuse it.
+- **Limit line.** The board row's `limit` (at most 400 characters, `ni_routes._limit_line`) is what the card says
+  when its source's free limit does not cover how often it refreshes: `ni_limits.line` over the sealed `limits` and
+  the card's interval held to its host's floor ("Alpha Vantage's free key allows 25 requests a day. Refreshing every
+  30 minutes needs 48, so this card will stop updating partway through each day."). Absent when the limits cover
+  it, or none is known. The client shows it under Keep on a held card, and beside the host's wait.
+- **Host's wait.** The board row's `waiting: {host, until, said}` (`ni_routes._waiting_of`) is present while the
+  host of the card's source itself asked SmartBrain to wait (a 429 or 503, or its limit message:
+  `ni_polite.Politeness.pause_of`, never SmartBrain's own spacing): `until` is when the card next tries, in UTC
+  ISO seconds, and `said` the host's own words (at most 300 characters, the key scrubbed at the fetch). A shell, or
+  a source whose host is still templated, has none. The card stays due meanwhile (`host_busy` is a capacity
+  status). The client says it on the card ("www.alphavantage.co asked SmartBrain to wait. The card tries again at
+  3:15 PM."), after the limit line when there is one, else with the host's words.
 - **Held.** `ni.awaits_yes(item)`: state `commissioning`, `_built_from.path` in the open set (`page`, `mapping`,
   `auto`, `research`, `kept`, `seed`) and no `_c2_ok`. A held card lands `commissioning` like any other and differs only in
   that the due query skips it (no cadence fetch before Keep), and the board shows the reading the flow found

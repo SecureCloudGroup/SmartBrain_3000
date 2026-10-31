@@ -212,6 +212,13 @@ export interface RowRender {
   unavailable: boolean;
 }
 
+/** The card's source asked SmartBrain to wait: its host, when the card tries again (UTC, ISO 8601) and the host's own words (empty when it gave none). */
+export interface RowWaiting {
+  host: string;
+  until: string;
+  said: string;
+}
+
 export type Scalar = boolean | number | string;
 
 export interface RecipeConstraint {
@@ -312,6 +319,8 @@ export interface BoardRow {
   draft?: RowDraft | null;
   preview?: RowPreview | null;
   brief?: BriefState;
+  limit?: string;
+  waiting?: RowWaiting;
 }
 
 /** GET /api/ni/items/{id}/flow: one item's flow fields. */

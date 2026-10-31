@@ -1306,6 +1306,8 @@ class LibraryIndex:
                                 # year codes and URL-encoded separators).
                                 "url_template": u.get("url_template") or u["url"],
                                 "clock_params": u.get("clock_params") or {},
+                                # pack v1.6.0: the free plan's documented request limits (ni_limits cleans them)
+                                "limits": (record.get("access") or {}).get("limits"),
                                 "scope": scope, "frame_kind": ctx["frame"]})
                 # keyed sources are gathered too, but enough keyless ones end the search (for a named place,
                 # enough keyless ones FOR that place: a place-scoped source may rank below global ones)

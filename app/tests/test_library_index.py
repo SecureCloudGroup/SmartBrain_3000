@@ -60,7 +60,8 @@ _SOURCES = [  # id, name, tier, status, prior, category, terms, kinds, access ex
     ("keyed-quote", "Keyed quote", "curated", "ok", 1.9, ("markets", "crypto"),
      {"bitcoin": 2.0, "quote": 3.0}, ["current_value"],
      {"url_template": "https://keyed.example.org/q?apikey={key}", "params": [
-         _param("key", "key", {"from": "vault_key"})]}, {}),
+         _param("key", "key", {"from": "vault_key"})],
+      "limits": [{"requests": 25, "seconds": 86400}, {"requests": 1, "seconds": 1}]}, {}),  # pack v1.6.0
     ("helper-stations", "Tide station list", "curated", "ok", 1.0, ("water", "tides"),
      {"tide": 2.0, "tides": 2.0, "stations": 3.0}, ["lookup"],
      {"url_template": "https://api.tidesandcurrents.noaa.gov/mdapi/stations.json"}, {"role": "helper"}),
@@ -491,6 +492,9 @@ def test_candidates_for_the_card_flow(lib) -> None:
     # a failed source stays off the card; a keyed one shows AFTER the keyless one, saying it needs a key
     assert [c["source_id"] for c in coins] == ["coingecko-price", "keyed-quote"]
     assert coins[0]["needs_key"] is None and coins[1]["needs_key"]["in"] == "query"
+    # pack v1.6.0: a row carries the free limits its record documents, as the pack has them; none is None
+    assert coins[0]["limits"] is None
+    assert coins[1]["limits"] == [{"requests": 25, "seconds": 86400}, {"requests": 1, "seconds": 1}]
     nothing, _ = lib.candidates("tides in Denver CO")
     assert nothing == []  # no station within range: the flow hands the ask to research, honestly
 
@@ -518,7 +522,12 @@ def test_the_auto_pick_seals_the_nearest_station_and_a_vote_is_sealed_at_rest(tm
     store = ni.NIStore(conn, gen_master_key())
     rec = _auto_pick(store, monkeypatch, "tides for Melbourne FL")
     assert rec["_auto_picked"] and rec["_ranked_library"][0]["source_id"] == "coops-tide-hilo"
+    assert rec["_ranked_library"][0]["limits"] == [], "no limit documented: unknown, sealed as []"
     assert "station=872" in rec["_ranked_library"][0]["url"]
+    coins = _auto_pick(store, monkeypatch, "bitcoin price")["_ranked_library"]
+    assert [r["source_id"] for r in coins] == ["coingecko-price", "keyed-quote"]
+    assert coins[1]["limits"] == [{"requests": 1, "seconds": 1}, {"requests": 25, "seconds": 86400}], \
+        "the pack's limits, cleaned: shortest window first"
     local = library_index.LocalSources(store)
     assert local.record_yes("coops-tide-hilo") == 1 and local.record_yes("coops-tide-hilo") == 2
     raw = conn.execute("SELECT ciphertext FROM ni_snapshots WHERE item_id = ? AND slot = 'votes'",

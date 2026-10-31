@@ -399,9 +399,17 @@ How a card comes to life:
    words (*"Tide predictions — NOAA · Official — Melbourne Causeway, FL"*), and
    tries the best one itself, moving on to the next when a source can't answer.
    While it works the card shows its progress, with a **Cancel** button. Sources
-   that work without a key come first; one that needs a free key from its
-   provider (or, for the SEC and BLS, your contact email) is tried last and the
-   card asks you for it before anything is fetched. While it asks, the card lists
+   whose free request limit covers how often the card refreshes come first: the
+   Library records the limits providers publish, and a stock price every 30
+   minutes is 48 requests a day, which Finnhub's free key covers and Alpha
+   Vantage's 25 a day don't. Within that, sources that work without a key come before one that
+   needs a free key from its provider (or, for the SEC and BLS, your contact
+   email), and the card asks you for it before anything is fetched. A card that
+   can only be built on a source whose free limit it will run past says so under
+   Keep (*"Alpha Vantage's free key allows 25 requests a day. Refreshing every 30
+   minutes needs 48, so this card will stop updating partway through each
+   day."*), and while a source asks SmartBrain to wait, the card says so and when
+   it tries again. While it asks for a key, the card lists
    what it already tried and why each was dropped, and **Skip this source** goes
    on without it (to the next source, then to research; no other source that
    needs the same site's key asks again). A Library source that

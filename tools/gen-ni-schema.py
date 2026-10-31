@@ -142,7 +142,8 @@ def _row_defs() -> dict[str, dict]:
         "interpretation": STR, "query": ref("RowQuery"), "fit": ref("Fit"), "actions": arr(ref("ActionKind")),
         "rendered": BOOL, "render": nullable(ref("RowRender")), "draft": nullable(ref("RowDraft")),
         "preview": nullable(ref("RowPreview")), "brief": ref("BriefState"),
-    }, opt=("interpretation", "query", "fit", "rendered", "render", "draft", "preview", "brief"),
+        "limit": text(400), "waiting": ref("RowWaiting"),
+    }, opt=("interpretation", "query", "fit", "rendered", "render", "draft", "preview", "brief", "limit", "waiting"),
         desc="One row of GET /api/ni/board. `actions` lists what the card offers; `payload` is the bound scene.")
     return {
         "NeedsItem": obj({"name": STR, "label": STR}), "Display": obj({"size": ref("DisplaySize")}),
@@ -153,6 +154,9 @@ def _row_defs() -> dict[str, dict]:
         "RowRender": obj({"sites": arr(STR), "unavailable": BOOL}),
         "RowDraft": obj({"reason": enum(ni_routes.DRAFT_REASONS), "sites": arr(STR)}),
         "RowPreview": obj({"feed_candidates": arr(ref("FeedCandidate"))}),
+        "RowWaiting": obj({"host": text(253), "until": text(40), "said": text(300)},
+                          desc="The card's source asked SmartBrain to wait: its host, when the card tries again (UTC, "
+                               "ISO 8601) and the host's own words (empty when it gave none)."),
         "BriefState": obj({"summary": BOOL, "local": BOOL, "state": ref("BriefSummaryState"), "label": STR,
                            "text": text(ni_brief.SUMMARY_MAX_CHARS)},
                           desc="A headline card's summary block: on or off, whether a local model exists to write it, "

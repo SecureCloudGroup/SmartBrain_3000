@@ -34,6 +34,7 @@ from . import (
     ni_flow,
     ni_intake,
     ni_library,
+    ni_limits,
     ni_master,
     ni_mcp,
     ni_measure,
@@ -277,6 +278,14 @@ def _board_row(store: ni.NIStore, item: dict, *,
         row["fit"] = fit
     if ni_brief.is_brief(item["spec"]):  # S8: the headline card's summary block (closed keys, absent elsewhere)
         row["brief"] = _brief_field(store, item)
+    # PR C (2026-10-31): the card's source's free limit doesn't cover how often it refreshes (said at Keep, and
+    # while its host holds it off), and the host asked SmartBrain to wait (when the card tries again)
+    limit = _limit_line(item)
+    if limit is not None:
+        row["limit"] = limit
+    waiting = _waiting_of(item)
+    if waiting is not None:
+        row["waiting"] = waiting
     if ni.spec_renders(item["spec"]):  # Round 20 (B3a): ride only on a page-browser card
         row.update(_render_fields(item))
     flow = row["flow"]  # a live flow declares its own actions (it holds the record)
@@ -285,6 +294,47 @@ def _board_row(store: ni.NIStore, item: dict, *,
             "", {}, shell=row["shell"], awaiting_yes=row["awaiting_yes"] is not None,
             item_state=item["state"], has_payload=snap is not None)
     return row
+
+
+def _limit_line(item: dict) -> str | None:
+    """What a card says when its source's free request limit doesn't cover how often it refreshes (T, 2026-10-31:
+    "says so when none does"), from the limits its build sealed (``_built_from.limits``) and the cadence it really
+    runs at (its interval held to its host's floor). None when they cover it, or when no limit is known."""
+    assert isinstance(item, dict), "item required"
+    spec = item["spec"]
+    built = spec.get("_built_from")
+    limits = built.get("limits") if isinstance(built, dict) else None
+    if limits is None:
+        return None
+    cadence = ni_limits.effective_minutes(max(1, int(item["interval_minutes"])), ni_polite.cadence_floor_minutes(spec))
+    return ni_limits.line(limits, cadence)
+
+
+_WAITING_SAID_CHARS = 300
+
+
+def _waiting_of(item: dict, now: datetime | None = None) -> dict | None:
+    """``{host, until, said}`` while the host of the card's source asked SmartBrain to wait (a 429 or 503, or its
+    limit message, ``ni_polite.pause_of``): when the card next tries, in UTC, and the host's own words ("" when it
+    gave none). Its refreshes stay due meanwhile; until 2026-10-31 nothing on the card said why it stopped updating.
+    None for every other card."""
+    assert isinstance(item, dict), "item required"
+    source = item["spec"].get("source")
+    if item["spec"].get("_shell") is True or not isinstance(source, dict) or not isinstance(source.get("url"), str):
+        return None
+    netloc = urlparse(source["url"]).netloc
+    host = (urlparse(source["url"]).hostname or "").lower()
+    if not host or "{" in netloc:
+        return None
+    paused = ni_polite.SHARED.pause_of(host)
+    if paused is None:
+        return None
+    left, said = paused
+    until = (now or datetime.now(UTC)) + timedelta(seconds=left)
+    out = {"host": host[:253], "until": until.astimezone(UTC).isoformat(timespec="seconds"),
+           "said": str(said or "")[:_WAITING_SAID_CHARS]}
+    assert set(out) == {"host", "until", "said"}, "closed keys"
+    return out
 
 
 def _brief_field(store: ni.NIStore, item: dict) -> dict:
