@@ -14,31 +14,41 @@ to know when a release changes behavior.
 ## [0.27.4] - 2026-11-01
 
 **Upgrading from 0.27.3.** No migration, and no change to your cards, sources or settings. The pinned
-Library pack moves to v1.6.0, which records the free request limits providers publish; the first
-Neural Interface ask after the update downloads it. This release changes the four things that still
-kept the Neural Interface from building a stock-price card on 0.27.3: field names with spaces and
-digits (Alpha Vantage), a provider's sentence read as data, a key checked against the wrong site, and
-research that ran only after a Keep looking tap. What leaves this computer is unchanged in kind.
-Research now runs at once when nothing ready answers, under the consent the card already holds and
-inside the same ceilings. A paired phone's Retry, Fix, Refine, Skip this source, Run and Keep on a card
-that uses a cloud model now draw the daily phone allowance, as Allow and Keep looking already did. The
-allowance bounds only those card runs, so the docs no longer say that what a phone can charge to your
-key is bounded, and they list what it does not count (below). There is no new held-out safety run for
-this release, so the latest measured numbers are still 0.27.0's, from before these changes to how a
-card is built.
+Library pack moves to v1.6.0, which records the free request limits providers publish; it downloads
+when the Neural Interface first needs it. This release changes the four things that still kept the
+Neural Interface from building a stock-price card on 0.27.3: field names with spaces and digits (Alpha
+Vantage), a provider's sentence read as data, a key checked against the wrong site, and research that
+ran only after a Keep looking tap. What leaves this computer is unchanged in kind. Research now runs at
+once when nothing ready answers, under the consent the card already holds and inside the same
+ceilings. A paired phone's Retry, Fix, Refine, Skip this source, Run and Keep on a card that uses a
+cloud model now draw the daily phone allowance, as Allow and Keep looking already did. The allowance
+bounds only those card runs, so the docs no longer say that what a phone can charge to your key is
+bounded, and they list what it does not count (below).
 
-**Delete your old log.** Earlier versions wrote to `app.log` the full address of every keyed source the
-app fetched, which carries your key, and of every sealed-vault import, which carries the vault's key.
-New lines no longer do (below), but the old ones stay in the file. Choose **Open logs** in the
-menu, quit SmartBrain, delete `app.log` and any `app.log.old` in that folder (the doctor's "Set app.log
-aside and start a new one" leaves one), and consider re-issuing the keys your cards used. A Docker
-install writes no log file: its log is the container's, which the update replaces.
+There is no new held-out safety run for this release. The last one was for 0.27.0, with a local model
+building cards and research on an Anthropic model. Since then, 0.27.3 let Library sources that don't
+describe their answers build and let a Claude Code route run every step, and this release lets sources
+with spaces in their field names build and runs research at once. Those changes turn asks that used to
+decline into cards. So that run does not say how often this release's cards are wrong, and that has
+not been measured. 0.27.3's note said the 0.27.0 numbers still stood; for the same reason, they did
+not.
+
+**Delete your old log.** Earlier versions wrote to `app.log` the full address of every source the app
+fetched. For a source that takes its key in the address, as Alpha Vantage and Finnhub do, that address
+carries your key, and a sealed-vault import's address carries the vault's key. New lines no longer
+carry a key (below), but the old ones stay in the file. Choose **Open logs** in the menu, then **Stop**
+(**Quit launcher** leaves SmartBrain running, holding the file open). Delete `app.log` and any
+`app.log.old` in that folder (the doctor's "Set app.log aside and start a new one" leaves one), then
+choose **Open SmartBrain** to start it again. Without the menu, `smartbrain stop` and `smartbrain
+start` do the same. A backup such as Time Machine keeps its own copy of the file, so re-issuing the
+keys your cards used is the sure fix. A Docker install writes no log file: with Docker's default log
+driver, its log is the container's, which the update replaces.
 
 ### Changed
 - Neural Interface: a card tries first the source whose free request limit covers how often it refreshes. The
   SmartBrain Library (pack v1.6.0) now records the request limits providers publish, and "NVDA stock price every 30
   minutes" is 48 requests a day: Finnhub's free key allows 60 a minute and now goes first, while Alpha Vantage's
-  allows 25 a day, so a card built on it would stop updating from about midday every day without saying why. An
+  allows 25 a day, so a card built on it would stop updating partway through each day without saying why. An
   hourly card is 24 a day, which Alpha Vantage covers, so for it the Library's order holds. Where a provider
   publishes no number, the order is as before: sources that need no key first.
 - SmartBrain Library pack v1.6.0. The pinned pack moves to v1.6.0: 21 curated sources carry the free request
@@ -55,10 +65,11 @@ install writes no log file: its log is the container's, which the update replace
 ### Fixed
 - Neural Interface: research on Claude Code gets the budget it was designed with. Each research call was a new CLI
   process that sent the whole conversation again, and the Claude Code route's token counts folded the prompt
-  cache's share into new input, so the run's token cap charged every cached read as new: T's first research run (no
-  keys, both keyed sites skipped) stopped after 11 calls and 65,616 prompt tokens. A research run on Claude Code now
-  keeps one CLI session for its calls, as a chat turn does (each call after the first sends only the new tool
-  results; the session is deleted when the run ends), and the cache's share reaches the budget and Usage & cost.
+  cache's share into new input, so the run's token cap charged every cached read as new: the first research run on
+  T's routes (no keys, both keyed sites skipped) stopped after 11 calls and 65,616 prompt tokens. A research run on
+  Claude Code now keeps one CLI session for its calls, as a chat turn does (each call after the first sends only the
+  new tool results; the session is deleted when the run ends), and the cache's share reaches the budget and Usage &
+  cost.
 - Neural Interface: a card research could not build says what research did and what stopped it. Its line names
   the time limit, the model budget, the steps or the model that stopped; before, every research stop read "ran out
   of steps". Its **What I tried** list (below) includes the searches research made (in their own words) and each
@@ -117,8 +128,8 @@ install writes no log file: its log is the container's, which the update replace
   allows 25 requests a day; a card every 30 minutes asks 48) with a sentence that names the key it was sent. Every
   body that answers a keyed request now has that request's own key removed at the fetch, in every spelling a body
   could carry it, before the rate-limit reader, the sentence reader, the path walker or a model sees it, so the key
-  is never in a source's reason, its History or what the card shows. Before, such a body reached the model as it
-  came.
+  is never in a source's reason, its History or what the card shows. Before, such a body reached the build's
+  model as it came.
 - Deleting a card drops every secret stored under it, including a key the card asked for on its way to a source it
   never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
 - Neural Interface: a day-by-day card whose first row is already yesterday lists every day from today. That happens
@@ -153,8 +164,9 @@ install writes no log file: its log is the container's, which the update replace
   words; before, it just stopped updating. The board's rows carry both (`limit`, `waiting`), and `tools/ni-proof.py`
   reports them.
 - Neural Interface: the card says what it tried. A key pause and a declined card list each source the build tried
-  and why it moved on ("www.alphavantage.co: files its values under the day's date..."); before, a decline read
-  "no source answers this" over three sources that each failed for a different reason.
+  and why it moved on ("www.alphavantage.co: files its values under the day's date..."); before, those reasons
+  lived only in the sealed record, and a decline read "No ready source answers this yet" over three sources that
+  each failed for a different reason.
 - Neural Interface: **Skip this source** on a key pause. When the card asks for a key you don't have for a source
   SmartBrain picked, the build goes on to the next source, then research, then the honest decline, and no other
   source that needs the same site's key asks for it again; before, the card stayed paused with no way past the
