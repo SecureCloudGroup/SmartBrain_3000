@@ -140,7 +140,9 @@ number you can check:
   Keep on a card that refreshes on one. Other cloud use the phone causes is not
   counted: chat and agent turns, scheduled tasks, a card's scheduled refreshes, a
   frontier repair switched on in a card's repair policy, summarizing a document,
-  and the background summaries of documents added to Knowledge.
+  the background summaries of documents added to Knowledge, and, with a cloud
+  embedding model, embedding what the phone adds to, reindexes or searches in
+  Knowledge.
 - **A source you kept, or one SmartBrain checked, is set aside after 3 failed
   reads in a row**, so a dead source stops costing every ask a fetch.
 - **An alert's cooldown is at least 5 minutes** (an hour unless you set one).

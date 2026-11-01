@@ -217,8 +217,8 @@ def charge_phone_spend(conn, now: datetime) -> bool:
     call (``ni._draw_phone_allowance``), once a run. Until 2026-10-31 only the two taps drew, so repeated Retry taps
     ran cloud builds uncounted; until 2026-11-01 Run did not draw. This bounds the cloud-model card runs the phone
     app's origin can start in a day. Its other cloud use is not counted (SECURITY.md): chat and agent turns, scheduled
-    tasks, a card's scheduled refreshes, a frontier repair it switches on, document summaries and Knowledge's
-    background summaries."""
+    tasks, a card's scheduled refreshes, a frontier repair it switches on, document summaries, Knowledge's
+    background summaries and, on a cloud embedding route, Knowledge's embeddings."""
     assert conn is not None and now.tzinfo is not None, "conn and an aware time required"
     if not auth.request_via() or _PHONE_PAID.get():
         return True

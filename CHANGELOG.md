@@ -11,14 +11,36 @@ to know when a release changes behavior.
 
 ## [Unreleased]
 
+## [0.27.4] - 2026-11-01
+
+**Upgrading from 0.27.3.** No migration, and no change to your cards, sources or settings. The pinned
+Library pack moves to v1.6.0, which records the free request limits providers publish; the first
+Neural Interface ask after the update downloads it. This release changes the four things that still
+kept the Neural Interface from building a stock-price card on 0.27.3: field names with spaces and
+digits (Alpha Vantage), a provider's sentence read as data, a key checked against the wrong site, and
+research that ran only after a Keep looking tap. What leaves this computer is unchanged in kind.
+Research now runs at once when nothing ready answers, under the consent the card already holds and
+inside the same ceilings. A paired phone's Retry, Fix, Refine, Skip this source, Run and Keep on a card
+that uses a cloud model now draw the daily phone allowance, as Allow and Keep looking already did. The
+allowance bounds only those card runs, so the docs no longer say that what a phone can charge to your
+key is bounded, and they list what it does not count (below). There is no new held-out safety run for
+this release, so the latest measured numbers are still 0.27.0's, from before these changes to how a
+card is built.
+
+**Delete your old log.** Earlier versions wrote to `app.log` the full address of every keyed source the
+app fetched, which carries your key, and of every sealed-vault import, which carries the vault's key.
+New lines no longer do (below), but the old ones stay in the file. Choose **Open logs** in the
+menu, quit SmartBrain, delete `app.log` and any `app.log.old` in that folder (the doctor's "Set app.log
+aside and start a new one" leaves one), and consider re-issuing the keys your cards used. A Docker
+install writes no log file: its log is the container's, which the update replaces.
+
 ### Changed
 - Neural Interface: a card tries first the source whose free request limit covers how often it refreshes. The
   SmartBrain Library (pack v1.6.0) now records the request limits providers publish, and "NVDA stock price every 30
   minutes" is 48 requests a day: Finnhub's free key allows 60 a minute and now goes first, while Alpha Vantage's
-  allows 25 a day, so a card built on it stopped updating from about midday every day without saying why (T's Mac
-  built the NVDA card on Alpha Vantage). An hourly card is 24 a day, which Alpha Vantage covers, so for it the
-  Library's order holds. Where a provider publishes no number, the order is as before: sources that need no key
-  first.
+  allows 25 a day, so a card built on it would stop updating from about midday every day without saying why. An
+  hourly card is 24 a day, which Alpha Vantage covers, so for it the Library's order holds. Where a provider
+  publishes no number, the order is as before: sources that need no key first.
 - SmartBrain Library pack v1.6.0. The pinned pack moves to v1.6.0: 21 curated sources carry the free request
   limits their providers publish (`access.limits`), which the order above reads, and two sources' notes no longer
   quote another address's limit. Nothing else in the pack changed.
@@ -37,18 +59,11 @@ to know when a release changes behavior.
   keys, both keyed sites skipped) stopped after 11 calls and 65,616 prompt tokens. A research run on Claude Code now
   keeps one CLI session for its calls, as a chat turn does (each call after the first sends only the new tool
   results; the session is deleted when the run ends), and the cache's share reaches the budget and Usage & cost.
-- Neural Interface: a card research could not build says what research did and what stopped it. Its **What I
-  tried** list adds the searches research made (in their own words) and each site it read with what came of it, and
-  its line names the time limit, the model budget, the steps or the model that stopped; before, the list showed only
-  the Library sources, and every research stop read "ran out of steps". The app log keeps one line per research run
+- Neural Interface: a card research could not build says what research did and what stopped it. Its line names
+  the time limit, the model budget, the steps or the model that stopped; before, every research stop read "ran out
+  of steps". Its **What I tried** list (below) includes the searches research made (in their own words) and each
+  site it read with what came of it. The app log keeps one line per research run
   with how it ended, its cache share and the sites it read (no address and no search words).
-- Neural Interface: after **Skip this source**, research no longer offers the skipped site's keyed sources again:
-  not as a read it cannot make, not as Use my key, not as the declined card's links. T's first research run linked
-  back to the two sites it had just been told had no key, and while it ran the card's progress still named the
-  last site skipped ("finnhub.io, 2 of 2"); it now names none. **Keep looking** keeps the skips too: each look ran the
-  ask again and paused for the first skipped site's key, which stopped the order there. A key for the site given
-  since on another card is offered on the card, as before. A Retry starts without the skips and asks again, since
-  you may have a key by then.
 - Neural Interface: a cloud run a paired phone starts draws one unit of the daily phone allowance whichever tap
   started it (Retry, Fix, Refine, Skip this source, as Allow and Keep looking already did), and the build and the
   research it reaches draw it once between them. Before, only Allow and Keep looking drew, and a build's worker
@@ -72,9 +87,9 @@ to know when a release changes behavior.
   waits out a pause of up to 5 seconds once and asks again (a `Retry-After` of a few seconds too); a pause that
   holds ends the build failed with Retry and the host's own words, never declined and never researched past, with
   a line that names the window: a retry before an hourly or daily limit resets ends the same way, and the card says
-  so instead of "Retry later". A
-  kept card's refresh stays due and is never marked failed, so a spent quota no longer runs the card toward broken.
-  While the host's pause holds, every request to it is held back with the host's words.
+  so instead of "Retry later". A kept card's refresh stays due and is never marked failed, so a spent quota no
+  longer runs the card toward broken. While the host's pause holds, every request to it is held back with the host's
+  words.
 - Neural Interface: a refresh you tap waits out a source's one-second limit once, as a build does, then reads the
   source. On T's Mac the first refresh after Keep came within a second of the card's own first run, Alpha Vantage
   answered its "1 request per second" sentence, and the card said "the local page browser is busy", with no page
@@ -86,7 +101,8 @@ to know when a release changes behavior.
   counts as the key for another host's row (Finnhub) on the same card: the card asks for that host's key, instead of
   fetching with the wrong one and dropping the row when the host-bound loader refused it.
 - Neural Interface: a source that files its values under each day's date (Alpha Vantage's daily series) is refused
-  with that reason, instead of being mapped to one day's value that would never change on the card.
+  with that reason, since a card mapped to one day's value would never change. Before, it dropped out with the keys
+  the walker could not spell (above).
 - Neural Interface: a build resumed after the key was given, whose last source then moved on, goes on to research
   or to the honest decline; before, it stopped in a source pick with nothing to tap.
 - Neural Interface: one build spends at most 24 model calls across every source it tries; past that it fails with
@@ -98,11 +114,11 @@ to know when a release changes behavior.
   traceback or stack it carries, is redacted of key-bearing query parameters and authorization headers before a
   handler writes it.
 - Privacy: a source's answer never hands the user's key on. Alpha Vantage answers a spent daily quota (its free key
-  allows 25 requests a day; a card every 30 minutes asks 48) with a sentence that names the key it was sent, and a
-  build keeps a source's words: its reason, History, what the card shows. The sentence reader hid a word shaped like
-  a token, but a key of another shape (all letters, or shorter than 16 characters) went through. Every body that
-  answers a keyed request now has that request's own key removed at the fetch, in every spelling a body could carry
-  it, before the rate-limit reader, the sentence reader, the path walker or a model sees it.
+  allows 25 requests a day; a card every 30 minutes asks 48) with a sentence that names the key it was sent. Every
+  body that answers a keyed request now has that request's own key removed at the fetch, in every spelling a body
+  could carry it, before the rate-limit reader, the sentence reader, the path walker or a model sees it, so the key
+  is never in a source's reason, its History or what the card shows. Before, such a body reached the model as it
+  came.
 - Deleting a card drops every secret stored under it, including a key the card asked for on its way to a source it
   never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
 - Neural Interface: a day-by-day card whose first row is already yesterday lists every day from today. That happens
@@ -115,16 +131,19 @@ to know when a release changes behavior.
 - Neural Interface: a Run a paired phone (or a browser at a LAN address) taps on a card that refreshes on a cloud
   model draws one unit of the daily phone allowance before the model call, and so does the run the Keep tap starts.
   Before, nothing on that path drew, so a phone could tap Run on such a card without limit, each tap a call on the
-  owner's cloud model; the docs and SECURITY.md said every run a phone starts was counted. With today's allowance
-  spent, Run says so and works from the Mac, the card is not marked failed and refreshes on its own schedule, and a
-  Keep is still taken. The Mac's own taps and scheduled refreshes are not counted, as before. The docs now also say
-  what the allowance does not count, so what a phone can charge to the owner's key is not bounded: chat and agent
-  turns, scheduled tasks (which a phone can create and run as often as every minute), a card's scheduled refreshes
-  (whose timing it can change), a frontier repair switched on in a card's repair policy, summarizing a document, and
-  the background summaries of documents added to Knowledge.
-- Logging: an access line whose address carries a key (a vault import sends its key as `?key=`) is written with the
-  key redacted. Since the redaction above, such a line was lost instead, with a "Logging error" traceback in its
-  place, because the web server formats its access lines from their parts and the redacted line had none.
+  owner's cloud model. With today's allowance spent, Run says so and works from the Mac, the card is not marked
+  failed and refreshes on its own schedule, and a Keep is still taken. The Mac's own taps and scheduled refreshes are
+  not counted, as before.
+- Docs: SECURITY.md and the remote-access guide no longer say that what a paired phone can charge to your key is
+  bounded (0.27.3 said it was, and that "a phone cannot run up your key without end"). The daily allowance bounds
+  the card runs a phone starts on a cloud model. It does not count chat and agent turns, scheduled tasks (which a
+  phone can create and run as often as every minute), a card's scheduled refreshes (whose timing it can change), a
+  frontier repair switched on in a card's repair policy, summarizing a document, the background summaries of
+  documents added to Knowledge, or, when the embedding model is a cloud one, embedding what a phone adds to,
+  reindexes or searches in Knowledge.
+- Privacy: importing a sealed vault no longer writes its key to app.log. The import sends the key in its address
+  (`?key=`), and the web server's access line wrote that address as it came; the line is now written with the key
+  redacted.
 
 ### Added
 - Neural Interface: a card says when its source's free limit won't keep up with it. Held for Keep, it says so under
@@ -134,13 +153,15 @@ to know when a release changes behavior.
   words; before, it just stopped updating. The board's rows carry both (`limit`, `waiting`), and `tools/ni-proof.py`
   reports them.
 - Neural Interface: the card says what it tried. A key pause and a declined card list each source the build tried
-  and why it moved on ("www.alphavantage.co: files its values under the day's date..."); before, those reasons
-  lived only in the sealed record, and a decline read "no source answers this" over three sources that each
-  failed for a different reason.
+  and why it moved on ("www.alphavantage.co: files its values under the day's date..."); before, a decline read
+  "no source answers this" over three sources that each failed for a different reason.
 - Neural Interface: **Skip this source** on a key pause. When the card asks for a key you don't have for a source
   SmartBrain picked, the build goes on to the next source, then research, then the honest decline, and no other
   source that needs the same site's key asks for it again; before, the card stayed paused with no way past the
-  source but Cancel. A source you named yourself is never skipped for you.
+  source but Cancel. Research does not offer the skipped site's keyed sources either (not as a read it cannot
+  make, as Use my key, or as the declined card's links), and **Keep looking** keeps the skips. A key for that site
+  given since on another card is still offered on the card. A Retry starts without the skips and asks again, since
+  you may have a key by then. A source you named yourself is never skipped for you.
 - `tools/ni-proof.py` observes one ask on a running SmartBrain over its local API, the way the done gate for a
   fix requires: it types the ask, answers only what it is told to (the model consent, a key from an environment
   variable, the YES, one refresh), and writes every state the card passed through, what it tried and why, its
