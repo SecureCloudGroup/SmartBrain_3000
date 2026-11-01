@@ -516,6 +516,7 @@ def test_a_commodity_or_a_currency_is_not_the_company_named_for_it(lib) -> None:
         rows = _ids(lib, ask)
         assert rows and rows[0] == first and not {"finnhub-quote", "coingecko-price"} & set(rows), (ask, rows)
     assert "finnhub-quote" not in _ids(lib, "what is the dollar trading at")  # a ranked currency's name
+    assert "finnhub-quote" in _ids(lib, "gold stock")  # a cue only shares have keeps a company reading
     for ask, ticker in (("what is Dollar General trading at", "DG"), ("what is meta trading at", "META"),
                         ("Gold X2 Mining stock", "AUXX"), ("what is AUXX trading at", "AUXX")):
         rows = lib.candidates(ask)[0]

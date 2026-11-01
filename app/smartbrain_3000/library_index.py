@@ -871,8 +871,8 @@ class LibraryIndex:
         for r, (best, said) in uncued.items():
             if said and any(set(said) & set(said_by[o]) for o in list(found)):
                 found[r], said_by[r] = best, said
-        # an unranked coin yields to a company read from the same words, and to the commodity or currency the rule
-        # above read them as ("what is GOLD trading at" is the metal, not an obscure token whose symbol is GOLD)
+        # an unranked coin yields to a company reading, or to one the rule above set aside ("what is GOLD trading
+        # at" is the metal, not an obscure token whose symbol is GOLD)
         if "crypto" in found and ("ticker" in found or set_aside) and not (found["crypto"].get("rank") or 0) > 0:
             found.pop("crypto")
         if "ticker" in found and "crypto" in found and (found["crypto"].get("rank") or 0) > 0 \
