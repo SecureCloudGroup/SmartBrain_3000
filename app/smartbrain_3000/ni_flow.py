@@ -6125,6 +6125,12 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
             _append_note(store, item_id,
                           f"verification flagged {len(judge['wrong'])} field(s); re-picking")
             continue
+        if first is None:
+            # the first pass built nothing (its mapping gave out, above): this build is the only one. It ships as a
+            # first build does when its re-pick earns nothing: a wrong verdict rides the notes as the doubt, since no
+            # pass is left for a re-pick (held-out run 2026-11-01: restoring the build that was never made raised
+            # TypeError and failed a card that had built)
+            break
         # Second round: ship it ONLY when the judge scored it strictly better;
         # otherwise revert to the first build and note the standing doubt.
         improved = (judge is not None

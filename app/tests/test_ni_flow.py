@@ -1694,6 +1694,63 @@ def test_g2_judge_repick_reverts_when_no_better() -> None:
     assert "kept the first build" in notes
 
 
+def test_g2_a_build_from_the_mappings_second_pass_ships() -> None:
+    """Held-out run, 2026-11-01 (H64): the first mapping pass gave out ("mapping needed another pass"), the
+    second built, and the judge's reply was cut short. The loop then restored a first build that was never
+    made and raised TypeError (with a judge verdict it raised too, reading that build's verdict), so a card
+    that had built failed. With no first build, the second pass's build is the only one. It ships as a first
+    build does when its re-pick earns nothing: an OK verdict is noted, no verdict leaves no note, and a wrong
+    verdict rides the notes as the doubt, since no pass is left for a re-pick."""
+    fixture = _load("hn")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "HN", "cadence_minutes": 15,
+        "wants": ["title"], "threshold": None, "display_hint": "value",
+    })
+    bad = json.dumps({"title": "hits[0].no_such_field"})  # not in the menu: the pass's own retry gives out too
+    judge_ok = json.dumps({"serves": True, "gaps": [], "wrong": []})
+    judge_wrong = json.dumps({"serves": False, "gaps": [], "wrong": ["title: not the real title"]})
+    for judge, note in (([], ""), (['{"serves": true, "ga'], ""), ([judge_ok], "verified against the request"),
+                        ([judge_wrong], "verification still doubts")):
+        store, _conn = _store()
+        model = _scripted_model([intent_reply, bad, bad, json.dumps({"title": "hits[0].title"}), *judge])
+        item_id = ni_flow.create_shell_item(store, "top story title")
+        result = ni_flow.run_flow(
+            store, item_id, gateway_call=model,
+            fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+        )
+        assert result["state"] == "ready", (judge, result.get("error"))
+        assert store.get_item(item_id)["spec"]["pipeline"][0]["paths"]["title"] == "hits[0].title"
+        notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
+        assert "mapping needed another pass" in notes and "kept the first build" not in notes, (judge, notes)
+        assert note in notes, (judge, notes)
+
+
+def test_g2_a_repick_that_gives_out_does_not_ship_the_flagged_build() -> None:
+    """The same loop's other side, kept as it was for 0.27.4 (review of #576): a "wrong" verdict earns a re-pick,
+    and when the re-pick's mapping gives out, the build the verdict flagged does not ship. The source is a misfit,
+    as on any mapping that gives out: an auto-picked row moves on to the next source or research, and a pasted
+    link, as here, fails. Whether a flagged build may reach the Keep step is to be one rule for every exit of this
+    loop (the no-better revert included), not decided here."""
+    store, _conn = _store()
+    fixture = _load("hn")
+    intent_reply = json.dumps({
+        "kind": "external_data", "subject": "HN", "cadence_minutes": 15,
+        "wants": ["title"], "threshold": None, "display_hint": "value",
+    })
+    judge_wrong = json.dumps({"serves": False, "gaps": [], "wrong": ["title: not the real title"]})
+    bad = json.dumps({"title": "hits[0].no_such_field"})
+    model = _scripted_model([intent_reply, json.dumps({"title": "hits[0].title"}), judge_wrong, bad, bad])
+    item_id = ni_flow.create_shell_item(store, "top story title")
+    result = ni_flow.run_flow(
+        store, item_id, gateway_call=model,
+        fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
+    )
+    assert result["state"] == "failed", result
+    assert "mapping stage failed after retry" in str(result.get("error") or ""), result
+    notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
+    assert "kept the first build" not in notes, notes
+
+
 def test_g2_judge_drops_hallucinated_wrong_fields() -> None:
     """A wrong-claim naming a field the payload does not display never
     triggers a re-pick (the dataGranularity live-probe class)."""
