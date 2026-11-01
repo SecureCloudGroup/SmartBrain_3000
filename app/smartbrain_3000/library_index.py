@@ -41,9 +41,9 @@ _GENERIC_PROVIDER_WORDS = frozenset({
     "data", "info", "online", "today", "times", "now", "top", "latest", "service", "services",
     "network", "media", "group", "report", "reports", "update", "updates"})
 PACK = {
-    "tag": "v1.5.0",
-    "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.5.0/library.duckdb.gz",
-    "sha256": "b1151d88b8f324ad504b2d16d5a66290749399055fa10b319ba9bffb423451d0",
+    "tag": "v1.6.0",
+    "url": "https://github.com/SecureCloudGroup/SmartBrain_Library/releases/download/v1.6.0/library.duckdb.gz",
+    "sha256": "1d7e5da7db4a2fcc85045ebed1bb05a72122a645c3878e888b66fb070249ad38",
 }
 MAX_PACK_GZ_BYTES = 60_000_000       # the download cap (the v1.2 gzip is ~18 MB)
 MAX_PACK_BYTES = 600_000_000         # the unpacked cap (the v1.2 file is ~80 MB)

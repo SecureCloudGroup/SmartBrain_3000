@@ -60,6 +60,7 @@ from test_ni_auto_pick import _row
 from smartbrain_3000 import (
     auth,
     gateway,
+    library_index,
     netguard,
     ni,
     ni_flow,
@@ -345,6 +346,15 @@ def test_the_recorded_rows_are_the_packs_three_keyed_undeclared_quote_rows() -> 
     assert [r["host"] for r in rows] == ["www.alphavantage.co", "finnhub.io", "www.alphavantage.co"]
     assert [r["limits"] for r in rows] == [AV_WINDOWS, [{"requests": 60, "seconds": 60}], AV_WINDOWS]
     assert ROWS_HOURLY["ask"] == "NVDA stock price every hour" and ROWS_HOURLY["rows"] == rows
+
+
+def test_every_recorded_row_fixture_comes_from_the_pack_this_build_pins() -> None:
+    """The rows a test replays are the pinned pack's (``library_index.PACK``): a pack bump re-records them with
+    ``tools/ni-library-rows.py``, or this fails, so the matrix never runs over a Library no install has."""
+    recorded = sorted((FIXTURES / "library").glob("rows-*.json"))
+    assert len(recorded) >= 3, "rows-nvda, rows-nvda-hourly and rows-msft"
+    for path in recorded:  # bounded: the fixtures directory
+        assert json.loads(path.read_text(encoding="utf-8"))["pack_version"] == library_index.PACK["tag"], path.name
 
 
 def _pick_order(rows: list[dict], cadence: object) -> list[str]:

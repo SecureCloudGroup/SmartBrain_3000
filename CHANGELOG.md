@@ -19,6 +19,9 @@ to know when a release changes behavior.
   built the NVDA card on Alpha Vantage). An hourly card is 24 a day, which Alpha Vantage covers, so for it the
   Library's order holds. Where a provider publishes no number, the order is as before: sources that need no key
   first.
+- SmartBrain Library pack v1.6.0. The pinned pack moves to v1.6.0: 21 curated sources carry the free request
+  limits their providers publish (`access.limits`), which the order above reads, and two sources' notes no longer
+  quote another address's limit. Nothing else in the pack changed.
 - Neural Interface: when the Library has nothing it can build for an ask, or every source it offered fails, research
   runs at once under the consent the card already holds (the consent question has said since 0.27.0 that "if no
   ready-made source fits, it may also research one with the same service"). Before, a first run ended at once with
