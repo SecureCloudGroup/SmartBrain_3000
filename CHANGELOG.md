@@ -105,6 +105,12 @@ to know when a release changes behavior.
   it, before the rate-limit reader, the sentence reader, the path walker or a model sees it.
 - Deleting a card drops every secret stored under it, including a key the card asked for on its way to a source it
   never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
+- Neural Interface: a day-by-day card whose first row is already yesterday lists every day from today. That happens
+  whenever your midnight comes before the source's: a forecast fetched in the source's evening, or shown in a time
+  zone ahead of it. The day table leaves past days off on purpose but counted them as days it had no room for, so
+  every taller size read as half empty and was refused: a card built then took the smallest size and showed Today
+  and Tomorrow only, and a kept card dropped day after day after midnight until it showed Today alone, until the
+  source's own day rolled over.
 
 ### Added
 - Neural Interface: a card says when its source's free limit won't keep up with it. Held for Keep, it says so under

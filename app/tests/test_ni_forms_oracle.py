@@ -253,6 +253,43 @@ def test_oracle_case_no_date_off_by_one(name: str, path: pathlib.Path) -> None:
     assert not fails, f"{name} {case['id']}: " + "; ".join(fails)
 
 
+def _check_after_midnight(case: dict, exp: dict) -> list[str]:
+    """A kept card's clock pass after the card zone's midnight lays the SAME outputs out again, so a
+    daily forecast's first row is then yesterday. Each sealed span stays lint-clean there and is laddered
+    down no further than at the seal. (The day table counted the past day it leaves off as a row it had
+    no room for, read hollow, and dropped every other day: the 7-day forecasts for Nashville, Phoenix,
+    Houston and Salt Lake City showed Today alone, lint red, until the next fetch.)"""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    answers, outputs = _filtered(case, exp)
+    now = datetime.fromisoformat(case["fetched_at"])
+    d = design(answers, outputs, title=case["title"], ask=case["ask"], now=now, source_url=case["source_url"],
+              cadence_s=900, rows_output_name=case["rows_output_name"], call_model=None,
+              viewer_tz=case["viewer_tz"], question_kind=case["frame_kind"], wants=[])
+    zone = ZoneInfo(d.rec.context.card_tz)
+    local = now.astimezone(zone)
+    after = datetime(local.year, local.month, local.day, tzinfo=zone) + timedelta(days=1, minutes=1)
+    fails: list[str] = []
+    for side in ("desktop", "phone"):
+        span = Span.parse(d.node["spans"][side])
+        sealed = layout_span(d.cand, d.rec, d.prof, d.inp, span, now).clir["ladder"]
+        lo = layout_span(d.cand, d.rec, d.prof, d.inp, span, after)
+        red = sorted({i.code for i in lo.lint.issues if i.sev == "red"})
+        if red:
+            fails.append(f"{side} {span.key} red {red} at {after.isoformat()}")
+        if len(lo.clir["ladder"]) > len(sealed):
+            fails.append(f"{side} {span.key} laddered {lo.clir['ladder']} (sealed {sealed})")
+    return fails
+
+
+@pytest.mark.parametrize("name,path", CASES, ids=[f"{n}-{p.stem}" for n, p in CASES])
+def test_oracle_case_holds_after_the_card_zones_midnight(name: str, path: pathlib.Path) -> None:
+    case, exp = _load(name, path)
+    fails = _check_after_midnight(case, exp)
+    assert not fails, f"{name} {case['id']}: " + "; ".join(fails)
+
+
 def test_oracle_pass_rate_is_reported_and_complete() -> None:
     """Runs last (pytest keeps file order): prints the per-set, per-case verdicts and
     rate, and holds EVERY fixture set to 100% — every scored case has an acceptable
