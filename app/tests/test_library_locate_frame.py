@@ -38,8 +38,14 @@ _TAXONOMY = [  # category, subcategory, kinds, keywords, policy
     ("water", "surf_waves", ["current_value", "forecast"], ["surf", "wave height"], _pol("geo", ["place"])),
     ("sky", "iss", ["current_value", "next_event"], ["iss", "space station"], _pol("none")),
     ("sky", "near_earth", ["latest_items", "next_event"], ["asteroid"], _pol("none")),
-    ("markets", "stocks", ["current_value"], ["stock", "nasdaq"], _pol("name", ["ticker"], ("primary", "official"))),
+    ("markets", "stocks", ["current_value"], ["stock", "nasdaq", "trading at"],
+     _pol("name", ["ticker"], ("primary", "official"))),
     ("markets", "indices", ["current_value"], ["nasdaq composite", "dow"], _pol("name", ["ticker"])),
+    # the "gold trading at" round (2026-11-01): the markets subcategories whose policy resolves no ticker
+    ("markets", "commodities", ["current_value", "trend"], ["gold", "silver", "platinum", "natural gas"],
+     _pol("none")),
+    ("markets", "fx", ["current_value", "trend"], ["exchange rate", "currency", "euro"], _pol("name", ["currency"])),
+    ("markets", "crypto", ["current_value", "trend"], ["bitcoin", "crypto"], _pol("name", ["crypto"])),
     ("sports", "scores", ["current_value", "latest_items"], ["score", "game"],
      _pol("name", _SPORTS, ("primary", "official", "aggregator", "community"))),
     ("sports", "schedules", ["schedule", "next_event"], ["schedule", "next game"],
@@ -94,6 +100,12 @@ _SOURCES = [
     _src("fred-nasdaqcom", "Nasdaq Composite (daily close) (FRED)", "markets/indices", ["current_value", "trend"],
          "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQCOM", entity="NASDAQCOM",
          examples=["nasdaq composite"]),
+    _src("goldapi-spot", "Gold, silver and platinum spot price per ounce (Gold API)", "markets/commodities",
+         ["current_value"], "https://api.gold-api.com/price/{k}", _res("metal"), authority="aggregator", prior=1.6,
+         words=["spot price", "gold price", "per ounce"]),
+    _src("fred-dexuseu", "US dollar per euro (FRED)", "markets/fx", ["trend", "current_value"],
+         "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXUSEU", entity="DEXUSEU", prior=2.0,
+         words=["us dollar per euro", "euro dollar"]),
     _src("thesportsdb-team-next", "Team's next matchup", "sports/schedules", ["next_event", "schedule"],
          "https://www.thesportsdb.com/api/v1/json/3/eventsnext.php?id={k}", _res("team_espn", "attrs.tsdb_id"),
          authority="community", prior=2.0, entity="NFL, NBA, MLB, NHL teams", words=["next game", "who plays"]),
@@ -176,6 +188,22 @@ _ENTRIES = [  # id, resolver, key, name, lat, lon, state, attrs, rank, aliases
      {"league": "premier-league", "sport": "soccer"}, 10.0, ["premier league", "epl"]),
     ("ticker:NDAQ", "ticker", "NDAQ", "Nasdaq, Inc.", None, None, "", {"exchange": "NASDAQ"}, 1.0,
      ["nasdaq", "ndaq", "nasdaq inc"]),
+    # the "gold trading at" round (2026-11-01): companies the pack also names by a commodity's or a currency's
+    # word, as the pinned pack does, the metals and currencies themselves, and a ranked coin whose symbol is a
+    # stock's ("meta")
+    ("ticker:AUXX", "ticker", "AUXX", "Gold X2 Mining Inc.", None, None, "", {"exchange": "NYSE American"}, 1.0,
+     ["auxx", "gold", "gold x2 mining inc"]),
+    ("ticker:CLWT", "ticker", "CLWT", "Euro Tech Holdings Company Limited", None, None, "", {"exchange": "NASDAQ"},
+     1.0, ["clwt", "euro", "euro tech holdings"]),
+    ("ticker:DG", "ticker", "DG", "Dollar General Corporation", None, None, "", {"exchange": "NYSE", "sp500": True},
+     3.0, ["dg", "dollar", "dollar general"]),
+    ("ticker:META", "ticker", "META", "Meta Platforms, Inc.", None, None, "", {"exchange": "NASDAQ", "sp500": True},
+     3.0, ["meta", "meta platforms"]),
+    ("metal:XAU", "metal", "XAU", "Gold", None, None, "", {}, 4.0, ["gold", "xau"]),
+    ("currency:USD", "currency", "USD", "US dollar", None, None, "", {}, 31.0, ["usd", "dollar", "us dollar"]),
+    ("currency:EUR", "currency", "EUR", "Euro", None, None, "", {}, 30.0, ["eur", "euro"]),
+    ("crypto:metadao", "crypto", "meta-2-2", "MetaDAO", None, None, "", {"symbol": "meta"}, 764.0,
+     ["meta", "metadao"]),
     ("airport:KHQZ", "airport", "KHQZ", "Mesquite Metro Airport", 32.7, -96.5, "TX", {}, 1.0,
      ["mesquite metro", "metro"]),
     ("airport:ORD", "airport", "ORD", "Chicago O'Hare International Airport", 41.97, -87.9, "IL", {}, 1.0,
@@ -470,6 +498,22 @@ def test_an_index_is_not_the_company_that_shares_its_name(lib) -> None:
     assert rows and rows[0] == "fred-nasdaqcom" and "finnhub-quote" not in rows
     assert _ids(lib, "NDAQ") == ["finnhub-quote"]
     assert "finnhub-quote" in _ids(lib, "Nasdaq Inc stock")
+
+
+def test_a_commodity_or_a_currency_is_not_the_company_named_for_it(lib) -> None:
+    """2026-11-01: "what is gold trading at" read as Gold X2 Mining's shares, since "trading", "market" and "quote"
+    cue a ticker and are a commodity's and a currency's words too. A company the ask names only by words that name
+    a commodity, a currency or a coin is that thing; a cue only shares have, or its symbol, still says the company.
+    A coin's symbol is no such word: it is often a stock's too ("meta")."""
+    for ask, first in (("what is gold trading at", "goldapi-spot"), ("the gold market today", "goldapi-spot"),
+                       ("what is the euro trading at", "fred-dexuseu"), ("quote for the euro", "fred-dexuseu")):
+        rows = _ids(lib, ask)
+        assert rows and rows[0] == first and "finnhub-quote" not in rows, (ask, rows)
+    assert "finnhub-quote" not in _ids(lib, "what is the dollar trading at")  # a ranked currency's name
+    for ask, ticker in (("what is Dollar General trading at", "DG"), ("what is meta trading at", "META"),
+                        ("gold stock", "AUXX"), ("what is AUXX trading at", "AUXX")):
+        rows = lib.candidates(ask)[0]
+        assert rows and rows[0]["source_id"] == "finnhub-quote" and rows[0]["params"] == {"k": ticker}, (ask, rows)
 
 
 def test_a_team_must_agree_with_the_named_league(lib) -> None:

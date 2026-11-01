@@ -121,6 +121,14 @@ driver, its log is the container's, which the update replaces.
   its own reason, and a retry runs with a fresh budget.
 - Neural Interface: a sentence in a sample (a provider's note or description) no longer counts as evidence that a
   numeric want is text.
+- Neural Interface: "what is gold trading at" asks for the metal, not a company named for it. "Trading", "market"
+  and "quote" cue a stock ticker, and the Library knows companies by words that name a commodity or a currency, so
+  the ask read as Gold X2 Mining's shares; silver, platinum, natural gas, corn, the euro and the dollar read as
+  shares too (Dollar General's for the dollar). With a Finnhub or Alpha Vantage key, a card could build from that
+  company's quote. A company the ask names only by such words (the Library's keywords for commodities, currencies,
+  crypto, rates and market hours, and the names of its ranked currencies) is now that thing; "stock", "shares", the
+  company's symbol or more of its name ("Dollar General", "Platinum Group Metals") still mean the company. Where no
+  Library row answers the thing itself, research looks for one (the dollar and corn have none).
 - Privacy: keys stay out of app.log. The HTTP client logged every request's full address at INFO, and a keyed
   source's address carries the key in its query string. Those request lines are off, and every log line, with the
   traceback or stack it carries, is redacted of key-bearing query parameters and authorization headers before a

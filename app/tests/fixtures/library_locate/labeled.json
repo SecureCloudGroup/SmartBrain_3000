@@ -1605,6 +1605,139 @@
    ]
   },
   {
+   "cls": "C6",
+   "ask": "what is gold trading at",
+   "first": [
+    "goldapi-spot"
+   ],
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "what is silver trading at today",
+   "first": [
+    "goldapi-spot"
+   ],
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "what is platinum trading at",
+   "first": [
+    "goldapi-spot"
+   ],
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "the gold market today",
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "what is natural gas trading at",
+   "admit": [
+    "fred-dhhngsp"
+   ],
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "what is the euro trading at",
+   "admit": [
+    "fred-dexuseu",
+    "frankfurter-latest"
+   ],
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "what is the dollar trading at",
+   "forbid": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily",
+    "sec-submissions",
+    "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "what is Dollar General trading at",
+   "first": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "what is meta trading at",
+   "first": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "what is apple trading at",
+   "first": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily"
+   ],
+   "control": true
+  },
+  {
+   "cls": "C6",
+   "ask": "Platinum Group Metals stock",
+   "admit": [
+    "finnhub-quote",
+    "alphavantage-quote",
+    "alphavantage-daily"
+   ],
+   "control": true
+  },
+  {
    "cls": "C15",
    "ask": "next Dodgers game",
    "first": [
