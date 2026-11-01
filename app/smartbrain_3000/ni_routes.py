@@ -1485,7 +1485,7 @@ def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict
     question matches the answered kind. Audited.
 
     Partial route class: a paired phone may answer only ``model_consent`` (a fixed choice,
-    one of T's four taps); every typed answer stays on the Mac.
+    one of T's five fixed-choice consent taps); every typed answer stays on the Mac.
     """
     if body.kind != "model_consent" and account.from_paired_phone(request):
         raise HTTPException(status_code=403, detail=account.DESKTOP_ONLY_DETAIL)

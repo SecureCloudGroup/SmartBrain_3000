@@ -134,11 +134,13 @@ number you can check:
   weekly, and stops after **14 days**. Those later runs and background
   re-research share a ceiling of **10 research runs a day** across all cards (at
   most one re-research a day per card). A run you start at the Desktop is not
-  counted. Anything a paired phone starts on a card that uses a cloud model is
-  counted, once per run: allowing a cloud model, Keep looking, a Retry, Fix,
-  Refine or Skip this source on a card that builds or researches with one, and a
-  Run or Keep on a card that refreshes on one. Chat and agent turns from the
-  phone, and a card's scheduled refreshes, are not counted.
+  counted. These runs a paired phone starts are counted when they use a cloud
+  model, once per run: allowing a cloud model, Keep looking, a Retry, Fix, Refine
+  or Skip this source on a card that builds or researches with one, and a Run or
+  Keep on a card that refreshes on one. Other cloud use the phone causes is not
+  counted: chat and agent turns, scheduled tasks, a card's scheduled refreshes, a
+  frontier repair switched on in a card's repair policy, summarizing a document,
+  and the background summaries of documents added to Knowledge.
 - **A source you kept, or one SmartBrain checked, is set aside after 3 failed
   reads in a row**, so a dead source stops costing every ask a fetch.
 - **An alert's cooldown is at least 5 minutes** (an hour unless you set one).

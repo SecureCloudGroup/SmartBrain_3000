@@ -29,11 +29,16 @@ is true of the broker protocol and still leaves things worth knowing:
   order, a Retry, Fix, Refine or Skip this source on a card that builds or researches with
   one, and a Run or Keep on a card that refreshes on one) draws one unit of the daily
   re-research ceiling (`SMARTBRAIN_NI_RERESEARCH_DAILY`, default 10) before its first cloud
-  call, so the card runs that origin can start in a day are bounded. Two kinds of cloud use
-  are not counted, so what it can charge to your key is not: chat and agent turns, each of
-  which calls a model (the request may name one), and a card's scheduled refreshes, which
-  run at the card's cadence (the phone can change a cadence, and a card that refreshes on a
-  cloud model has no cadence floor). It cannot enter or change keys (provider keys
+  call, so the cloud-model card runs that origin can start in a day are bounded. Other cloud
+  use it can cause is not counted, so what it can charge to your key is not bounded: chat and
+  agent turns (a request may name the model, and an agent turn may call it many times);
+  scheduled tasks, which it can create, change and run, each an agent turn as often as every
+  minute on a model the task may name; a card's scheduled refreshes, at a cadence it can
+  change (a card that refreshes on a cloud model can be set to refresh every minute); a
+  frontier repair it switches on in a card's repair policy (one cloud call per failure
+  streak); summarizing a document; and the background summaries of the documents it adds to
+  Knowledge, which use the chat model unless a summary model is set. It cannot enter or
+  change keys (provider keys
   and card credentials), paste links, type answers, change where model requests go or which
   model a step uses, change the passphrase, trust a publisher, change feeds, web-search or
   MCP settings, back up, pair or revoke devices, or install updates: those refuse anything

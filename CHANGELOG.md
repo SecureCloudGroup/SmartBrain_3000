@@ -118,8 +118,10 @@ to know when a release changes behavior.
   owner's cloud model; the docs and SECURITY.md said every run a phone starts was counted. With today's allowance
   spent, Run says so and works from the Mac, the card is not marked failed and refreshes on its own schedule, and a
   Keep is still taken. The Mac's own taps and scheduled refreshes are not counted, as before. The docs now also say
-  what the allowance does not count: chat and agent turns from the phone, and a card's scheduled refreshes, whose
-  timing the phone can change.
+  what the allowance does not count, so what a phone can charge to the owner's key is not bounded: chat and agent
+  turns, scheduled tasks (which a phone can create and run as often as every minute), a card's scheduled refreshes
+  (whose timing it can change), a frontier repair switched on in a card's repair policy, summarizing a document, and
+  the background summaries of documents added to Knowledge.
 - Logging: an access line whose address carries a key (a vault import sends its key as `?key=`) is written with the
   key redacted. Since the redaction above, such a line was lost instead, with a "Logging error" traceback in its
   place, because the web server formats its access lines from their parts and the redacted line had none.

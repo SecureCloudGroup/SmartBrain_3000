@@ -71,10 +71,12 @@ phone starts on a card that uses a cloud model counts against the daily re-resea
 allowance (see [Design limits](09-design-limits.md)): allowing a cloud model, Keep looking,
 a Retry, Fix, Refine or Skip this source on a card that builds or researches with one, and
 a Run or Keep on a card that refreshes on one, once per run. When the day's allowance is
-spent, the card says so and the same tap works from your Mac. A Keep is still taken, and the
-card checks its data at its next scheduled refresh. The allowance counts card runs only:
-chat from the phone is not counted, and neither are a card's scheduled refreshes, whose
-timing the phone can change. What
+spent, those taps say so and work from your Mac, except Keep: it is still taken, and the card
+checks its data at its next scheduled refresh. The allowance counts only those card runs. It
+does not count chat or agent turns from the phone, scheduled tasks (which the phone can create
+and run, as often as every minute), a card's scheduled refreshes (whose timing the phone can
+change), a frontier repair switched on in a card's repair policy, summarizing a document, or
+the background summaries of documents added to Knowledge. What
 the phone cannot do is hand over anything secret or anything that widens trust: pasting a
 link, typing an answer, adding a key or a feed, trusting a publisher, changing where model
 requests go or which model a step uses, MCP settings, the passphrase, backups, pairing and
