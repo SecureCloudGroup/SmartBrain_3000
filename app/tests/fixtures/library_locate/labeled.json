@@ -1649,12 +1649,27 @@
   {
    "cls": "C6",
    "ask": "the gold market today",
+   "first": [
+    "goldapi-spot"
+   ],
    "forbid": [
     "finnhub-quote",
     "alphavantage-quote",
     "alphavantage-daily",
     "sec-submissions",
     "sec-companyfacts"
+   ]
+  },
+  {
+   "cls": "C6",
+   "ask": "what is GOLD trading at",
+   "first": [
+    "goldapi-spot"
+   ],
+   "forbid": [
+    "coinbase-spot",
+    "coingecko-price",
+    "coingecko-chart"
    ]
   },
   {
@@ -1705,6 +1720,7 @@
     "alphavantage-quote",
     "alphavantage-daily"
    ],
+   "label_has": "Dollar General",
    "control": true
   },
   {
@@ -1715,6 +1731,7 @@
     "alphavantage-quote",
     "alphavantage-daily"
    ],
+   "label_has": "Meta Platforms",
    "control": true
   },
   {
@@ -1725,6 +1742,7 @@
     "alphavantage-quote",
     "alphavantage-daily"
    ],
+   "label_has": "Apple Inc",
    "control": true
   },
   {
@@ -1735,6 +1753,7 @@
     "alphavantage-quote",
     "alphavantage-daily"
    ],
+   "label_has": "Platinum Group Metals",
    "control": true
   },
   {

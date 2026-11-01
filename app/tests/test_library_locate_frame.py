@@ -106,6 +106,9 @@ _SOURCES = [
     _src("fred-dexuseu", "US dollar per euro (FRED)", "markets/fx", ["trend", "current_value"],
          "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXUSEU", entity="DEXUSEU", prior=2.0,
          words=["us dollar per euro", "euro dollar"]),
+    _src("coingecko-price", "CoinGecko coin price", "markets/crypto", ["current_value"],
+         "https://api.coingecko.com/api/v3/simple/price?ids={k}&vs_currencies=usd", _res("crypto"),
+         authority="aggregator", prior=1.6, words=["coin price", "crypto price"]),
     _src("thesportsdb-team-next", "Team's next matchup", "sports/schedules", ["next_event", "schedule"],
          "https://www.thesportsdb.com/api/v1/json/3/eventsnext.php?id={k}", _res("team_espn", "attrs.tsdb_id"),
          authority="community", prior=2.0, entity="NFL, NBA, MLB, NHL teams", words=["next game", "who plays"]),
@@ -189,10 +192,10 @@ _ENTRIES = [  # id, resolver, key, name, lat, lon, state, attrs, rank, aliases
     ("ticker:NDAQ", "ticker", "NDAQ", "Nasdaq, Inc.", None, None, "", {"exchange": "NASDAQ"}, 1.0,
      ["nasdaq", "ndaq", "nasdaq inc"]),
     # the "gold trading at" round (2026-11-01): companies the pack also names by a commodity's or a currency's
-    # word, as the pinned pack does, the metals and currencies themselves, and a ranked coin whose symbol is a
-    # stock's ("meta")
+    # word, as the pinned pack does, the metals and currencies themselves, a ranked coin whose symbol is a
+    # stock's ("meta") and an unranked coin whose symbol is a metal's word ("GOLD")
     ("ticker:AUXX", "ticker", "AUXX", "Gold X2 Mining Inc.", None, None, "", {"exchange": "NYSE American"}, 1.0,
-     ["auxx", "gold", "gold x2 mining inc"]),
+     ["auxx", "gold", "gold x2 mining", "gold x2 mining inc"]),
     ("ticker:CLWT", "ticker", "CLWT", "Euro Tech Holdings Company Limited", None, None, "", {"exchange": "NASDAQ"},
      1.0, ["clwt", "euro", "euro tech holdings"]),
     ("ticker:DG", "ticker", "DG", "Dollar General Corporation", None, None, "", {"exchange": "NYSE", "sp500": True},
@@ -204,6 +207,7 @@ _ENTRIES = [  # id, resolver, key, name, lat, lon, state, attrs, rank, aliases
     ("currency:EUR", "currency", "EUR", "Euro", None, None, "", {}, 30.0, ["eur", "euro"]),
     ("crypto:metadao", "crypto", "meta-2-2", "MetaDAO", None, None, "", {"symbol": "meta"}, 764.0,
      ["meta", "metadao"]),
+    ("crypto:gold-10", "crypto", "gold-10", "Gold", None, None, "", {"symbol": "GOLD"}, 0.0, ["gold"]),
     ("airport:KHQZ", "airport", "KHQZ", "Mesquite Metro Airport", 32.7, -96.5, "TX", {}, 1.0,
      ["mesquite metro", "metro"]),
     ("airport:ORD", "airport", "ORD", "Chicago O'Hare International Airport", 41.97, -87.9, "IL", {}, 1.0,
@@ -504,14 +508,16 @@ def test_a_commodity_or_a_currency_is_not_the_company_named_for_it(lib) -> None:
     """2026-11-01: "what is gold trading at" read as Gold X2 Mining's shares, since "trading", "market" and "quote"
     cue a ticker and are a commodity's and a currency's words too. A company the ask names only by words that name
     a commodity, a currency or a coin is that thing; a cue only shares have, or its symbol, still says the company.
-    A coin's symbol is no such word: it is often a stock's too ("meta")."""
+    A coin's symbol is no such word: it is often a stock's too ("meta"). Nor is an unranked coin what the cue asks
+    for once the company is set aside: "GOLD" in capitals is an obscure token's symbol as well."""
     for ask, first in (("what is gold trading at", "goldapi-spot"), ("the gold market today", "goldapi-spot"),
+                       ("what is GOLD trading at", "goldapi-spot"), ("GOLD quote", "goldapi-spot"),
                        ("what is the euro trading at", "fred-dexuseu"), ("quote for the euro", "fred-dexuseu")):
         rows = _ids(lib, ask)
-        assert rows and rows[0] == first and "finnhub-quote" not in rows, (ask, rows)
+        assert rows and rows[0] == first and not {"finnhub-quote", "coingecko-price"} & set(rows), (ask, rows)
     assert "finnhub-quote" not in _ids(lib, "what is the dollar trading at")  # a ranked currency's name
     for ask, ticker in (("what is Dollar General trading at", "DG"), ("what is meta trading at", "META"),
-                        ("gold stock", "AUXX"), ("what is AUXX trading at", "AUXX")):
+                        ("Gold X2 Mining stock", "AUXX"), ("what is AUXX trading at", "AUXX")):
         rows = lib.candidates(ask)[0]
         assert rows and rows[0]["source_id"] == "finnhub-quote" and rows[0]["params"] == {"k": ticker}, (ask, rows)
 

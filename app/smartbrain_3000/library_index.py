@@ -825,6 +825,7 @@ class LibraryIndex:
         said_by: dict[str, list[str]] = {}
         spelled: set[str] = set()  # entities the ask names by their own code ("delays at ORD")
         uncued: dict[str, tuple[dict, list[str]]] = {}
+        set_aside = False  # a company a shared cue would have admitted, set aside by the rule below
         for r in ENTITY_RESOLVERS:
             m = res.by_name(r, ask)
             if m["status"] == "none":
@@ -844,6 +845,7 @@ class LibraryIndex:
                 # as Platinum Group Metals, "the dollar" as Dollar General, "the euro" as Euro Tech Holdings)
                 named = {w for a in said + _aliases_in(res, best["id"], low, partial=True) for w in a.split()}
                 if named <= self._market_words(con, ask, low):
+                    set_aside = set_aside or bool(words & _SHARED_TICKER_CUES)
                     continue
             if not said and not typed:
                 # only part of a name matched: "crypto" is not The Crypto Dog — unless another reading names
@@ -869,7 +871,9 @@ class LibraryIndex:
         for r, (best, said) in uncued.items():
             if said and any(set(said) & set(said_by[o]) for o in list(found)):
                 found[r], said_by[r] = best, said
-        if "crypto" in found and "ticker" in found and not (found["crypto"].get("rank") or 0) > 0:
+        # an unranked coin yields to a company read from the same words, and to the commodity or currency the rule
+        # above read them as ("what is GOLD trading at" is the metal, not an obscure token whose symbol is GOLD)
+        if "crypto" in found and ("ticker" in found or set_aside) and not (found["crypto"].get("rank") or 0) > 0:
             found.pop("crypto")
         if "ticker" in found and "crypto" in found and (found["crypto"].get("rank") or 0) > 0 \
                 and not found["ticker"].get("attrs", {}).get("sp500"):
@@ -895,6 +899,8 @@ class LibraryIndex:
         A coin's names are left out: a ranked coin is a reading of its own, which a company outside the S&P 500
         yields to (``_entities``), and coins' symbols are often stock symbols too ("meta" is MetaDAO's, "bp"
         Backpack's)."""
+        from .library_resolve import MAX_NGRAM
+
         subs = {cid: set(pol.get("resolvers") or []) for cid, (_, pol) in self._subcategories(con).items()}
         markets = {cid.split("/")[0] for cid, resolvers in subs.items() if "ticker" in resolvers}
         beside = {cid: resolvers for cid, resolvers in subs.items()
@@ -902,7 +908,7 @@ class LibraryIndex:
         out = {w for kw, cid in self._matched_keywords(ask) if cid in beside for w in kw.split()}
         named = sorted(set().union(*beside.values()) - {"crypto"})
         toks = low.split()[:40]  # bounded: an ask is a sentence
-        grams = sorted({" ".join(toks[i:i + n]) for n in (1, 2, 3) for i in range(len(toks) - n + 1)})
+        grams = sorted({" ".join(toks[i:i + n]) for n in range(1, MAX_NGRAM + 1) for i in range(len(toks) - n + 1)})
         if named and grams:
             rows = con.execute(
                 "SELECT DISTINCT a.alias FROM library_resolver_aliases a JOIN library_resolver_entries e "
