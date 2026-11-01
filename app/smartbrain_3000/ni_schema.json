@@ -244,6 +244,14 @@
         },
         "brief": {
           "$ref": "#/$defs/BriefState"
+        },
+        "limit": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 400
+        },
+        "waiting": {
+          "$ref": "#/$defs/RowWaiting"
         }
       },
       "additionalProperties": false,
@@ -1437,6 +1445,33 @@
         "sites",
         "unavailable"
       ]
+    },
+    "RowWaiting": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 253
+        },
+        "until": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 40
+        },
+        "said": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "until",
+        "said"
+      ],
+      "description": "The card's source asked SmartBrain to wait: its host, when the card tries again (UTC, ISO 8601) and the host's own words (empty when it gave none)."
     },
     "Scalar": {
       "anyOf": [

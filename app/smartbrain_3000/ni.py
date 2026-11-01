@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from . import ni_brief, ni_compare, ni_models, ni_recipe
+from . import ni_brief, ni_compare, ni_limits, ni_models, ni_recipe
 from .zones import zone_named
 
 log = logging.getLogger("smartbrain.ni")
@@ -689,18 +689,21 @@ _MAX_BUILT_FROM_TITLE = 200
 
 
 def _validate_built_from(value: object) -> None:
-    """Shape-check the sealed ``_built_from`` marker: absent, or exactly ``{path, host, title}``.
+    """Shape-check the sealed ``_built_from`` marker: absent, or exactly ``{path, host, title}``, plus ``limits`` (the
+    source's free request limits as the Library documents them, ``ni_limits.block``) on a card built from a Library
+    row that has them.
 
     Written only by the flow's finalize; stripped on export and refused in template packs, so a
     template can neither claim nor shed it."""
     if value is None:
         return
-    if not (isinstance(value, dict) and set(value) == {"path", "host", "title"}
+    if not (isinstance(value, dict) and set(value) - {"limits"} == {"path", "host", "title"}
+            and ("limits" not in value or ni_limits.valid_block(value["limits"]))
             and value["path"] in _BUILT_FROM_PATHS
             and isinstance(value["host"], str) and len(value["host"]) <= _MAX_BUILT_FROM_HOST
             and isinstance(value["title"], str) and len(value["title"]) <= _MAX_BUILT_FROM_TITLE):
-        raise ValueError("spec._built_from must be {path: declared|page|mapping|auto|research|kept|seed, host, title} "
-                         "or absent")
+        raise ValueError("spec._built_from must be {path: declared|page|mapping|auto|research|kept|seed, host, title, "
+                         "limits?} or absent")
 
 
 _PRESENTATION_IDS: frozenset[str] = frozenset({"pick", "second"})

@@ -45,6 +45,7 @@ from . import (
     ni,
     ni_brief,
     ni_compare,
+    ni_limits,
     ni_master,
     ni_models,
     ni_polite,
@@ -4151,15 +4152,41 @@ def _row_needs_access(row: dict) -> bool:
     return need
 
 
+def _covers(row: dict, cadence_minutes: int) -> bool:
+    """True unless the row's documented free limit is overrun by a card refreshing every ``cadence_minutes``, held
+    to the floor the engine holds its refreshes to (``ni_polite.cadence_floor_minutes``, the rule the card's line
+    uses too: a Library row is an HTTP source). An unknown limit covers: most providers document no number."""
+    assert isinstance(row, dict) and isinstance(cadence_minutes, int), "row + cadence required"
+    floor = ni_polite.cadence_floor_minutes({"source": {"type": "http_json", "url": str(row.get("url") or "")}})
+    return ni_limits.fits(ni_limits.clean(row.get("limits")), ni_limits.effective_minutes(cadence_minutes, floor)) \
+        is not False
+
+
+def _by_fit(rows: list[dict], intent: dict) -> list[dict]:
+    """The order the auto-pick tries the buildable Library rows in (T, 2026-10-31: "Prefer a source that fits"):
+    the rows whose free limit covers how often the card refreshes, then the rest, and within each the keyless rows
+    before the ones that ask for a key or email, in the Library's order. For "NVDA stock price every 30 minutes"
+    (48 requests a day) Finnhub's free key (60 a minute) goes before Alpha Vantage's (25 a day)."""
+    assert isinstance(rows, list) and isinstance(intent, dict), "rows + intent required"
+    raw = intent.get("cadence_minutes")
+    cadence = raw if isinstance(raw, int) and not isinstance(raw, bool) and raw >= _MIN_CADENCE else _DEFAULT_CADENCE
+    covers = [_covers(r, cadence) for r in rows]
+    out = [r for fit in (True, False) for keyed in (False, True) for r, ok in zip(rows, covers, strict=True)
+           if ok is fit and _row_needs_access(r) is keyed]
+    assert len(out) == len(rows), "an order loses no row"
+    return out
+
+
 def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
                call_model: Callable[[str], str], do_fetch: Callable[[str], object]) -> dict:
-    """v2: no pick pause. Seal the Library rows keyless-first, then try them in turn (``_auto_continue``).
+    """v2: no pick pause. Seal the Library rows in the order of fit (``_by_fit``: the rows whose free request limit
+    covers the card's cadence first, keyless before keyed within each), then try them in turn (``_auto_continue``).
 
     Consent posture: the only fetch before the user's Keep is of an installed Library row that declares
     its answers, or of a source the user kept before for this question (``ni_intake.reuse``: robots.txt, the
     per-site budget, off with the open web), each through the same netguard path as a tap and audited with its
-    host; a row needing a key or contact email goes last and asks for it on the card. Nothing recurs until Keep
-    (the card is held, ``_built_from.path`` auto).
+    host; a row needing a key or contact email goes after the keyless rows of its group and asks for it on the
+    card. Nothing recurs until Keep (the card is held, ``_built_from.path`` auto).
     No buildable row, or every row tried and dropped: research at once under the consent the card holds
     (``ni_research_flow.fallback``), then the declined card (``_end``; the Library's link pages ride it)."""
     assert store is not None and item_id, "store + id required"
@@ -4192,7 +4219,7 @@ def _auto_pick(store: ni.NIStore, item_id: str, request: str, intent: dict,
         # "no source answers this" was said for a missing model), so the user can route one or paste a link.
         return _end(store, item_id, "no_source_research_off", _research_off_line(store, item_id),
                     links=[{"title": r.get("title"), "url": r.get("page")} for r in rows if r.get("answers") is False])
-    ordered = [r for r in buildable if not _row_needs_access(r)] + [r for r in buildable if _row_needs_access(r)]
+    ordered = _by_fit(buildable, intent)
     assert len(ordered) == len(buildable), "a partition loses no row"
     ordered += [r for r in rows if r not in buildable]  # the link rows ride behind, for the honest stop
     _transition(store, item_id, "source", note="finding the best SmartBrain Library source",
@@ -4524,7 +4551,10 @@ def _library_rows(cands: list[dict]) -> list[dict]:
              # that finishes its address after the tap (C13)
              "categories": [str(x)[:60] for x in (c.get("categories") or [])[:6]],
              "scope": "place" if c.get("scope") == "place" else "global",
-             "lookup": _clean_lookup(c.get("lookup"), str(c.get("url") or ""))}
+             "lookup": _clean_lookup(c.get("lookup"), str(c.get("url") or "")),
+             # pack v1.6.0: the free plan's documented request limits ([] = unknown); the auto-pick tries the
+             # rows that cover the card's cadence first, and a build seals them (``_built_from.limits``)
+             "limits": ni_limits.clean(c.get("limits"))}
             for c in cands if len(str(c.get("url") or "")) <= ni._MAX_URL
             # an address its lookup can't finish (a step off its host) is no address at all
             and (not c.get("lookup") or _clean_lookup(c.get("lookup"), str(c.get("url") or "")))]
@@ -5048,6 +5078,12 @@ def seal_library_pick(store: ni.NIStore, item_id: str, url: str, row: dict) -> N
     record["_library_provider"] = str(row.get("provider") or "")[:120]
     record["_library_scope"] = "place" if row.get("scope") == "place" else "global"
     record["_library_label"] = str(row.get("label") or "")[:160]  # the reading it was offered as
+    # the source's free request limits, for the card to say so when its cadence overruns them (``_built_from_of``)
+    limits = ni_limits.block(row.get("provider"), row.get("needs_key"), row.get("limits"))
+    if limits is not None:
+        record["_library_limits"] = limits
+    else:
+        record.pop("_library_limits", None)  # a re-pick of another row keeps no earlier row's limits
     # how the Library read the ask's named subjects ("New York Yankees (mlb)"; a place reading is the place):
     # every row of the pick, kept across re-picks — locate checked each row it offered against them (a
     # source takes the team, covers its league, or declares it)
@@ -6842,11 +6878,12 @@ def _built_from_of(store: ni.NIStore, item_id: str, path: str, url: str, title: 
     """The sealed ``_built_from`` marker (ruling 2026-10-04): which path built the card, the host
     its reading came from, and the page / dataset title the user judges it by — the page's own
     title, else the title of the pick row the user tapped (Library or web), else "" (a pasted
-    link names only its host)."""
+    link names only its host). A card built from the Library row the flow sealed also carries that source's free
+    request limits (``limits``, pack v1.6.0), so it can say when its cadence overruns them (``ni_limits.line``)."""
     assert path in ni._BUILT_FROM_PATHS, "path must be closed"
     host = (urlparse(url).hostname or "").lower()[:ni._MAX_BUILT_FROM_HOST]
+    record = _flow_read(store, item_id) or {}
     if not title.strip():
-        record = _flow_read(store, item_id) or {}
         sealed_sid = str(record.get("_library_source") or "")
         for slot in ("_ranked_library", "_ranked_search"):  # bounded: the sealed pick rows
             row = next((r for r in record.get(slot) or [] if isinstance(r, dict)
@@ -6857,8 +6894,11 @@ def _built_from_of(store: ni.NIStore, item_id: str, path: str, url: str, title: 
             if row is not None:
                 title = str(row.get("title") or "")
                 break
-    return {"path": path, "host": host,
-            "title": " ".join(title.split())[:ni._MAX_BUILT_FROM_TITLE]}
+    out = {"path": path, "host": host, "title": " ".join(title.split())[:ni._MAX_BUILT_FROM_TITLE]}
+    limits = record.get("_library_limits")
+    if record.get("_library_url") == url and ni_limits.valid_block(limits):
+        out["limits"] = limits
+    return out
 
 
 def _finalize(store: ni.NIStore, item_id: str, spec: dict, preview: dict,

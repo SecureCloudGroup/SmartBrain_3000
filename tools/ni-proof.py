@@ -453,6 +453,8 @@ def _card(api: Api, item_id: str) -> dict:
     out = {k: row.get(k) for k in ("title", "state", "last_status", "last_checked", "consecutive_failures",
                                    "interval_minutes", "shell", "c2_ok", "awaiting_yes", "payload_at", "payload_ok",
                                    "payload", "interpreted", "fit")}
+    # what the card says about its source's free request limit and the host's wait (2026-10-31), when it says it
+    out.update({k: row[k] for k in ("limit", "waiting") if row.get(k)})
     out.update(reading_of(row.get("payload")))
     status, item = api("GET", f"/api/ni/items/{item_id}", None)
     if status == 200 and isinstance(item, dict):
@@ -465,7 +467,7 @@ def _card(api: Api, item_id: str) -> dict:
                              "host": (urllib.parse.urlsplit(str(source.get("url") or "")).hostname or None)}
         built = spec.get("_built_from") if isinstance(spec.get("_built_from"), dict) else None
         if built is not None:
-            out["built_from"] = {k: built.get(k) for k in ("path", "host", "title")}
+            out["built_from"] = {k: built.get(k) for k in ("path", "host", "title", "limits") if k in built}
     return out
 
 
@@ -621,6 +623,12 @@ def markdown(report: dict) -> str:
         lines += ["", "## Decline", "", f"- {decline.get('reason')}: {decline.get('line')}"]
         lines += [f"- link: {u}" for u in decline.get("links") or []]
     lines += ["", "## Reading", "", f"- Summary: {card.get('summary') or '(none)'}"]
+    if card.get("limit"):
+        lines += [f"- Limit: {_cell(str(card['limit']))}"]
+    if isinstance(card.get("waiting"), dict):
+        wait = card["waiting"]
+        lines += [f"- Waiting: {wait.get('host')} asked SmartBrain to wait until {wait.get('until')}"
+                  + (f": {_cell(str(wait.get('said')))}" if wait.get("said") else "")]
     lines += [f"- {v['at']}: {v['value']}" for v in card.get("values") or []] or ["- no numbers on the card"]
     if card.get("shown"):
         lines += ["- Shown: " + _cell(" / ".join(card["shown"]))]

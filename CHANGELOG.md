@@ -12,6 +12,16 @@ to know when a release changes behavior.
 ## [Unreleased]
 
 ### Changed
+- Neural Interface: a card tries first the source whose free request limit covers how often it refreshes. The
+  SmartBrain Library (pack v1.6.0) now records the request limits providers publish, and "NVDA stock price every 30
+  minutes" is 48 requests a day: Finnhub's free key allows 60 a minute and now goes first, while Alpha Vantage's
+  allows 25 a day, so a card built on it stopped updating from about midday every day without saying why (T's Mac
+  built the NVDA card on Alpha Vantage). An hourly card is 24 a day, which Alpha Vantage covers, so for it the
+  Library's order holds. Where a provider publishes no number, the order is as before: sources that need no key
+  first.
+- SmartBrain Library pack v1.6.0. The pinned pack moves to v1.6.0: 21 curated sources carry the free request
+  limits their providers publish (`access.limits`), which the order above reads, and two sources' notes no longer
+  quote another address's limit. Nothing else in the pack changed.
 - Neural Interface: when the Library has nothing it can build for an ask, or every source it offered fails, research
   runs at once under the consent the card already holds (the consent question has said since 0.27.0 that "if no
   ready-made source fits, it may also research one with the same service"). Before, a first run ended at once with
@@ -97,6 +107,12 @@ to know when a release changes behavior.
   never built from; before, only the sealed spec's parameters were dropped and such a key stayed in the store.
 
 ### Added
+- Neural Interface: a card says when its source's free limit won't keep up with it. Held for Keep, it says so under
+  the button ("Alpha Vantage's free key allows 25 requests a day. Refreshing every 30 minutes needs 48, so this card
+  will stop updating partway through each day."). While a source asks SmartBrain to wait (its quota is spent, or it
+  asks for a pause), the card says which site asked and when it tries again, after that line or with the site's own
+  words; before, it just stopped updating. The board's rows carry both (`limit`, `waiting`), and `tools/ni-proof.py`
+  reports them.
 - Neural Interface: the card says what it tried. A key pause and a declined card list each source the build tried
   and why it moved on ("www.alphavantage.co: files its values under the day's date..."); before, those reasons
   lived only in the sealed record, and a decline read "no source answers this" over three sources that each

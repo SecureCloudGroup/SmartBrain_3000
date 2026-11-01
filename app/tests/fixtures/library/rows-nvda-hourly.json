@@ -1,0 +1,131 @@
+{
+  "ask": "NVDA stock price every hour",
+  "intent": {
+    "subject": "NVDA",
+    "wants": [
+      "price"
+    ],
+    "place": null,
+    "frame_kind": null
+  },
+  "limit": 5,
+  "pack_version": "v1.6.0",
+  "recorded_at": "2026-11-01T02:11:28+00:00",
+  "rows": [
+    {
+      "source_id": "alphavantage-quote",
+      "title": "Alpha Vantage global quote",
+      "host": "www.alphavantage.co",
+      "url": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=NVDA",
+      "provider": "Alpha Vantage",
+      "authority": "aggregator",
+      "label": "NVIDIA Corporation (NASDAQ)",
+      "choice": false,
+      "format": "json",
+      "needs_key": {
+        "in": "query",
+        "name": "apikey",
+        "prefix": "",
+        "docs_url": "https://www.alphavantage.co/terms_of_service/"
+      },
+      "needs_contact": false,
+      "params": {
+        "ticker": "NVDA"
+      },
+      "url_template": "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=NVDA",
+      "clock_params": {},
+      "categories": [
+        "markets/stocks",
+        "markets/funds"
+      ],
+      "scope": "global",
+      "lookup": null,
+      "limits": [
+        {
+          "requests": 1,
+          "seconds": 1
+        },
+        {
+          "requests": 25,
+          "seconds": 86400
+        }
+      ],
+      "answers": null
+    },
+    {
+      "source_id": "finnhub-quote",
+      "title": "Finnhub quote",
+      "host": "finnhub.io",
+      "url": "https://finnhub.io/api/v1/quote?symbol=NVDA",
+      "provider": "Finnhub",
+      "authority": "aggregator",
+      "label": "NVIDIA Corporation (NASDAQ)",
+      "choice": false,
+      "format": "json",
+      "needs_key": {
+        "in": "query",
+        "name": "token",
+        "prefix": "",
+        "docs_url": "https://finnhub.io/terms-of-service"
+      },
+      "needs_contact": false,
+      "params": {
+        "ticker": "NVDA"
+      },
+      "url_template": "https://finnhub.io/api/v1/quote?symbol=NVDA",
+      "clock_params": {},
+      "categories": [
+        "markets/stocks",
+        "markets/indices"
+      ],
+      "scope": "global",
+      "lookup": null,
+      "limits": [
+        {
+          "requests": 60,
+          "seconds": 60
+        }
+      ],
+      "answers": null
+    },
+    {
+      "source_id": "alphavantage-daily",
+      "title": "Alpha Vantage daily history",
+      "host": "www.alphavantage.co",
+      "url": "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=NVDA",
+      "provider": "Alpha Vantage",
+      "authority": "aggregator",
+      "label": "NVIDIA Corporation (NASDAQ)",
+      "choice": false,
+      "format": "json",
+      "needs_key": {
+        "in": "query",
+        "name": "apikey",
+        "prefix": "",
+        "docs_url": "https://www.alphavantage.co/terms_of_service/"
+      },
+      "needs_contact": false,
+      "params": {
+        "ticker": "NVDA"
+      },
+      "url_template": "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=NVDA",
+      "clock_params": {},
+      "categories": [
+        "markets/stocks"
+      ],
+      "scope": "global",
+      "lookup": null,
+      "limits": [
+        {
+          "requests": 1,
+          "seconds": 1
+        },
+        {
+          "requests": 25,
+          "seconds": 86400
+        }
+      ],
+      "answers": null
+    }
+  ]
+}

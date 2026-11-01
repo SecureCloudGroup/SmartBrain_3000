@@ -2,9 +2,10 @@
 route table.
 
 Three releases were announced fixed on fixtures typed by hand (0.27.1, 0.27.2, 0.27.3) and each failed on T's Mac
-within the hour. These tests replay, through ``ni_flow.run_flow`` with its production fetcher, the rows the v1.5.0
-pack really ranks for "NVDA stock price every 30 minutes" (``fixtures/library/rows-nvda.json``, recorded with
-``tools/ni-library-rows.py``) against the bodies the providers serve (``fixtures/providers/<host>/<name>.json``,
+within the hour. These tests replay, through ``ni_flow.run_flow`` with its production fetcher, the rows the v1.6.0
+pack really ranks for "NVDA stock price every 30 minutes" (``fixtures/library/rows-nvda.json``, and for the hourly
+ask ``rows-nvda-hourly.json``, recorded with ``tools/ni-library-rows.py``) against the bodies the providers serve
+(``fixtures/providers/<host>/<name>.json``,
 captured with ``tools/ni-capture-fixtures.py``). The only seams are the model (scripted, but it reads the real menu
 and copies a path from it), ``netguard._guarded_get_once`` (the one function that touches the network: the bytes
 the provider sent, with its status and content type) and the politeness clock, so the key store, the host-bound
@@ -30,6 +31,14 @@ What the first capture showed on 2026-10-31:
   once and builds; a limit that holds ends it with a retry; a refresh stays due.
 * Alpha Vantage answered a made-up key with a real quote: a quote proves nothing about the key, and the invalid-key
   sentence the first fixtures assumed was never seen.
+
+What T chose on 2026-10-31 ("Prefer a source that fits", pack v1.6.0): every 30 minutes is 48 requests a day and
+Alpha Vantage's free key allows 25, so a card built on it would stop updating from about midday. The pack carries
+each provider's free limit, and the auto-pick tries the rows whose limit covers the cadence first: Finnhub (60 a
+minute), then the Alpha Vantage rows. A card on Alpha Vantage says so under Keep, and says when it tries again
+while the host holds it off. An hourly card is 24 a day, which Alpha Vantage covers, so for it the Library's own
+order holds and Alpha Vantage goes first. The tests of what Alpha Vantage does once the build reaches it use its
+two rows alone (``AV_ROWS``: the build after Finnhub's row was skipped) or the hourly ask.
 """
 from __future__ import annotations
 
@@ -39,7 +48,7 @@ import json
 import pathlib
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -51,14 +60,17 @@ from test_ni_auto_pick import _row
 from smartbrain_3000 import (
     auth,
     gateway,
+    library_index,
     netguard,
     ni,
     ni_flow,
+    ni_limits,
     ni_master,
     ni_message,
     ni_polite,
     ni_refresh,
     ni_research_flow,
+    ni_routes,
     ni_standing,
 )
 from smartbrain_3000 import db as dbmod
@@ -68,8 +80,15 @@ FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 PROVIDERS = FIXTURES / "providers"
 CAPTURE_TOOL = pathlib.Path(__file__).resolve().parents[2] / "tools" / "ni-capture-fixtures.py"
 ROWS_NVDA = json.loads((FIXTURES / "library" / "rows-nvda.json").read_text(encoding="utf-8"))
+ROWS_HOURLY = json.loads((FIXTURES / "library" / "rows-nvda-hourly.json").read_text(encoding="utf-8"))
 ASK = ROWS_NVDA["ask"]
-AV_QUOTE, FINNHUB, AV_DAILY = (r["url"] for r in ROWS_NVDA["rows"])
+HOURLY = ROWS_HOURLY["ask"]   # "NVDA stock price every hour": 24 requests a day, which Alpha Vantage's 25 covers
+AV_QUOTE, FINNHUB, AV_DAILY = (r["url"] for r in ROWS_NVDA["rows"])   # the Library's order
+AV_ROWS = [ROWS_NVDA["rows"][0], ROWS_NVDA["rows"][2]]   # the two Alpha Vantage rows: the build after Finnhub's skip
+AV_WINDOWS = [{"requests": 1, "seconds": 1}, {"requests": 25, "seconds": 86400}]
+AV_LIMITS = {"provider": "Alpha Vantage", "keyed": True, "windows": AV_WINDOWS}
+AV_LINE = ("Alpha Vantage's free key allows 25 requests a day. Refreshing every 30 minutes needs 48, so this card "
+           "will stop updating partway through each day.")
 T_ROUTES = {"ni": "claudecode/opus", "chat": "claudecode/sonnet", "agent": "claudecode/sonnet"}
 T_ZONE = "America/New_York"   # T's Mac (2026-10-31: a test that only failed off UTC)
 KEY_PARAMS = frozenset({"apikey", "token", "key", "api_key", "access_token"})
@@ -91,7 +110,7 @@ def _store() -> ni.NIStore:
 
 class _Library:
     """The pack's rows for the ask, as ``ni_flow._library_candidates`` would offer them (no declared answers:
-    every quote row of v1.5.0 is keyed and undeclared)."""
+    every quote row of v1.6.0 is keyed and undeclared)."""
 
     def __init__(self, rows: list[dict]) -> None:
         self.rows = [dict(r) for r in rows]
@@ -172,17 +191,19 @@ _ALIASES = {"price": ("c", "last", "close", "price")}   # how the quote provider
 class _Model:
     """The build's model, scripted by stage; the mapping stage READS the menu the flow printed and copies one
     offered path per field (by name, then by the provider's own alias for it, then the first of the type), so a
-    spelling the flow cannot print or verify fails here as it would with a real model. Counts calls by stage."""
+    spelling the flow cannot print or verify fails here as it would with a real model. Counts calls by stage.
+    ``cadence``: the minutes the intent reads from the ask (30 for the proof ask, 60 for the hourly one)."""
 
-    def __init__(self, picks: dict[str, str] | None = None) -> None:
+    def __init__(self, picks: dict[str, str] | None = None, cadence: int = 30) -> None:
         self.calls: dict[str, int] = {"intent": 0, "mapping": 0, "judge": 0, "other": 0}
         self.picks = picks  # a forced reply for the mapping stage (a test of invalid picks)
+        self.cadence = cadence
 
     def __call__(self, model: str, prompt: str) -> str:
         assert model == "claudecode/opus", f"T's build model, consented; got {model}"
         if "Classify a dashboard-card request" in prompt:
             self.calls["intent"] += 1
-            return json.dumps({"kind": "external_data", "subject": "NVDA", "cadence_minutes": 30,
+            return json.dumps({"kind": "external_data", "subject": "NVDA", "cadence_minutes": self.cadence,
                                "wants": ["price"], "threshold": None, "display_hint": "value"})
         if "Choose the best candidate path" in prompt:
             self.calls["mapping"] += 1
@@ -296,6 +317,11 @@ def _notes(store: ni.NIStore, item_id: str) -> str:
     return json.dumps((ni_flow._flow_read(store, item_id) or {}).get("notes"))
 
 
+def _board(store: ni.NIStore, item_id: str) -> dict:
+    """The card's row as ``GET /api/ni/board`` serves it (its ``limit`` line and ``waiting`` block included)."""
+    return ni_routes._board_row(store, store.get_item(item_id))
+
+
 # ---- the fixtures themselves ----------------------------------------------------------------------------------
 
 @pytest.mark.skipif(not hasattr(time, "tzset"), reason="the zone is set with time.tzset")
@@ -309,14 +335,85 @@ def test_these_tests_run_in_ts_zone_on_productions_utc_database() -> None:
 
 
 def test_the_recorded_rows_are_the_packs_three_keyed_undeclared_quote_rows() -> None:
-    """What the v1.5.0 pack offers for the NVDA ask (T's Mac ranked the same three, in this order), so the matrix
-    below runs over the Library the user has, not rows a test invented."""
-    assert ROWS_NVDA["pack_version"] == "v1.5.0"
+    """What the v1.6.0 pack offers for the NVDA ask, in the Library's order (T's Mac ranked the same three on
+    v1.5.0), each with the free request limits its provider documents, so the matrix below runs over the Library the
+    user has, not rows a test invented. The pack ranks the same rows for the hourly ask."""
+    assert ROWS_NVDA["pack_version"] == ROWS_HOURLY["pack_version"] == "v1.6.0"
     rows = ROWS_NVDA["rows"]
     assert [r["source_id"] for r in rows] == ["alphavantage-quote", "finnhub-quote", "alphavantage-daily"]
     assert all(r["needs_key"] and r["needs_key"]["in"] == "query" and r["answers"] is None for r in rows)
     assert [r["needs_key"]["name"] for r in rows] == ["apikey", "token", "apikey"]
     assert [r["host"] for r in rows] == ["www.alphavantage.co", "finnhub.io", "www.alphavantage.co"]
+    assert [r["limits"] for r in rows] == [AV_WINDOWS, [{"requests": 60, "seconds": 60}], AV_WINDOWS]
+    assert ROWS_HOURLY["ask"] == "NVDA stock price every hour" and ROWS_HOURLY["rows"] == rows
+
+
+def test_every_recorded_row_fixture_comes_from_the_pack_this_build_pins() -> None:
+    """The rows a test replays are the pinned pack's (``library_index.PACK``): a pack bump re-records them with
+    ``tools/ni-library-rows.py``, or this fails, so the matrix never runs over a Library no install has."""
+    recorded = sorted((FIXTURES / "library").glob("rows-*.json"))
+    assert len(recorded) >= 3, "rows-nvda, rows-nvda-hourly and rows-msft"
+    for path in recorded:  # bounded: the fixtures directory
+        assert json.loads(path.read_text(encoding="utf-8"))["pack_version"] == library_index.PACK["tag"], path.name
+
+
+def _pick_order(rows: list[dict], cadence: object) -> list[str]:
+    """The order the auto-pick tries ``rows`` in for an intent of ``cadence`` minutes."""
+    return [r["source_id"] for r in ni_flow._by_fit(ni_flow._library_rows(copy.deepcopy(rows)),
+                                                    {"cadence_minutes": cadence})]
+
+
+def test_the_pick_tries_first_the_source_whose_free_limit_covers_the_cadence() -> None:
+    """T, 2026-10-31: "Prefer a source that fits". Every 30 minutes is 48 requests a day: Finnhub's free key (60 a
+    minute) covers it and Alpha Vantage's (25 a day) does not, so Finnhub goes first and the Alpha Vantage rows after
+    it, in the Library's order. From every 58 minutes (25 a day) Alpha Vantage covers it and the Library's order
+    holds. A cadence under the third-party floor counts as the floor (a card is never refreshed faster), and an ask
+    with no cadence is the default card's."""
+    rows = ROWS_NVDA["rows"]
+    finnhub_first = ["finnhub-quote", "alphavantage-quote", "alphavantage-daily"]
+    library_order = ["alphavantage-quote", "finnhub-quote", "alphavantage-daily"]
+    assert _pick_order(rows, 30) == _pick_order(rows, 57) == finnhub_first
+    assert _pick_order(rows, 58) == _pick_order(rows, 60) == _pick_order(rows, 24 * 60) == library_order
+    assert ni_limits.need(86400, 57) == 26 and ni_limits.need(86400, 58) == 25, "the boundary: 25 a day"
+    assert _pick_order(rows, 1) == finnhub_first, "every minute counts as every 15 (96 a day)"
+    assert _pick_order(rows, None) == _pick_order(rows, "30") == _pick_order(rows, True) == finnhub_first, \
+        "no cadence or a malformed one is the default card's (every 15 minutes)"
+    assert ni_flow._DEFAULT_CADENCE == ni_polite.CADENCE_FLOOR_MINUTES == 15
+
+
+def test_the_pick_counts_the_cadence_a_card_really_refreshes_at() -> None:
+    """A card on a third-party host is never refreshed faster than every 15 minutes (96 requests a day), so a source
+    allowing 100 a day covers a five-minute ask there and goes first; on an own host there is no floor, so five
+    minutes is 288 a day and the same limit does not cover it. Mutation check: a pick that ignored the floor sent
+    the five-minute ask past a source that serves it."""
+    free = {**ROWS_NVDA["rows"][1], "source_id": "free-100", "url": "https://quotes.example.org/v1/nvda.json",
+            "host": "quotes.example.org", "needs_key": None, "limits": [{"requests": 100, "seconds": 86400}]}
+    own = {**free, "source_id": "own-100", "url": "http://quotes.local/nvda.json", "host": "quotes.local"}
+    rows = [*ROWS_NVDA["rows"], free]
+    assert _pick_order(rows, 5) == ["free-100", "finnhub-quote", "alphavantage-quote", "alphavantage-daily"]
+    assert _pick_order([*ROWS_NVDA["rows"], own], 5) == ["finnhub-quote", "own-100", "alphavantage-quote",
+                                                        "alphavantage-daily"]
+    assert _pick_order([*ROWS_NVDA["rows"], own], 15) == ["own-100", "finnhub-quote", "alphavantage-quote",
+                                                         "alphavantage-daily"]
+
+
+def test_a_limit_nobody_documented_counts_as_covering_and_keyless_rows_go_first_within_a_group() -> None:
+    """Most providers document no number: an unknown limit covers, so a pack without limits (v1.5.0) and a malformed
+    field (data from a pack is never trusted to be well formed) keep the order the auto-pick had before. Within the
+    rows that cover, and within the rows that don't, a row that needs no key goes before one that asks for it; a
+    keyless row that runs out still goes after a keyed one that covers."""
+    rows = ROWS_NVDA["rows"]
+    library_order = ["alphavantage-quote", "finnhub-quote", "alphavantage-daily"]
+    assert _pick_order([{**r, "limits": None} for r in rows], 30) == library_order, "a pack without limits"
+    malformed = [{"requests": 25, "seconds": 86400}, {"requests": 0, "seconds": 1}]
+    assert _pick_order([{**r, "limits": malformed} for r in rows], 30) == library_order, "all or nothing: unknown"
+    keyless = {**rows[1], "source_id": "free-quote", "url": "https://quotes.example.org/v1/nvda.json",
+               "host": "quotes.example.org", "needs_key": None, "limits": None}
+    assert _pick_order([*rows, keyless], 30) == ["free-quote", "finnhub-quote", "alphavantage-quote",
+                                                 "alphavantage-daily"]
+    runs_out = {**keyless, "source_id": "free-but-short", "limits": [{"requests": 10, "seconds": 86400}]}
+    assert _pick_order([runs_out, *rows], 30) == ["finnhub-quote", "free-but-short", "alphavantage-quote",
+                                                  "alphavantage-daily"]
 
 
 def test_every_provider_fixture_is_captured() -> None:
@@ -367,15 +464,16 @@ def test_no_fixture_carries_a_key() -> None:
 # ---- the quote row: the real body through the production fetch path -----------------------------------------------
 
 def test_the_quote_row_builds_from_the_real_body_with_the_users_key_on_the_production_fetch_path(monkeypatch) -> None:
-    """The NVDA ask on T's install, end to end: the first row asks for its key before anything is fetched; the key
-    goes under this card bound to www.alphavantage.co; the build samples through ``ni_flow.default_fetcher`` →
-    ``_fetch_with_access`` → ``ni.http_request_parts`` → ``ni_fetch`` → ``netguard`` with ``apikey=`` on the
-    request and refuses redirects; the walker offers Alpha Vantage's spaced, numbered keys as quoted paths; the
-    model copies one from the menu; the price (sent as text) is converted; the card is held for Keep with the
-    quoted path in its sealed pipeline and the key only as a reference."""
+    """The NVDA ask on T's install once the build reaches Alpha Vantage's rows (Finnhub's skipped), end to end: the
+    quote row asks for its key before anything is fetched; the key goes under this card bound to
+    www.alphavantage.co; the build samples through ``ni_flow.default_fetcher`` → ``_fetch_with_access`` →
+    ``ni.http_request_parts`` → ``ni_fetch`` → ``netguard`` with ``apikey=`` on the request and refuses redirects;
+    the walker offers Alpha Vantage's spaced, numbered keys as quoted paths; the model copies one from the menu; the
+    price (sent as text) is converted; the card is held for Keep with the quoted path in its sealed pipeline, the
+    key only as a reference, and the source's free limits sealed with it."""
     replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
     model = _Model()
-    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    store, item_id, secrets = _card(monkeypatch, AV_ROWS, replay)
     out = ni_flow.run_flow(store, item_id, gateway_call=model)
     assert out["state"] == "awaiting_access" and out["source_url"] == AV_QUOTE and replay.fetched == []
     assert out["_access"]["host"] == "www.alphavantage.co" and out["_access"]["key"]["name"] == "apikey"
@@ -396,6 +494,8 @@ def test_the_quote_row_builds_from_the_real_body_with_the_users_key_on_the_produ
     assert item["spec"]["source"]["secret_query"] == {"apikey": {"$secret": f"ni:{item_id}:api_key"}}
     sealed = json.dumps(item["spec"]) + json.dumps(ni_flow._flow_read(store, item_id))
     assert AV_KEY not in sealed, "the key is stored once, host-bound, and referenced everywhere else"
+    assert item["spec"]["_built_from"] == {"path": "mapping", "host": "www.alphavantage.co",
+                                           "title": ROWS_NVDA["rows"][0]["title"], "limits": AV_LIMITS}
     ni.validate_spec(item["spec"])  # the sealed card is a valid card: its quoted path is grammar, not a hack
 
 
@@ -403,7 +503,7 @@ def test_the_sealed_card_refreshes_through_the_same_request(monkeypatch) -> None
     """The engine's refresh (``ni.run_item``) reads the card's pipeline over a fresh fetch with the same key
     reference: the quoted path resolves there too, with the price converted."""
     replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
-    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    store, item_id, secrets = _card(monkeypatch, AV_ROWS, replay)
     ni_flow.run_flow(store, item_id, gateway_call=_Model())
     ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
     out = ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=AV_QUOTE)
@@ -418,17 +518,70 @@ def test_the_sealed_card_refreshes_through_the_same_request(monkeypatch) -> None
     assert runs and runs[-1][0] == "ok", runs
 
 
+# ---- the source that fits the cadence (pack v1.6.0) ------------------------------------------------------------
+
+def test_the_nvda_ask_tries_finnhub_first_and_alpha_vantage_is_sent_nothing(monkeypatch) -> None:
+    """The proof ask with both keys at hand (T has both; the Alpha Vantage one already on another card): the build
+    pauses first for Finnhub's key, since its free key covers every 30 minutes and Alpha Vantage's 25 a day do not
+    (T's Mac built on Alpha Vantage, which would have stopped updating from about midday). Finnhub's key builds the
+    card from its flat body, the card refreshes through the same request, and nothing is ever sent to Alpha
+    Vantage. Finnhub's limits are sealed with the card, and they leave the card nothing to say."""
+    replay = _Replay({FINNHUB: "finnhub-quote"}, {"finnhub.io": FH_KEY})
+    model = _Model()
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    ni.put_credential(secrets, "another-card", ni_flow.KEY_PARAM, AV_KEY, "www.alphavantage.co")
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["source_url"] == FINNHUB and out["_access"]["host"] == "finnhub.io"
+    assert replay.fetched == [] and not out["_access"].get("reuse"), "a key for another host is never offered"
+    assert ni_flow.give_access(store, item_id, secrets, key=FH_KEY, email=None) == []
+    item = _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=model, source_url=FINNHUB), FINNHUB)
+    assert item["spec"]["pipeline"][0]["paths"]["price"] == "c"
+    assert item["spec"]["_built_from"]["limits"] == {"provider": "Finnhub", "keyed": True,
+                                                     "windows": [{"requests": 60, "seconds": 60}]}
+    ni.validate_spec(item["spec"])
+    assert "limit" not in _board(store, item_id) and "waiting" not in _board(store, item_id)
+    monkeypatch.setattr(ni, "_clock", lambda: datetime.now().astimezone() + timedelta(minutes=31))
+    ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
+    assert store.read_snapshot(item_id, "latest")["ok"]
+    assert replay.fetched == [f"{FINNHUB}&token={FH_KEY}"] * 2, "the build's sample and the refresh; no other host"
+    assert AV_KEY not in _kept(store, item_id) and FH_KEY not in _kept(store, item_id)
+
+
+def test_with_only_an_alpha_vantage_key_the_card_says_at_keep_that_it_will_run_out(monkeypatch) -> None:
+    """No Finnhub key: Skip at Finnhub's pause, and the build goes on to Alpha Vantage's quote row, which asks for
+    its key. The card builds from it and, held for Keep, says that Alpha Vantage's free key allows 25 requests a
+    day while refreshing every 30 minutes needs 48 (T, 2026-10-31: "says so when none does"). Finnhub was sent
+    nothing."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    model = _Model()
+    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io"
+    assert ni_flow.skip_source(store, item_id) is True
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)   # the worker the skip started
+    assert out["state"] == "awaiting_access" and out["source_url"] == AV_QUOTE
+    assert ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None) == []
+    item = _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE), AV_QUOTE)
+    assert item["spec"]["_built_from"]["limits"] == AV_LIMITS and item["interval_minutes"] == 30
+    row = _board(store, item_id)
+    assert row["limit"] == AV_LINE and row["awaiting_yes"] and "waiting" not in row
+    assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"], "Finnhub was sent nothing"
+
+
 # ---- a sentence instead of data --------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", ["alphavantage-demo-key-refused"])
 def test_a_sentence_body_moves_on_at_once_with_no_model_call_and_the_reason_on_the_record(monkeypatch, name) -> None:
     """Alpha Vantage refuses its demo key on a real symbol with a 200 OK sentence. The row moves on with the
     sentence's gist as its reason and not one mapping or judge call; the pick goes on to Finnhub, which asks for
-    its own key. (A limit sentence is a wait, not a refusal: the tests below.)"""
+    its own key. (An hourly card: Alpha Vantage's free key covers it, so its quote row goes first. A limit sentence
+    is a wait, not a refusal: the tests below.)"""
     replay = _Replay({AV_QUOTE: name}, {"www.alphavantage.co": AV_KEY})
-    model = _Model()
-    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
-    ni_flow.run_flow(store, item_id, gateway_call=model)
+    model = _Model(cadence=60)
+    store, item_id, secrets = _card(monkeypatch, ROWS_HOURLY["rows"], replay, ask=HOURLY)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["source_url"] == AV_QUOTE, "the Library's order holds"
     ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
     out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)
     assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"]
@@ -468,7 +621,8 @@ def test_provider_message_tells_a_sentence_from_data() -> None:
 # ---- the host asks SmartBrain to wait ----------------------------------------------------------------------------
 
 def _keyed_quote_card(monkeypatch, rows: list[dict], replay: _Replay, model: _Model) -> tuple[ni.NIStore, str, dict]:
-    """The NVDA card past its key pause: the user's Alpha Vantage key given, the quote row's build run."""
+    """The NVDA card past its key pause: the user's Alpha Vantage key given, the quote row's build run (``rows``
+    the Alpha Vantage rows, which the build reaches after a Finnhub skip)."""
     store, item_id, secrets = _card(monkeypatch, rows, replay)
     ni_flow.run_flow(store, item_id, gateway_call=model)
     ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
@@ -483,7 +637,7 @@ def test_a_one_second_limit_is_waited_out_once_and_the_quote_builds(monkeypatch,
     replay = _Replay({AV_QUOTE: ["alphavantage-burst-limited", "alphavantage-global-quote"]},
                      {"www.alphavantage.co": AV_KEY})
     model = _Model()
-    store, item_id, out = _keyed_quote_card(monkeypatch, ROWS_NVDA["rows"], replay, model)
+    store, item_id, out = _keyed_quote_card(monkeypatch, AV_ROWS, replay, model)
     item = _held(store, item_id, out, AV_QUOTE)
     assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"] * 2, "the request, and once more after the wait"
     assert _t_install.slept == [ni_message.WAIT_SECOND_S], "the wait the host named, once"
@@ -496,14 +650,12 @@ def test_a_limit_that_holds_ends_the_build_with_a_retry_and_the_hosts_words(monk
     for this build (one wall for every tenant), no model reads the sentence, no research runs past a source that is
     only busy, and the card ends failed with a retry and the host's own words, never declined. While the host's
     pause holds a retry sends nothing and says the same; once it ends, the retry builds."""
-    rows = [ROWS_NVDA["rows"][0], ROWS_NVDA["rows"][2]]   # the two Alpha Vantage rows
     replay = _Replay({AV_QUOTE: "alphavantage-burst-limited", AV_DAILY: "alphavantage-time-series-daily"},
                      {"www.alphavantage.co": AV_KEY})
     model = _Model()
     researched: list[str] = []
-    from smartbrain_3000 import ni_research_flow
     monkeypatch.setattr(ni_research_flow, "fallback", lambda *a, **k: researched.append("ran") or {})
-    store, item_id, out = _keyed_quote_card(monkeypatch, rows, replay, model)
+    store, item_id, out = _keyed_quote_card(monkeypatch, AV_ROWS, replay, model)
     assert out["state"] == "failed" and ni_master.error_class_of(out["error"]) == "waited", out
     assert replay.fetched == [f"{AV_QUOTE}&apikey={AV_KEY}"] * 2, "asked twice, the daily row never fetched"
     assert model.calls["mapping"] == 0 and model.calls["judge"] == 0 and researched == []
@@ -531,12 +683,15 @@ def test_a_limit_that_holds_ends_the_build_with_a_retry_and_the_hosts_words(monk
 def test_a_refresh_the_host_asks_to_wait_stays_due_and_is_never_a_failure(monkeypatch, _t_install) -> None:
     """A kept card whose refresh gets the host's limit sentence is not failed (no run row, no streak, no repair, the
     last value stays): the host is paused for the window it named and the card stays due; the next refresh after
-    the pause reads the quote. Before 2026-10-31 the sentence was read as the card's data and failed it."""
+    the pause reads the quote. Before 2026-10-31 the sentence was read as the card's data and failed it, and nothing
+    on the card said why it stopped updating: the board row now carries the host's wait (when the card tries again,
+    in the host's words) beside the line about the free limit its cadence overruns, until the pause ends."""
     replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
-    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    store, item_id, secrets = _card(monkeypatch, AV_ROWS, replay)
     ni_flow.run_flow(store, item_id, gateway_call=_Model())
     ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
     _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=AV_QUOTE), AV_QUOTE)
+    assert _board(store, item_id)["limit"] == AV_LINE and "waiting" not in _board(store, item_id)
     monkeypatch.setattr(ni, "_clock", lambda: datetime.now().astimezone() + timedelta(minutes=31))
     replay.serve(AV_QUOTE, "alphavantage-burst-limited")
     with pytest.raises(ni.NIError) as busy:
@@ -546,7 +701,17 @@ def test_a_refresh_the_host_asks_to_wait_stays_due_and_is_never_a_failure(monkey
     item = store.get_item(item_id)
     assert item["consecutive_failures"] == 0 and store.conn.execute(
         "SELECT count(*) FROM ni_runs WHERE item_id = ? AND status <> 'ok';", [item_id]).fetchone()[0] == 0
+    before = datetime.now(UTC)
+    row = _board(store, item_id)
+    waiting = row["waiting"]
+    assert set(waiting) == {"host", "until", "said"} and waiting["host"] == "www.alphavantage.co"
+    assert "1 request per second" in waiting["said"] and waiting["said"] == ni_polite.SHARED._said(waiting["host"])
+    until = datetime.fromisoformat(waiting["until"])
+    assert until.utcoffset() == timedelta(0) and timedelta(0) <= until - before.replace(microsecond=0) \
+        <= timedelta(seconds=ni_message.WAIT_SECOND_S + 1), "when the card tries again, in UTC"
+    assert row["limit"] == AV_LINE, "the line about the limit rides beside the wait"
     _t_install.now += ni_message.WAIT_SECOND_S + 1
+    assert "waiting" not in _board(store, item_id), "the pause is over: no wait to show"
     replay.serve(AV_QUOTE, "alphavantage-global-quote")
     ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
     assert store.read_snapshot(item_id, "latest")["ok"]
@@ -586,13 +751,15 @@ class _Recording(_Model):
 
 def _kept(store: ni.NIStore, item_id: str) -> str:
     """Everything the card keeps that a person, a phone or a model can read: its record (notes, error, what it
-    waited on), its History, what the card shows, its spec, its snapshots and its runs."""
+    waited on), its History, what the card shows, its spec, its snapshots, its runs and its board row (the host's
+    wait in its own words included)."""
     item = store.get_item(item_id) or {}
     runs = store.conn.execute("SELECT * FROM ni_runs WHERE item_id = ?;", [item_id]).fetchall()
     return json.dumps([ni_flow._flow_read(store, item_id), store.read_journal(item_id),
                        ni_flow.board_flow_field(store, item_id, read_only=True), item.get("spec"),
                        store.read_snapshot(item_id, "preview"), store.read_snapshot(item_id, "latest"),
-                       [[str(v) for v in row] for row in runs]], default=str)
+                       [[str(v) for v in row] for row in runs],
+                       ni_routes._board_row(store, item) if item else None], default=str)
 
 
 # The sentence reader already hides a word shaped like a token (16 or more letters and digits, ``ni_message``); a key of
@@ -609,11 +776,10 @@ def test_a_spent_quota_that_names_the_key_ends_the_build_with_its_window_and_kee
     politeness layer repeats to every request while the host's pause holds). The body is scrubbed at the fetch, so
     the key is nowhere the card keeps nor in any prompt, whatever its shape; the build ends with a retry and a
     line that says a retry waits for the limit to reset (not "Retry later"); the day's limit is never waited out."""
-    rows = [ROWS_NVDA["rows"][0], ROWS_NVDA["rows"][2]]   # the two Alpha Vantage rows
     replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": key})
     _serve_body(replay, AV_QUOTE, _quota_spent(key))
     model = _Recording()
-    store, item_id, secrets = _card(monkeypatch, rows, replay)
+    store, item_id, secrets = _card(monkeypatch, AV_ROWS, replay)
     ni_flow.run_flow(store, item_id, gateway_call=model)
     ni_flow.give_access(store, item_id, secrets, key=key, email=None)
     out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)
@@ -633,9 +799,11 @@ def test_a_refresh_that_meets_the_spent_quota_stays_due_for_its_window_and_keeps
                                                                                        _t_install) -> None:
     """The kept card's refresh meets the spent quota: the card stays due (a capacity status, no failure), the host
     is paused for the window the sentence names (the hour cap, not a second), nothing is sent while it holds, and
-    the key is in neither the refusal, nor what the pause repeats to every request, nor anything the card keeps."""
+    the key is in neither the refusal, nor what the pause repeats to every request, nor anything the card keeps.
+    The card says why it isn't updating and when it tries again (T, 2026-10-31: "when the limit is spent, with when
+    it resumes"): the line about the free limit its cadence overruns, and the host's wait with its time."""
     replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": LETTERS_KEY})
-    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    store, item_id, secrets = _card(monkeypatch, AV_ROWS, replay)
     ni_flow.run_flow(store, item_id, gateway_call=_Model())
     ni_flow.give_access(store, item_id, secrets, key=LETTERS_KEY, email=None)
     _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=AV_QUOTE), AV_QUOTE)
@@ -645,6 +813,13 @@ def test_a_refresh_that_meets_the_spent_quota_stays_due_for_its_window_and_keeps
         ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
     assert busy.value.kind == "host_busy" and LETTERS_KEY not in str(busy.value)
     assert LETTERS_KEY not in ni_polite.SHARED._said("www.alphavantage.co"), "the pause repeats no key"
+    before = datetime.now(UTC).replace(microsecond=0)
+    row = _board(store, item_id)
+    assert row["limit"] == AV_LINE and row["waiting"]["host"] == "www.alphavantage.co"
+    assert row["waiting"]["said"].startswith(f"We have detected your API key as {netguard.SCRUBBED} and")
+    resumes = datetime.fromisoformat(row["waiting"]["until"]) - before
+    assert timedelta(seconds=ni_message.WAIT_LONG_S - 2) <= resumes <= timedelta(seconds=ni_message.WAIT_LONG_S + 2), \
+        "the hour cap, the most one answer can hold a host off"
     _t_install.now += ni_message.WAIT_MINUTE_S
     with pytest.raises(ni.NIError) as still:
         ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
@@ -653,8 +828,18 @@ def test_a_refresh_that_meets_the_spent_quota_stays_due_for_its_window_and_keeps
     assert LETTERS_KEY not in _kept(store, item_id)
 
 
+# The keyed builds the proof ask can make: Finnhub's (the source that covers every 30 minutes, ``token=``) and
+# Alpha Vantage's once Finnhub's row is skipped (``apikey=``).
+_KEYED_BUILDS = {
+    "finnhub": (ROWS_NVDA["rows"], FINNHUB, "finnhub.io", FH_KEY, "token", "finnhub-quote"),
+    "alphavantage": (AV_ROWS, AV_QUOTE, "www.alphavantage.co", AV_KEY, "apikey", "alphavantage-global-quote"),
+}
+
+
+@pytest.mark.parametrize("build", sorted(_KEYED_BUILDS))
 def test_no_log_record_holds_the_key_over_the_keyed_build_and_refresh_on_the_real_http_client(monkeypatch, caplog,
-                                                                                            _t_install) -> None:
+                                                                                            _t_install,
+                                                                                            build) -> None:
     """Postmortem M6, end to end. The keyed NVDA build and a refresh run over the real HTTP client: ``httpx`` with a
     stub transport in place of the network, so everything above it is production (netguard's pinned request, the
     politeness layer, the key store, the request builder). Every logger is at DEBUG, the HTTP client's own included,
@@ -666,9 +851,10 @@ def test_no_log_record_holds_the_key_over_the_keyed_build_and_refresh_on_the_rea
 
     from smartbrain_3000 import logredact
 
+    rows, url, host, key, param, served = _KEYED_BUILDS[build]
     real_once = netguard._guarded_get_once
-    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
-    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
+    replay = _Replay({url: served}, {host: key})
+    store, item_id, secrets = _card(monkeypatch, rows, replay)
     monkeypatch.setattr(netguard, "_guarded_get_once", real_once)   # the real guarded request, not the replay
     sent: list[str] = []
 
@@ -688,17 +874,18 @@ def test_no_log_record_holds_the_key_over_the_keyed_build_and_refresh_on_the_rea
     logredact.install()
     with caplog.at_level(logging.DEBUG), caplog.at_level(logging.DEBUG, logger="httpx"), \
             caplog.at_level(logging.DEBUG, logger="httpcore"):
-        ni_flow.run_flow(store, item_id, gateway_call=_Model())
-        ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
-        _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=AV_QUOTE), AV_QUOTE)
+        out = ni_flow.run_flow(store, item_id, gateway_call=_Model())
+        assert out["state"] == "awaiting_access" and out["_access"]["host"] == host, "the build's first pause"
+        ni_flow.give_access(store, item_id, secrets, key=key, email=None)
+        _held(store, item_id, ni_flow.run_flow(store, item_id, gateway_call=_Model(), source_url=url), url)
         monkeypatch.setattr(ni, "_clock", lambda: datetime.now().astimezone() + timedelta(minutes=31))
         ni.run_item(store, item_id, gateway_mod=gateway, secrets_store=secrets)
-    assert sent == [f"{AV_QUOTE}&apikey={AV_KEY}"] * 2, "the build's sample and the refresh, over the client"
+    assert sent == [f"{url}&{param}={key}"] * 2, "the build's sample and the refresh, over the client"
     assert store.read_snapshot(item_id, "latest")["ok"]
     lines = [r.getMessage() for r in caplog.records if r.name == "httpx"]
-    assert len(lines) == 2 and all("HTTP Request: GET" in m and "apikey=[redacted]" in m for m in lines), lines
-    assert AV_KEY not in caplog.text
-    assert not any(AV_KEY in r.getMessage() or AV_KEY in repr(r.args) or AV_KEY in (r.exc_text or "")
+    assert len(lines) == 2 and all("HTTP Request: GET" in m and f"{param}=[redacted]" in m for m in lines), lines
+    assert key not in caplog.text
+    assert not any(key in r.getMessage() or key in repr(r.args) or key in (r.exc_text or "")
                    for r in caplog.records)
 
 
@@ -708,12 +895,15 @@ def test_the_cards_key_for_another_host_does_not_count_for_this_row(monkeypatch)
     """T's Mac: once the Alpha Vantage key sat on the card, the key check saw "a key exists" and skipped the pause
     for the Finnhub row; the host-bound loader then refused the key and the row dropped in 20 ms with no fetch. The
     check compares the stored key's host with the row's: the card asks for Finnhub's key, nothing is fetched, and
-    the key the user then gives builds the card from Finnhub's flat body (``c``, the current price)."""
+    the key the user then gives builds the card from Finnhub's flat body (``c``, the current price). (T's Mac
+    tried Alpha Vantage first; since pack v1.6.0 that is the order for a card whose cadence its free key covers, as
+    an hourly one.)"""
     replay = _Replay({AV_QUOTE: "alphavantage-demo-key-refused", FINNHUB: "finnhub-quote"},
                      {"www.alphavantage.co": AV_KEY, "finnhub.io": FH_KEY})
-    model = _Model()
-    store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
-    ni_flow.run_flow(store, item_id, gateway_call=model)
+    model = _Model(cadence=60)
+    store, item_id, secrets = _card(monkeypatch, ROWS_HOURLY["rows"], replay, ask=HOURLY)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model)
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co"
     ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
     out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)   # Alpha Vantage answers a sentence
     assert out["state"] == "awaiting_access" and out["source_url"] == FINNHUB and out["_access"]["host"] == "finnhub.io"
@@ -730,6 +920,9 @@ def test_the_cards_key_for_another_host_does_not_count_for_this_row(monkeypatch)
         {"price": fixture("finnhub-quote")["body"]["c"]}
     assert str(fixture("finnhub-quote")["body"]["c"]) in json.dumps(store.read_snapshot(item_id, "preview"))
     assert FH_KEY not in json.dumps(item["spec"]) and AV_KEY not in json.dumps(item["spec"])
+    assert item["spec"]["_built_from"]["limits"] == {"provider": "Finnhub", "keyed": True,
+                                                     "windows": [{"requests": 60, "seconds": 60}]}
+    assert "limit" not in _board(store, item_id), "Finnhub's free key covers every hour: nothing to say"
 
 
 def test_missing_access_counts_only_a_key_bound_to_the_rows_host() -> None:
@@ -794,28 +987,32 @@ def test_the_daily_series_is_refused_for_its_dated_paths_and_research_then_runs_
 def test_skipping_each_keyed_host_goes_on_to_the_next_and_then_to_research(monkeypatch) -> None:
     """The user has no key for a source the build paused on: Skip drops that row with that reason, and with it the
     host's other rows that need the same key (review of #570: the daily row asked for Alpha Vantage's key again), and
-    the build goes on from the rows it had left (never a second ranking, which would offer the rows again): Finnhub
-    pauses; skipped, nothing is left and research runs at once under the card's consent. Every pause and the decline
-    list what was tried. Nothing is ever fetched and no mapping call is made."""
+    the build goes on from the rows it had left (never a second ranking, which would offer the rows again). Finnhub
+    pauses first (its free key covers every 30 minutes); skipped, Alpha Vantage's quote row pauses; skipped, its
+    daily row goes with it, nothing is left and research runs at once under the card's consent. Every pause and the
+    decline list what was tried. Nothing is ever fetched and no mapping call is made."""
     replay, model, research = _Replay({}, {}), _Model(), _researcher()
     store, item_id, _secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
     started: list[dict] = []
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda store_, item_id_, **kw: started.append(kw) or True)
     out = ni_flow.run_flow(store, item_id, gateway_call=model)
-    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co"
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io"
     field = ni_flow.board_flow_field(store, item_id, read_only=True)
     assert "skip_source" in field["actions"] and "give_access" in field["actions"] and "tried" not in field
     assert ni_flow.skip_source(store, item_id) is True and started == [{}], "the skip resumes the build itself"
     left = [r["url"] for r in ni_flow._flow_read(store, item_id).get("_ranked_library") or []]
-    assert AV_DAILY not in left and FINNHUB in left, left
+    assert FINNHUB not in left and AV_QUOTE in left and AV_DAILY in left, left
     out = ni_flow.run_flow(store, item_id, gateway_call=model)   # the worker the skip started
-    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io"
-    assert _tried(store, item_id) == [("www.alphavantage.co", ni_flow._SKIP_WHY)]
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co"
+    assert out["source_url"] == AV_QUOTE
+    assert _tried(store, item_id) == [("finnhub.io", ni_flow._SKIP_WHY)]
     assert ni_flow.skip_source(store, item_id) is True
+    left = [r["url"] for r in ni_flow._flow_read(store, item_id).get("_ranked_library") or []]
+    assert AV_DAILY not in left and AV_QUOTE not in left, "the host's keyed rows go with the skip"
     out = ni_flow.run_flow(store, item_id, gateway_call=model)
     assert research.seen, "nothing left: research ran at once under the consent"
     assert out["state"] == "declined" and out["_decline_card"]["reason"] == "research_gave_up", out
-    assert [h for h, _w in _tried(store, item_id)] == ["www.alphavantage.co", "finnhub.io"]
+    assert [h for h, _w in _tried(store, item_id)] == ["finnhub.io", "www.alphavantage.co"]
     field = ni_flow.board_flow_field(store, item_id, read_only=True)
     assert "skip_source" not in field["actions"] and "keep_looking" in field["actions"]
     assert replay.fetched == [] and model.calls["mapping"] == 0 and model.calls["intent"] == 1
@@ -876,10 +1073,10 @@ def test_research_after_both_skips_offers_neither_site_again_and_the_card_says_w
 
     monkeypatch.setattr(gateway, "chat_with_tools_recorded", chat)
     out = ni_flow.run_flow(store, item_id, gateway_call=model)
-    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co"
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io"
     assert ni_flow.skip_source(store, item_id) is True
     out = ni_flow.run_flow(store, item_id, gateway_call=model)
-    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io"
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co"
     assert ni_flow.skip_source(store, item_id) is True
     with caplog.at_level("INFO", logger="smartbrain_3000.ni_research_flow"):
         out = ni_flow.run_flow(store, item_id, gateway_call=model)
@@ -896,7 +1093,7 @@ def test_research_after_both_skips_offers_neither_site_again_and_the_card_says_w
     assert card["reason"] == "research_gave_up" and card["line"] == ni_master.GAVE_UP_LINES["tokens"], card
     assert [link["url"] for link in card["links"]] == [page] and card.get("key_wall") is None
     assert _tried(store, item_id) == [
-        ("www.alphavantage.co", ni_flow._SKIP_WHY), ("finnhub.io", ni_flow._SKIP_WHY),
+        ("finnhub.io", ni_flow._SKIP_WHY), ("www.alphavantage.co", ni_flow._SKIP_WHY),
         ("web search", 'searched for "NVDA stock price api"'),
         ("research", "read quotes.example.com (no data file or table)")]
     view = ni_master.terminal_surface("declined", ni_flow._flow_read(store, item_id), shell=True)
@@ -914,7 +1111,7 @@ def _skip_both(monkeypatch) -> tuple[ni.NIStore, str, SecretStore, _Model, _Rese
     replay, model, research = _Replay({}, {}), _Model(), _researcher()
     store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
     monkeypatch.setattr(ni_flow, "start_flow_worker", lambda *a, **kw: True)
-    for host in ("www.alphavantage.co", "finnhub.io"):
+    for host in ("finnhub.io", "www.alphavantage.co"):   # the order of fit: Finnhub covers every 30 minutes
         out = ni_flow.run_flow(store, item_id, gateway_call=model)
         assert out["state"] == "awaiting_access" and out["_access"]["host"] == host, out
         assert ni_flow.skip_source(store, item_id) is True
@@ -925,7 +1122,7 @@ def _skip_both(monkeypatch) -> tuple[ni.NIStore, str, SecretStore, _Model, _Rese
 
 def test_keep_looking_after_both_skips_looks_again_without_asking_for_either_key(monkeypatch) -> None:
     """Keep looking on the card research declined after both keyed sites were skipped. Each look runs the ask again,
-    and before, it paused for Alpha Vantage's key again: the order stopped there, asking for a key the user had said
+    and before, it paused for the first site's key again: the order stopped there, asking for a key the user had said
     they don't have. The skips ride the order: a look drops both sites' keyed rows with the skip's reason and goes
     on to research, fetching nothing. A key for a skipped site given since on another card is offered on the card,
     as any same-host key is (the user's tap, nothing copied)."""
@@ -935,7 +1132,7 @@ def test_keep_looking_after_both_skips_looks_again_without_asking_for_either_key
     out = ni_flow.run_flow(store, item_id, gateway_call=model)
     assert out["state"] == "declined" and isinstance(out.get("_looking"), dict), out
     assert len(research.seen) > runs, "the look went on to research"
-    assert _tried(store, item_id) == [("www.alphavantage.co", ni_flow._SKIP_WHY), ("finnhub.io", ni_flow._SKIP_WHY)]
+    assert _tried(store, item_id) == [("finnhub.io", ni_flow._SKIP_WHY), ("www.alphavantage.co", ni_flow._SKIP_WHY)]
     assert ni_flow.skipped_sites(ni_flow._flow_read(store, item_id)) == {"www.alphavantage.co", "finnhub.io"}
     assert replay.fetched == [] and model.calls["mapping"] == 0
     # a key for Alpha Vantage given on another card since: the next look (a free re-match) offers it on this card
@@ -949,12 +1146,12 @@ def test_keep_looking_after_both_skips_looks_again_without_asking_for_either_key
 
 def test_a_retry_after_a_skip_asks_for_the_key_again(monkeypatch) -> None:
     """A Retry starts a fresh record without the skips (the user may have a key by then; it is the one way to bring
-    one later), so the build pauses for the first site's key again."""
+    one later), so the build pauses for the first site's key again: Finnhub's, the source that covers the cadence."""
     store, item_id, _secrets, model, _research, replay = _skip_both(monkeypatch)
     assert ni_flow.reseed_for_retry(store, item_id, ni_flow._flow_read(store, item_id), ASK) is True
     assert ni_flow.skipped_sites(ni_flow._flow_read(store, item_id)) == frozenset()
     out = ni_flow.run_flow(store, item_id, gateway_call=model)
-    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "www.alphavantage.co", out
+    assert out["state"] == "awaiting_access" and out["_access"]["host"] == "finnhub.io", out
     assert replay.fetched == []
 
 
@@ -1020,12 +1217,12 @@ def test_a_build_stops_honestly_when_its_model_budget_is_spent(monkeypatch) -> N
     its calls on every row of the pick. The row that hits the cap moves on naming the budget, the build then fails
     with its own class and line, and a retry runs with a fresh budget."""
     monkeypatch.setattr(ni_flow, "_BUILD_MODEL_CALLS", 3)
-    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    replay = _Replay({FINNHUB: "finnhub-quote"}, {"finnhub.io": FH_KEY})
     model = _Model(picks={"price": "not.an.offered.path"})
     store, item_id, secrets = _card(monkeypatch, ROWS_NVDA["rows"], replay)
     ni_flow.run_flow(store, item_id, gateway_call=model)
-    ni_flow.give_access(store, item_id, secrets, key=AV_KEY, email=None)
-    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=AV_QUOTE)
+    ni_flow.give_access(store, item_id, secrets, key=FH_KEY, email=None)
+    out = ni_flow.run_flow(store, item_id, gateway_call=model, source_url=FINNHUB)
     assert out["state"] == "failed" and ni_master.error_class_of(out["error"]) == "model_budget", out["error"]
     assert ni_master.reason_for("failed", out["error"]).startswith("The build spent its model-call budget")
     assert model.calls["mapping"] == 3, "exactly the budget: the fourth call was never made"

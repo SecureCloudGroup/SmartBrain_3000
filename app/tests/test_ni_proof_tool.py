@@ -1,7 +1,7 @@
 """``tools/ni-proof.py``: the observation that decides "fixed" (postmortem 2026-10-31, rule A1, M13).
 
 The tool drives a running SmartBrain over its local API. These run it against the real app (``create_app`` with
-its routes, flow worker, key store and engine) on T's route table, over the v1.5.0 Library rows for the NVDA ask
+its routes, flow worker, key store and engine) on T's route table, over the v1.6.0 Library rows for the NVDA ask
 and the provider bodies captured on T's Mac, with the same two seams as the proof asks: the model (scripted, it
 reads the real menu) and ``netguard._guarded_get_once`` (the bytes the provider sent). So what the tool reports is
 what the card did on the production path, and the report is checked for the one thing it must never hold: a key.
@@ -20,8 +20,12 @@ from fastapi.testclient import TestClient
 from test_ni_proof_asks import (
     ASK,
     AV_KEY,
+    AV_LIMITS,
+    AV_LINE,
     AV_QUOTE,
+    AV_ROWS,
     FH_KEY,
+    FINNHUB,
     ROWS_NVDA,
     T_ROUTES,
     _Library,
@@ -107,36 +111,44 @@ def _run(tool, client, out: pathlib.Path, *args: str, environ: dict | None = Non
 
 def test_the_nvda_ask_is_observed_from_the_words_to_a_refreshed_card(tool, app, monkeypatch, tmp_path,
                                                                       capsys) -> None:
-    """The run the done gate names: the ask typed, T's cloud model allowed on the card, Alpha Vantage's key given
-    from an environment variable when the card asks for it, the reading kept, one refresh. The report shows each
-    of those steps, the price the card holds, the audit rows, and no key anywhere."""
-    replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
+    """The run the done gate names, as T's Mac will make it: the ask typed, T's cloud model allowed on the card,
+    both keys at hand in environment variables, the reading kept, one refresh. The card asks for Finnhub's key
+    first (its free key covers every 30 minutes; Alpha Vantage's 25 a day do not), so only that key is given and
+    Alpha Vantage is sent nothing. The report shows each of those steps, the price the card holds, the audit rows,
+    and no key anywhere."""
+    replay = _Replay({FINNHUB: "finnhub-quote"}, {"finnhub.io": FH_KEY})
     _wire(monkeypatch, ROWS_NVDA["rows"], replay)
     code, report, markdown = _run(tool, app, tmp_path / "out", "--consent", "allow", "--key",
-                                  "www.alphavantage.co=SB_PROOF_AV", "--yes", "--refresh", "--expect", "built",
-                                  environ={"SB_PROOF_AV": AV_KEY})
+                                  "finnhub.io=SB_PROOF_FH", "--key", "www.alphavantage.co=SB_PROOF_AV", "--yes",
+                                  "--refresh", "--expect", "built",
+                                  environ={"SB_PROOF_FH": FH_KEY, "SB_PROOF_AV": AV_KEY})
     assert code == 0 and report["end"] == "built" and report["met"] is True, (report.get("end"), report["events"])
     assert report["why_not"] == [] and "Not met" not in markdown
-    assert [t["tap"] for t in report["taps"]] == ["consent", "key:www.alphavantage.co", "yes"]
+    assert [t["tap"] for t in report["taps"]] == ["consent", "key:finnhub.io", "yes"]
     assert all(t["status"] == 200 for t in report["taps"])
     asked = [e.get("asks") for e in report["events"]]
     assert "model_consent" in asked, "the card asked for the cloud model before any model call"
     paused = [e for e in report["events"] if e.get("access")]
-    assert paused and paused[0]["access"]["host"] == "www.alphavantage.co" and paused[0]["access"]["key"]
-    assert any(e.get("awaiting_yes", {}).get("host") == "www.alphavantage.co" for e in report["events"])
-    price = float(fixture("alphavantage-global-quote")["body"]["Global Quote"]["05. price"])
+    assert paused and {e["access"]["host"] for e in paused} == {"finnhub.io"} and paused[0]["access"]["key"]
+    assert any(e.get("awaiting_yes", {}).get("host") == "finnhub.io" for e in report["events"])
+    price = float(fixture("finnhub-quote")["body"]["c"])
     assert {"at": "price", "value": price} in report["card"]["values"], report["card"]
-    assert report["card"]["built_from"]["host"] == "www.alphavantage.co"
+    assert report["card"]["built_from"] == {"path": "mapping", "host": "finnhub.io",
+                                            "title": ROWS_NVDA["rows"][1]["title"],
+                                            "limits": {"provider": "Finnhub", "keyed": True,
+                                                       "windows": [{"requests": 60, "seconds": 60}]}}
+    assert "limit" not in report["card"] and "waiting" not in report["card"], "Finnhub covers the cadence"
     assert report["refresh"]["status"] == 200 and report["refresh"]["answer"]["status"] == "ok"
     assert report["card"]["state"] == "live" and report["card"]["runs"][0]["status"] == "ok"
     assert [s["model"] for s in report["app"]["steps"] if s["step"] == "build"] == ["claudecode/opus"]
     tools_seen = {a["tool"] for a in report["audit"]}
     assert {"ni_intake", "ni_flow_answer", "ni_flow_access"} <= tools_seen, tools_seen
-    assert all(u == f"{AV_QUOTE}&apikey={AV_KEY}" for u in replay.fetched), "the key went to its own host only"
+    assert replay.fetched and all(u == f"{FINNHUB}&token={FH_KEY}" for u in replay.fetched), \
+        "the key went to its own host only, and Alpha Vantage was sent nothing"
     printed = capsys.readouterr()
     for text in (json.dumps(report), markdown, printed.out, printed.err):
-        assert AV_KEY not in text, "no key in the report or on the terminal"
-    assert "SB_PROOF_AV" in markdown and "End: **built**" in markdown
+        assert FH_KEY not in text and AV_KEY not in text, "no key in the report or on the terminal"
+    assert "SB_PROOF_FH" in markdown and "End: **built**" in markdown and "- Limit:" not in markdown
 
 
 def test_a_daily_ask_that_cannot_build_is_reported_with_what_was_tried(tool, app, monkeypatch, tmp_path) -> None:
@@ -168,18 +180,21 @@ def test_a_card_waiting_on_a_key_the_run_was_not_given_times_out_and_says_so(too
 
 
 def test_skip_keyless_goes_past_a_row_with_no_key_to_the_one_it_has(tool, app, monkeypatch, tmp_path) -> None:
-    """Given only Finnhub's key, the run skips the Alpha Vantage quote at its pause and the build goes on to
-    Finnhub, whose key it then gives: the card builds from finnhub.io and the tried list names the skip."""
-    replay = _Replay({AV_QUOTE: "alphavantage-global-quote", ROWS_NVDA["rows"][1]["url"]: "finnhub-quote"},
-                     {"finnhub.io": FH_KEY})
+    """Given only Alpha Vantage's key, the run skips Finnhub at its pause and the build goes on to the Alpha Vantage
+    quote, whose key it then gives: the card builds from www.alphavantage.co, the tried list names the skip, and
+    the report carries the card's line about the free limit every 30 minutes overruns, as the card shows it."""
+    replay = _Replay({AV_QUOTE: "alphavantage-global-quote", FINNHUB: "finnhub-quote"},
+                     {"www.alphavantage.co": AV_KEY})
     _wire(monkeypatch, ROWS_NVDA["rows"][:2], replay)
-    code, report, _ = _run(tool, app, tmp_path / "out", "--key", "finnhub.io=SB_PROOF_FH", "--skip-keyless",
-                           "--expect", "built", environ={"SB_PROOF_FH": FH_KEY})
-    assert code == 0 and report["card"]["built_from"]["host"] == "finnhub.io", report["events"]
-    assert [t["tap"] for t in report["taps"]] == ["consent", "skip:www.alphavantage.co", "key:finnhub.io"]
-    assert any("www.alphavantage.co: " in t for e in report["events"] for t in e.get("tried") or [])
-    assert replay.fetched and all(urlsplit(u).hostname == "finnhub.io" for u in replay.fetched), \
+    code, report, markdown = _run(tool, app, tmp_path / "out", "--key", "www.alphavantage.co=SB_PROOF_AV",
+                                  "--skip-keyless", "--expect", "built", environ={"SB_PROOF_AV": AV_KEY})
+    assert code == 0 and report["card"]["built_from"]["host"] == "www.alphavantage.co", report["events"]
+    assert [t["tap"] for t in report["taps"]] == ["consent", "skip:finnhub.io", "key:www.alphavantage.co"]
+    assert any("finnhub.io: " in t for e in report["events"] for t in e.get("tried") or [])
+    assert replay.fetched and all(urlsplit(u).hostname == "www.alphavantage.co" for u in replay.fetched), \
         "nothing was sent to the source it skipped"
+    assert report["card"]["built_from"]["limits"] == AV_LIMITS and report["card"]["limit"] == AV_LINE
+    assert f"- Limit: {AV_LINE}" in markdown
 
 
 def test_consent_stop_reports_the_question_and_sends_nothing(tool, app, monkeypatch, tmp_path) -> None:
@@ -228,7 +243,7 @@ def test_a_refresh_right_after_yes_waits_the_sources_second_out_and_reads_the_qu
     """A run someone tapped waits the second the host named, once, as a build does, asks again and reads the
     quote: the refresh is ok and the card goes live."""
     replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
-    _wire(monkeypatch, ROWS_NVDA["rows"], replay)
+    _wire(monkeypatch, AV_ROWS, replay)
     api = _limited_from_the_refresh(app, replay, ["alphavantage-burst-limited", "alphavantage-global-quote"])
     code, report, _ = _run(tool, app, tmp_path / "out", "--key", "www.alphavantage.co=SB_PROOF_AV", "--yes",
                            "--refresh", "--expect", "built", environ={"SB_PROOF_AV": AV_KEY}, api=api)
@@ -244,9 +259,11 @@ def test_a_refresh_the_source_still_refuses_says_so_and_leaves_the_card_as_due_a
                                                                                          polite_clock) -> None:
     """The host asks again after the wait: the refresh is a 409 with the host's code and a sentence about the
     source (never the page browser), the run is not met and the report says why, and the card is exactly as due
-    as the YES left it, so the engine's next pass makes its first scheduled proof once the host allows."""
+    as the YES left it, so the engine's next pass makes its first scheduled proof once the host allows. The card
+    the board serves says why it isn't updating: the host's wait in its own words and when it tries again, beside
+    the line about the free limit every 30 minutes overruns; once the host allows, the wait is gone."""
     replay = _Replay({AV_QUOTE: "alphavantage-global-quote"}, {"www.alphavantage.co": AV_KEY})
-    _wire(monkeypatch, ROWS_NVDA["rows"], replay)
+    _wire(monkeypatch, AV_ROWS, replay)
     api = _limited_from_the_refresh(app, replay, ["alphavantage-burst-limited"])
     code, report, markdown = _run(tool, app, tmp_path / "out", "--key", "www.alphavantage.co=SB_PROOF_AV", "--yes",
                                   "--refresh", "--expect", "built", environ={"SB_PROOF_AV": AV_KEY}, api=api)
@@ -259,11 +276,17 @@ def test_a_refresh_the_source_still_refuses_says_so_and_leaves_the_card_as_due_a
     item = store.get_item(report["item_id"])
     assert item["state"] == "commissioning" and item["consecutive_failures"] == 0
     assert item["last_checked"] is None, "as due as the YES left it: its first scheduled proof is the next pass"
+    waiting = report["card"]["waiting"]
+    assert waiting["host"] == "www.alphavantage.co" and "1 request per second" in waiting["said"], waiting
+    assert report["card"]["limit"] == AV_LINE
+    assert f"- Waiting: www.alphavantage.co asked SmartBrain to wait until {waiting['until']}: Thank you" in markdown
     polite_clock.now += ni_message.WAIT_SECOND_S + 1
     replay.serve(AV_QUOTE, "alphavantage-global-quote")
     ni.tick(app.app)
     item = store.get_item(report["item_id"])
     assert item["state"] == "live" and item["last_status"] == "ok", "the card refreshed on its own"
+    row = next(r for r in app.get("/api/ni/board").json()["items"] if r["id"] == report["item_id"])
+    assert "waiting" not in row and row["limit"] == AV_LINE, "the host allows again: no wait to show"
 
 
 def test_the_watch_waits_for_the_next_scheduled_run_and_stops_at_it(tool) -> None:

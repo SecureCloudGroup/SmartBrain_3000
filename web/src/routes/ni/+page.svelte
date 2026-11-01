@@ -49,6 +49,7 @@
   import { friendlyErrorClass } from "$lib/ni/errors";
   import { fitText } from "$lib/ni/fit";
   import { AWAITING_SOURCE_PICK, TERMINAL_FLOW_STATES, awaitingYesButtons, awaitingYesNotice, awaitingYesSource, flowStageLabel, hasAction, pauseKind, isFlowActive } from "$lib/ni/flow";
+  import { keepLimitLine, waitingNotice } from "$lib/ni/limits";
   import {
     filterTemplates,
     formatFingerprint,
@@ -1356,7 +1357,7 @@
         {@const reason = state === "failing"
           ? `${friendlyErrorClass(item.last_status)} · last tried ${relTime(item.last_checked)}`
           : ""}
-        {@const notice = renderNotice(item)}
+        {@const notice = renderNotice(item) || waitingNotice(item)}
         {@const draftSites = renderDraftSites(item)}
         {@const fit = fitText(item.fit)}
         <CardShell
@@ -1807,6 +1808,10 @@
               <p class="muted ni-yes-from">{awaitingYesSource(item.awaiting_yes)}</p>
               {#if awaitingYesNotice(item.awaiting_yes)}
                 <p class="muted ni-yes-from">{awaitingYesNotice(item.awaiting_yes)}</p>
+              {/if}
+              {#if keepLimitLine(item)}
+                <!-- PR C (2026-10-31): the source's free limit doesn't cover how often the card refreshes -->
+                <p class="ni-yes-limit">{keepLimitLine(item)}</p>
               {/if}
               <div class="ni-actions">
                 {#if hasAction(item, "keep")}
@@ -2568,6 +2573,12 @@
     margin: 2px 0 var(--s-2);
     font-size: var(--f-label);
     overflow-wrap: anywhere; /* a long host or page title wraps inside the card */
+  }
+  .ni-yes-limit {
+    margin: 2px 0 var(--s-2);
+    font-size: var(--f-label);
+    color: var(--warn);
+    overflow-wrap: anywhere;
   }
   .ni-pick-url {
     /* G1 field fix: a row layout collapsed the input to ~1ch inside card
