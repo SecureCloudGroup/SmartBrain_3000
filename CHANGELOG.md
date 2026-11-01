@@ -131,11 +131,9 @@ driver, its log is the container's, which the update replaces.
   no Library row answers the thing itself, research looks for one (the dollar, corn and the euro's current rate
   have none).
 - Neural Interface: a card whose first mapping attempt gave out and whose second one built no longer fails with
-  "crash: TypeError". The build compared the second attempt with a first build that was never made, so the card
-  failed with a working build in hand (1 of the 100 held-out asks). The second attempt's build now ships, with its
-  own verification notes. And when verification's doubt earns a second pick that then gives out, the first build
-  ships with that doubt noted, as it already did when the second pick scored no better; before, the card failed,
-  or moved on to the next source.
+  "crash: TypeError". The build compared the second attempt with, or fell back to, a first build that was never
+  made, so the card failed with a working build in hand (1 of the 100 held-out asks). The second attempt's build
+  now ships, with its own verification when the check answered.
 - Privacy: keys stay out of app.log. The HTTP client logged every request's full address at INFO, and a keyed
   source's address carries the key in its query string. Those request lines are off, and every log line, with the
   traceback or stack it carries, is redacted of key-bearing query parameters and authorization headers before a

@@ -1698,8 +1698,9 @@ def test_g2_a_build_from_the_mappings_second_pass_ships() -> None:
     """Held-out run, 2026-11-01 (H64): the first mapping pass gave out ("mapping needed another pass"), the
     second built, and the judge's reply was cut short. The loop then restored a first build that was never
     made and raised TypeError (with a judge verdict it raised too, reading that build's verdict), so a card
-    that had built failed. With no first build, the second pass's build is the only one. It ships with its
-    judge's verdict, or none, as a first build would, and a doubt still rides its notes."""
+    that had built failed. With no first build, the second pass's build is the only one. It ships as a first
+    build does when its re-pick earns nothing: an OK verdict is noted, no verdict leaves no note, and a wrong
+    verdict rides the notes as the doubt, since no pass is left for a re-pick."""
     fixture = _load("hn")
     intent_reply = json.dumps({
         "kind": "external_data", "subject": "HN", "cadence_minutes": 15,
@@ -1724,10 +1725,12 @@ def test_g2_a_build_from_the_mappings_second_pass_ships() -> None:
         assert note in notes, (judge, notes)
 
 
-def test_g2_a_repick_that_gives_out_keeps_the_first_build() -> None:
-    """The same loop's other side: a "wrong" verdict earns a re-pick, and a re-pick must earn its place. One whose
-    mapping gives out earns nothing, as one that scores no better earns nothing, so the first build ships with its
-    doubt noted. Before, the card failed (or moved on) with a working build in hand."""
+def test_g2_a_repick_that_gives_out_does_not_ship_the_flagged_build() -> None:
+    """The same loop's other side, kept as it was for 0.27.4 (review of #576): a "wrong" verdict earns a re-pick,
+    and when the re-pick's mapping gives out, the build the verdict flagged does not ship. The source is a misfit,
+    as on any mapping that gives out: an auto-picked row moves on to the next source or research, and a pasted
+    link, as here, fails. Whether a flagged build may reach the Keep step is to be one rule for every exit of this
+    loop (the no-better revert included), not decided here."""
     store, _conn = _store()
     fixture = _load("hn")
     intent_reply = json.dumps({
@@ -1742,11 +1745,10 @@ def test_g2_a_repick_that_gives_out_keeps_the_first_build() -> None:
         store, item_id, gateway_call=model,
         fetcher=lambda url: fixture, source_url="https://hn.algolia.com/api/v1/search?tags=front_page",
     )
-    assert result["state"] == "ready", result.get("error")
-    assert store.get_item(item_id)["spec"]["pipeline"][0]["paths"]["title"] == "hits[0].title"
+    assert result["state"] == "failed", result
+    assert "mapping stage failed after retry" in str(result.get("error") or ""), result
     notes = " ".join((ni_flow._flow_read(store, item_id) or {}).get("notes") or [])
-    assert "second pick failed at mapping; kept the first build" in notes, notes
-    assert "verification still doubts: title: not the real title" in notes, notes
+    assert "kept the first build" not in notes, notes
 
 
 def test_g2_judge_drops_hallucinated_wrong_fields() -> None:

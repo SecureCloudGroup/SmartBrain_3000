@@ -5817,15 +5817,6 @@ def _judge_build(request: str, intent: dict, preview: dict,
         return None
 
 
-def _kept_first(store: ni.NIStore, item_id: str, first: tuple, stage: str) -> tuple:
-    """The judge loop's first build, kept when the re-pick its verdict earned fails at ``stage``: a re-pick must
-    earn its place, and one that gives out earns nothing, as one that scores no better earns nothing (the first
-    build ships, its verdict's doubt with it)."""
-    assert isinstance(first, tuple) and len(first) == 6, "a first build"
-    _append_note(store, item_id, f"second pick failed at {stage}; kept the first build")
-    return first
-
-
 def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                     intent: dict, url: str,
                     call_model: Callable[[str], str],
@@ -6086,9 +6077,6 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                 _append_note(store, item_id,
                               "mapping needed another pass; re-picking")
                 continue
-            if first is not None:  # the re-pick a verdict earned gave out: the first build stands
-                mapping, built, converted, klass, degrade_note, judge = _kept_first(store, item_id, first, "mapping")
-                break
             return misfit("mapping", str(exc))
         klass = _DISPLAY_LIST if hint == "list" else _DISPLAY_VALUE
         degrade_note = None
@@ -6119,17 +6107,11 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                                call_model=call_model, frame_kind=intent.get("frame_kind"),
                                wants=_frame_wants(intent)))
         except ValueError as exc:
-            if first is not None:
-                mapping, built, converted, klass, degrade_note, judge = _kept_first(store, item_id, first, "assembly")
-                break
             return misfit("assembly", str(exc))
         # A12 (case matrix): deterministic °F conversion for temperature fields.
         try:
             converted = _maybe_author_fahrenheit(built, fields, klass, request, sample)
         except (ni.NIError, ValueError) as exc:
-            if first is not None:
-                mapping, built, converted, klass, degrade_note, judge = _kept_first(store, item_id, first, "assembly")
-                break
             return _fail(store, item_id, "assembly", f"fahrenheit conversion failed: {exc}")
         judge = _judge_build(request, intent, built.get("preview_payload") or {},
                              call_model)
@@ -6144,9 +6126,10 @@ def _sample_and_map(store: ni.NIStore, item_id: str, request: str,
                           f"verification flagged {len(judge['wrong'])} field(s); re-picking")
             continue
         if first is None:
-            # the first pass built nothing (its mapping gave out, above): this build is the only one, and it
-            # ships with its own verdict, or none, as a first build does (held-out run 2026-11-01: restoring the
-            # build that was never made raised TypeError and failed a card that had built)
+            # the first pass built nothing (its mapping gave out, above): this build is the only one. It ships as a
+            # first build does when its re-pick earns nothing: a wrong verdict rides the notes as the doubt, since no
+            # pass is left for a re-pick (held-out run 2026-11-01: restoring the build that was never made raised
+            # TypeError and failed a card that had built)
             break
         # Second round: ship it ONLY when the judge scored it strictly better;
         # otherwise revert to the first build and note the standing doubt.
