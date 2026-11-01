@@ -27,30 +27,30 @@ bounded, and they list what it does not count (below).
 
 **How often cards are wrong.** This release was measured on the 100 sealed held-out asks, with an
 Anthropic model building cards and researching, as a Claude Code route does. It built 58 cards. Checked
-one by one against their asks, by one reviewer from what each card saved, 26 answer the ask, 29 do not,
-and 3 can't be told. Of the 29, 10 show something other than what was asked (3 of them say so on the
-card), 9 read a place with the same name in another country, 8 cover another time window, 1 shows one
-region of several, and 1 reads a value that won't stay current. Of the other 42 asks, 9 declined as they
-should, 24 declined that should have built a card, 8 stopped to ask for a key or an email address, which
-the test doesn't give, and 1 crashed (fixed, below). 0.27.0's run, with a local model building its cards
-and an Anthropic model researching, checked the same way, built 51 cards: 18 right, 27 wrong and 6
+one by one against their asks by one AI reviewer, reading what each card saved, 26 answer the ask, 29 do
+not, and 3 can't be told. Of the 29, 10 show something other than what was asked (3 of them say so on
+the card), 9 read a place with the same name in another country, 8 cover another time window, 1 shows
+one region of several, and 1 reads a value that won't stay current. Of the other 42 asks, 9 declined as
+they should, 24 declined that should have built a card, 8 stopped to ask for a key or an email address,
+which the test doesn't give, and 1 crashed (fixed, below). 0.27.0's run, with a local model building its
+cards and an Anthropic model researching, checked the same way, built 51 cards: 18 right, 27 wrong and 6
 unsure. The two runs used different models as well as different releases, so the 8 more right cards
 can't be credited to this release alone. In both, about half of the cards built were wrong. The notes
 for 0.27.1 and 0.27.3 said the 0.27.0 safety numbers stood, but those numbers were never a count of
 wrong cards. The test could call a card wrong only for the few faults a script can check (a card where
 none should be built, or an asked number, unit or compared thing missing from it), and most asks have
-none of those. A card from a source the test didn't list was left for a person to check, and none was
+none of those. A card from a source the test didn't list was set aside to be checked, and none was
 checked before this release. A place passed if its name was on the card, wherever it was, and the time a
 card covers was never checked.
 
 **Check a card before you tap Keep.** A card SmartBrain picked or found itself stays a preview until you
 tap **Keep**. Before you do, read the lines under its title, not the title, which often repeats your
 ask: check that they show the thing and the time you asked for. In this run, those lines showed the
-mistake on 15 of the 18 cards that read another thing or another time window. They don't show a wrong
+mistake on 15 of the 18 cards that read another thing or another time window. They never showed a wrong
 place. If your place shares its name with a place in another country, the card may read the other one,
-even when your ask names the country, and nothing on the card may say so. In this run, 9 cards read a
-same-named place: none of the 6 that saved their text says which place it read, and 2 carry the asked
-place's name in their title.
+even when your ask names the country, and nothing on the card may say so. This run had 9 such cards:
+none of the 6 whose text the test kept says which place it read, and 2 carry the asked place's name in
+their title.
 
 **Delete your old log.** Earlier versions wrote to `app.log` the full address of every source the app
 fetched. For a source that takes its key in the address, as Alpha Vantage and Finnhub do, that address
