@@ -33,8 +33,9 @@ def day_label_rc(ctx, d: date, d0: date):
 
 
 def day_rows(ctx: LayoutCtx, cv: Canvas, evs: list, top: float, bottom: float, *, days: int | None = None,
-             compact: bool = False, name_f: str | None = None, start=None) -> float:
-    """Events grouped by card-zone day: label | cells (tri, time, value). Returns bottom."""
+             compact: bool = False, name_f: str | None = None, start=None) -> tuple[float, int]:
+    """Events grouped by card-zone day: label | cells (tri, time, value). Returns (bottom, how many
+    of ``evs`` it drew): a day the span has no room for is not drawn, nor are its events."""
     _R, W = ctx.R, ctx.W
     tz = ctx.tz
     vf = ctx.cand.bindings.get("value")
@@ -83,6 +84,7 @@ def day_rows(ctx: LayoutCtx, cv: Canvas, evs: list, top: float, bottom: float, *
     cv.d.meta["today"] = d0.isoformat()
     d = start or d0
     shown = 0
+    drawn = 0
     maxd = days or 60
     while shown < maxd:
         evd = by.get(d, [])
@@ -139,8 +141,9 @@ def day_rows(ctx: LayoutCtx, cv: Canvas, evs: list, top: float, bottom: float, *
                 fmt.day_start(e.day + timedelta(days=1), tz)))
         y += h + gap
         shown += 1
+        drawn += len(evd)
         d = d + timedelta(days=1)
-    return y
+    return y, drawn
 
 
 class DayTable(BaseForm):
@@ -231,14 +234,19 @@ class DayTable(BaseForm):
         # synthesizing the empty days between today and the window the ask named.
         start = min(e.day for e in evs)
         if ctx.cand.variant == "events":
-            day_rows(ctx, cv, evs, y0 + 4, y1, days=days, name_f=b.get("name"), start=start)
+            _, drawn = day_rows(ctx, cv, evs, y0 + 4, y1, days=days, name_f=b.get("name"), start=start)
         else:
-            self.rows(ctx, cv, evs, y0 + 4, y1, days, history=is_history)
-        cv.d.state = "many"
+            _, drawn = self.rows(ctx, cv, evs, y0 + 4, y1, days, history=is_history)
+        # the form's own count verdict, which layout_span's every-row-shown rule reads: a table that
+        # reaches today means to show the rows from today on, and the past days it leaves off by design
+        # are not rows it had no room for (counted as such, a forecast whose first row is yesterday read
+        # hollow, red, on every taller span). An all-history record means every row.
+        meant = len(allev) if is_history else len(evs)
+        cv.d.state = "many" if drawn < meant else ("one" if meant == 1 else "few")
 
     def rows(self, ctx, cv, evs, top, bottom, days, history=False):
         """One row per date: day label | name | value columns (right-aligned, headed by their
-        labels so a column of times or numbers is never anonymous)."""
+        labels so a column of times or numbers is never anonymous). Returns (bottom, rows drawn)."""
         R, b, W = ctx.R, ctx.cand.bindings, ctx.W
         d0 = today(ctx.now, ctx.tz)
         narrow = ctx.wc == "W1"
@@ -288,6 +296,7 @@ class DayTable(BaseForm):
         lh = line_h("sub")
         row_h = lh + (12 if ctx.rows > 1 else 6) + (line_h("meta") if narrow else 0)
         y = top
+        drawn = 0
         if keep and keep[0][0][0] == "rng":
             keep = [(keep[0][0][:3] + (None,), keep[0][1])] + keep[1:]
         if keep and not (len(keep) == 1 and keep[0][0][0] == "rng"):
@@ -332,8 +341,9 @@ class DayTable(BaseForm):
             if not history:
                 cv.live("past_dim", prims=ids, t=fmt.iso(fmt.day_start(e.day + timedelta(days=1), ctx.tz)))
             y += row_h - (line_h("meta") if narrow else 0)
+            drawn += 1
         cv.d.meta["today"] = d0.isoformat()
-        return y
+        return y, drawn
 
     @staticmethod
     def _rng(R, b, i):

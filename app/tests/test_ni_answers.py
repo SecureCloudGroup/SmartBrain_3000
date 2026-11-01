@@ -9,8 +9,9 @@ import copy
 import gzip
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import duckdb
 import pytest
@@ -20,8 +21,16 @@ from smartbrain_3000 import library_index, library_resolve, ni_flow
 from smartbrain_3000 import ni as nimod
 from smartbrain_3000.secrets import gen_master_key
 
+
+def _viewer_today() -> date:
+    """Today where the card is laid out: the viewer zone the build and the bind both read
+    (``ni.user_timezone_name``, UTC until a device reports one), never the process's own zone, whose
+    date is a day behind the viewer's every US evening."""
+    return datetime.now(ZoneInfo(nimod.user_timezone_name())).date()
+
+
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast?latitude=40.71&longitude=-74.01"
-_DAYS = [(datetime.now().date() + timedelta(days=i)).isoformat() for i in range(7)]
+_DAYS = [(_viewer_today() + timedelta(days=i)).isoformat() for i in range(7)]
 OPEN_METEO = {
     "current_units": {"temperature_2m": "°F", "relative_humidity_2m": "%", "wind_speed_10m": "mph"},
     "current": {"time": "2026-09-28T14:00", "temperature_2m": 71.3, "relative_humidity_2m": 62,
@@ -117,7 +126,7 @@ class _FakeNet:
 def _days_from_today():
     # The forecast days start today; re-dated per test, since a suite collected before
     # midnight runs these after it, when import-time days would already be yesterday's.
-    _DAYS[:] = [(datetime.now().date() + timedelta(days=i)).isoformat() for i in range(7)]
+    _DAYS[:] = [(_viewer_today() + timedelta(days=i)).isoformat() for i in range(7)]
 
 
 @pytest.fixture()
@@ -256,6 +265,48 @@ def test_a_columns_answer_zips_a_daily_forecast(weather) -> None:
         + len([t for t in texts if t in ("Today", "Tomorrow")])
     assert days >= 6, (days, texts)
     assert any(t.startswith("Ligh") for t in texts) and "7 entries" in bound["summary"]
+
+
+def _forecast_from(first: date) -> dict:
+    """``OPEN_METEO`` with its seven days starting at ``first`` (nothing else re-dated)."""
+    return {**OPEN_METEO, "daily": {**OPEN_METEO["daily"],
+                                    "time": [(first + timedelta(days=i)).isoformat() for i in range(7)]}}
+
+
+def _day_labels(bound: dict, device: str) -> list[str]:
+    """A bound card's day column on ``device``, top to bottom: the words Today / Tomorrow /
+    Yesterday, else the date a time prim stands for (the client formats it)."""
+    out = []
+    shown = [p for p in bound["clir"][device]["prims"] if p["k"] in ("text", "time")]
+    for p in sorted(shown, key=lambda p: p["y"]):  # bounded: one card's prims
+        if p["k"] == "time" and len(p["t"]) == 10:
+            out.append(p["t"])
+        elif p["k"] == "text" and p["lines"] in (["Today"], ["Tomorrow"], ["Yesterday"]):
+            out.append(p["lines"][0])
+    return out
+
+
+def test_a_forecast_whose_first_day_is_yesterday_lists_every_day_from_today(weather) -> None:
+    """The viewer's midnight comes before the source's (a forecast fetched in the source's evening,
+    or a viewer a zone ahead of it), so the first row is yesterday. The day table leaves past days off
+    by design, and they are not rows it had no room for: counted as such, every taller span read
+    hollow and red, the card sealed the shortest one (Today and Tomorrow), and a card sealed on a
+    forecast from today, bound over one from yesterday, dropped day after day down to Today alone."""
+    chosen = [a for a in weather if a["name"] == "daily_forecast"]
+    today = _viewer_today()
+    want = ["Today", "Tomorrow"] + [(today + timedelta(days=i)).isoformat() for i in range(2, 6)]
+    on_time = ni_flow.build_from_answers(chosen, _forecast_from(today), "Philly forecast")
+    late = ni_flow.build_from_answers(chosen, _forecast_from(today - timedelta(days=1)), "Philly forecast")
+    _valid(late)
+    assert late["scene"]["spans"] == on_time["scene"]["spans"], late["scene"]["spans"]
+    # the card built today, bound after the viewer's midnight over the snapshot it last fetched
+    payload = nimod.run_pipeline(on_time["pipeline"], _forecast_from(today - timedelta(days=1)))
+    rolled = {**on_time, "preview_payload": payload}
+    for built in (late, rolled):
+        bound = _bound(built, "Philly forecast")
+        for device in ("desktop", "phone"):
+            assert _day_labels(bound, device) == want, (device, _day_labels(bound, device))
+            assert bound["clir"][device]["ladder"] == [], bound["clir"][device]["ladder"]  # nothing dropped
 
 
 def test_a_list_answer_with_time_rows_newest_first(lib) -> None:
