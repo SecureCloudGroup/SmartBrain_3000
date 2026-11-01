@@ -674,6 +674,9 @@ def validate_item(request: Request, item_id: str, body: ValidateIn) -> dict:
     # run logged three 200s from one confused user). The verdict now kicks
     # the C3 proof run immediately and synchronously; a run failure is
     # reported honestly but never turns the recorded verdict into an error.
+    # From a phone, a kick on a card that refreshes on a cloud model draws the
+    # daily allowance like any run a phone starts; when it is spent the kick
+    # is "refused" and the card checks on its next scheduled refresh.
     run_result: dict = {}
     refreshed = store.get_item(item_id)
     if refreshed is not None and refreshed["state"] == "commissioning"             and refreshed["enabled"]:
@@ -923,6 +926,8 @@ def run_item(request: Request, item_id: str) -> dict:
     if ni.spec_renders(item["spec"]) and browser_runner.slot_busy():
         return _busy_conflict("render_busy")
     result = _execute_manual_run(request, store, item)
+    if result.get("kind") == ni.PHONE_ALLOWANCE:  # a phone's Run on a cloud-model card, today's allowance spent
+        raise HTTPException(status_code=429, detail=PHONE_RUN_DETAIL)
     if result.get("status") == "busy":  # B3a/S5a: the slot or the source's host turned it away — no run, no failure
         return _busy_conflict(str(result.get("kind") or "render_busy"))
     return result
@@ -978,11 +983,13 @@ def _execute_manual_run(request: Request, store: ni.NIStore, item: dict) -> dict
                                  secrets_store=secrets, schedules_store=schedules,
                                  kb=getattr(state, "kb", None))
     except ni.NIError as exc:
-        if exc.kind in ("render_busy", "host_busy"):  # B3a/S5a: capacity, never a failure — the card stays as it was
+        # B3a/S5a: capacity, never a failure — the card stays as it was. A run a phone started that met today's
+        # spent allowance (F3) never reached its cloud call either: no failure, and the card refreshes on its schedule
+        if exc.kind in ("render_busy", "host_busy", ni.PHONE_ALLOWANCE):
             # ...and as due as it was: the stamp above kept the tick off a run in flight, and no run happened
             store.restore_checked(item_id, item.get("last_checked"), item.get("last_status"))
-            return {"status": "busy", "kind": exc.kind, "code": exc.kind,
-                    "duration_ms": int((time.monotonic() - started) * 1000)}
+            return {"status": "refused" if exc.kind == ni.PHONE_ALLOWANCE else "busy", "kind": exc.kind,
+                    "code": exc.kind, "duration_ms": int((time.monotonic() - started) * 1000)}
         store.mark_checked(item_id, exc.kind[:200])
         _post_carrier_after_run(schedules, store, item_id, prior_state, item,
                                 alerts=[], repaired=[])
@@ -1478,7 +1485,7 @@ def answer_flow_question(request: Request, item_id: str, body: AnswerIn) -> dict
     question matches the answered kind. Audited.
 
     Partial route class: a paired phone may answer only ``model_consent`` (a fixed choice,
-    one of T's four taps); every typed answer stays on the Mac.
+    one of T's five fixed-choice consent taps); every typed answer stays on the Mac.
     """
     if body.kind != "model_consent" and account.from_paired_phone(request):
         raise HTTPException(status_code=403, detail=account.DESKTOP_ONLY_DETAIL)
@@ -1556,6 +1563,8 @@ def reopen_flow_pick(request: Request, item_id: str) -> dict:
 
 PHONE_SPEND_DETAIL = ("Today's allowance for cloud research started from a phone is spent "
                       "(the daily re-research ceiling). Allow this one from your Mac, or tomorrow.")
+PHONE_RUN_DETAIL = ("Today's allowance for cloud model use started from a phone is spent (the daily re-research "
+                    "ceiling). Run this card from your Mac, or tomorrow. It still refreshes on its own schedule.")
 
 
 def _charge_phone_spend(request: Request, store: ni.NIStore) -> None:

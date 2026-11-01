@@ -213,9 +213,12 @@ def charge_phone_spend(conn, now: datetime) -> bool:
     unit (``phone_paid``), or when the unit is drawn now; False, nothing drawn, when today's allowance is spent. A tap
     that starts cloud spend (Allow, Keep looking) draws at the tap; any other run a phone started (Retry, Fix, Refine,
     Skip this source) draws before its first cloud model call (``ni_flow._run_flow``) or its cloud research
-    (``ni_research_flow.fallback``), once a run. Until 2026-10-31 only the two taps drew, so repeated Retry taps ran
-    cloud builds uncounted, and research at once under the card's consent would have added research to them. This
-    bounds what the phone app's origin can charge to the owner's key in a day (SECURITY.md)."""
+    (``ni_research_flow.fallback``), and a refresh it started (Run, the run Keep starts) before the card's cloud model
+    call (``ni._draw_phone_allowance``), once a run. Until 2026-10-31 only the two taps drew, so repeated Retry taps
+    ran cloud builds uncounted; until 2026-11-01 Run did not draw. This bounds the cloud-model card runs the phone
+    app's origin can start in a day. Its other cloud use is not counted (SECURITY.md): chat and agent turns, scheduled
+    tasks, a card's scheduled refreshes, a frontier repair it switches on, document summaries and Knowledge's
+    background summaries."""
     assert conn is not None and now.tzinfo is not None, "conn and an aware time required"
     if not auth.request_via() or _PHONE_PAID.get():
         return True

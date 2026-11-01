@@ -1594,6 +1594,79 @@ def test_model_consent_allow_from_a_phone_draws_the_daily_ceiling(client: TestCl
                        json={"kind": "model_consent", "value": "allow"}).status_code == 200  # the Desktop
 
 
+T_ROUTES = {"ni": "claudecode/opus", "chat": "claudecode/sonnet", "agent": "claudecode/sonnet"}  # T's: no local
+
+
+def _cloud_model_cards(client: TestClient, monkeypatch, state: str, count: int) -> tuple[list[str], list[str]]:
+    """``count`` cards that refresh on a cloud model with the card's consent, on T's routes (every one Claude Code,
+    no local model), the allowance at 1 unit and the model call faked; returns (card ids, models called)."""
+    from test_ni import _fetching_preview, _fetching_scene_spec
+
+    from smartbrain_3000 import gateway, ni_refresh
+    _unlock(client)
+    monkeypatch.setenv(ni_refresh.ENV_DAILY, "1")
+    store = client.app.state.ni
+    gateway.save_routes(store.conn, T_ROUTES)
+    calls: list[str] = []
+
+    def chat(messages, model, **_kw) -> dict:
+        assert messages and isinstance(model, str), "a model turn"
+        calls.append(model)
+        return {"choices": [{"message": {"content": "a fresh reading"}}]}
+
+    monkeypatch.setattr(gateway, "chat", chat)
+    ids = []
+    for _ in range(count):
+        item_id = store.add_item({**_fetching_scene_spec(), "_model_consent": "claudecode/opus"},
+                                 _fetching_preview())
+        store.set_state(item_id, state)
+        ids.append(item_id)
+    return ids, calls
+
+
+def test_a_phone_run_on_a_cloud_model_card_draws_the_daily_ceiling(client: TestClient, monkeypatch) -> None:
+    """Review F3 (2026-11-01): a phone's Run on a card that refreshes on a cloud model made a cloud call on every
+    tap and drew nothing, so the phone app's origin could run up the owner's key without end. The review's probe, on
+    T's routes with the allowance at 1: three phone Runs, three cloud calls, the unit unspent. Now the first phone
+    Run draws the unit and refreshes; the next is refused (429, its own sentence) before any model call, and leaves
+    the card as it was: no failure, no run row, as due as before. The Desktop's Run is never counted."""
+    from smartbrain_3000 import ni_refresh
+    (item_id,), calls = _cloud_model_cards(client, monkeypatch, "live", 1)
+    store = client.app.state.ni
+    first = client.post(f"/api/ni/items/{item_id}/run", headers=_PHONE)
+    assert first.status_code == 200 and first.json()["status"] == "ok", first.text
+    assert calls == ["claudecode/opus"] and not ni_refresh.budget_left(store.conn, datetime.now(UTC))
+    before, runs = store.get_item(item_id), len(store.list_runs(item_id))
+    for _ in range(2):   # tapped again, and again
+        refused = client.post(f"/api/ni/items/{item_id}/run", headers=_PHONE)
+        assert refused.status_code == 429 and refused.json()["detail"] == ni_routes.PHONE_RUN_DETAIL, refused.text
+    assert calls == ["claudecode/opus"], "nothing reached the model"
+    after = store.get_item(item_id)
+    assert after["consecutive_failures"] == 0 and len(store.list_runs(item_id)) == runs, "no failure, no run"
+    assert (after["last_checked"], after["last_status"]) == (before["last_checked"], before["last_status"])
+    assert after["state"] == "live"
+    desk = client.post(f"/api/ni/items/{item_id}/run")   # the owner at the desk
+    assert desk.status_code == 200 and desk.json()["status"] == "ok" and calls == ["claudecode/opus"] * 2
+
+
+def test_the_run_keep_starts_from_a_phone_draws_the_daily_ceiling_too(client: TestClient, monkeypatch) -> None:
+    """The run a YES kicks off (``validate``, the Keep tap) takes the same path. From a phone, on a card that
+    refreshes on a cloud model, it draws the unit. With today's spent, the YES still stands, the kick is refused
+    before any model call, and the card checks its data on its next scheduled refresh."""
+    (kept, second), calls = _cloud_model_cards(client, monkeypatch, "commissioning", 2)
+    store = client.app.state.ni
+    first = client.post(f"/api/ni/items/{kept}/validate", headers=_PHONE, json={"ok": True})
+    assert first.status_code == 200 and first.json()["run"] == "ok", first.text
+    assert calls == ["claudecode/opus"]
+    refused = client.post(f"/api/ni/items/{second}/validate", headers=_PHONE, json={"ok": True})
+    assert refused.status_code == 200, refused.text
+    assert refused.json() == {"ok": True, "state": "commissioning", "run": "refused"}
+    assert calls == ["claudecode/opus"], "nothing reached the model"
+    item = store.get_item(second)
+    assert item["spec"]["_c2_ok"] is True, "the YES stands"
+    assert item["consecutive_failures"] == 0 and store.list_runs(second) == []
+
+
 def test_model_consent_local_refused_when_no_local_model_offered(client: TestClient,
                                                                  monkeypatch) -> None:
     from smartbrain_3000 import ni_flow

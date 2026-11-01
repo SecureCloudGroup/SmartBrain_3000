@@ -63,15 +63,20 @@ the phone too; the desktop is still where it lands.
 
 **Neural Interface cards from the phone.** You can ask for a card in plain words and work
 the cards you have: Retry, Cancel, Fix, Refine, Reopen, Stop looking, fill a value that is
-not a secret, switch the brief summary, and read the findings and the measure. The four
+not a secret, switch the brief summary, and read the findings and the measure. The five
 fixed-choice consents are taps the phone may make too: allow a cloud model on a card,
-Activate a card's other sites, Keep looking, and the repair policy. The Desktop checks each
-one and records it in Activity as "from paired phone". Anything the phone starts that uses
-a cloud model counts against the daily re-research allowance (see
-[Design limits](09-design-limits.md)): allowing a cloud model, Keep looking, and a Retry,
-Fix, Refine or Skip this source on a card that builds or researches with one, once per run.
-When the day's allowance is spent, the card says so and the same tap works from your Mac.
-So a phone cannot run up your key without end. What
+Activate a card's other sites, Keep looking, Skip this source, and the repair policy. The
+Desktop checks each one and records it in Activity as "from paired phone". Anything the
+phone starts on a card that uses a cloud model counts against the daily re-research
+allowance (see [Design limits](09-design-limits.md)): allowing a cloud model, Keep looking,
+a Retry, Fix, Refine or Skip this source on a card that builds or researches with one, and
+a Run or Keep on a card that refreshes on one, once per run. When the day's allowance is
+spent, those taps say so and work from your Mac, except Keep: it is still taken, and the card
+checks its data at its next scheduled refresh. The allowance counts only those card runs. It
+does not count chat or agent turns from the phone, scheduled tasks (which the phone can create
+and run, as often as every minute), a card's scheduled refreshes (whose timing the phone can
+change), a frontier repair switched on in a card's repair policy, summarizing a document, or
+the background summaries of documents added to Knowledge. What
 the phone cannot do is hand over anything secret or anything that widens trust: pasting a
 link, typing an answer, adding a key or a feed, trusting a publisher, changing where model
 requests go or which model a step uses, MCP settings, the passphrase, backups, pairing and
