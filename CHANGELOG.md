@@ -39,9 +39,10 @@ carries your key, and a sealed-vault import's address carries the vault's key. N
 carry a key (below), but the old ones stay in the file. Choose **Open logs** in the menu, then **Stop**
 (**Quit launcher** leaves SmartBrain running, holding the file open). Delete `app.log` and any
 `app.log.old` in that folder (the doctor's "Set app.log aside and start a new one" leaves one), then
-choose **Open SmartBrain** to start it again. Without the menu, `smartbrain stop` and `smartbrain
-start` do the same. A backup such as Time Machine keeps its own copy of the file, so re-issuing the
-keys your cards used is the sure fix. A Docker install writes no log file: with Docker's default log
+choose **Open SmartBrain** to start it again. On a headless Linux install, use `systemctl --user stop
+smartbrain` and then `systemctl --user start smartbrain`; `smartbrain stop` alone does not keep it
+stopped there. A backup such as Time Machine keeps its own copy of the file, so re-issuing the keys
+your cards used is the sure fix. A Docker install writes no log file: with Docker's default log
 driver, its log is the container's, which the update replaces.
 
 ### Changed
