@@ -75,8 +75,9 @@ spent, those taps say so and work from your Mac, except Keep: it is still taken,
 checks its data at its next scheduled refresh. The allowance counts only those card runs. It
 does not count chat or agent turns from the phone, scheduled tasks (which the phone can create
 and run, as often as every minute), a card's scheduled refreshes (whose timing the phone can
-change), a frontier repair switched on in a card's repair policy, summarizing a document, or
-the background summaries of documents added to Knowledge. What
+change), a frontier repair switched on in a card's repair policy, summarizing a document,
+the background summaries of documents added to Knowledge, or, when your embedding model is a
+cloud one, embedding what the phone adds to, reindexes or searches in Knowledge. What
 the phone cannot do is hand over anything secret or anything that widens trust: pasting a
 link, typing an answer, adding a key or a feed, trusting a publisher, changing where model
 requests go or which model a step uses, MCP settings, the passphrase, backups, pairing and

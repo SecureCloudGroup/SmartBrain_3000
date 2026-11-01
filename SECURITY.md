@@ -36,15 +36,17 @@ is true of the broker protocol and still leaves things worth knowing:
   minute on a model the task may name; a card's scheduled refreshes, at a cadence it can
   change (a card that refreshes on a cloud model can be set to refresh every minute); a
   frontier repair it switches on in a card's repair policy (one cloud call per failure
-  streak); summarizing a document; and the background summaries of the documents it adds to
-  Knowledge, which use the chat model unless a summary model is set. It cannot enter or
-  change keys (provider keys
-  and card credentials), paste links, type answers, change where model requests go or which
-  model a step uses, change the passphrase, trust a publisher, change feeds, web-search or
-  MCP settings, back up, pair or revoke devices, or install updates: those refuse anything
-  but the Desktop. That list is what refuses the phone outright; the chat, Knowledge,
-  Planner, Schedules, Email and the rest of the Neural Interface card actions work from the
-  phone by design, and the frozen census in `app/tests/test_phone_authority.py` is the record.
+  streak); summarizing a document; the background summaries of the documents it adds to
+  Knowledge, which use the chat model unless a summary model is set; and, when the
+  `embedding` route names a cloud provider, embedding what it adds to, reindexes or searches
+  in Knowledge (the default embedding model is local). It cannot enter or change keys
+  (provider keys and card credentials), paste links, type answers, change where model
+  requests go or which model a step uses, change the passphrase, trust a publisher, change
+  feeds, web-search or MCP settings, back up, pair or revoke devices, or install updates:
+  those refuse anything but the Desktop. That list is what refuses the phone outright; the
+  chat, Knowledge, Planner, Schedules, Email and the rest of the Neural Interface card
+  actions work from the phone by design, and the frozen census in
+  `app/tests/test_phone_authority.py` is the record.
   Every action taken from a phone is recorded in Activity as "from paired phone". Running
   your own node via `SMARTBRAIN_SIGNALING_URL` moves that trust to you; using the
   Desktop only avoids it entirely.
