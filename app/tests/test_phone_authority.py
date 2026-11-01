@@ -4,8 +4,9 @@ phone is display and control).
 Three classes, declared in ``account``:
   * Desktop-only: ``dependencies=[account.DESKTOP_ONLY]`` on the route. Keys, pasted links,
     typed answers, trust, backups, pairing, tokens, MCP config, feeds, updates.
-  * Phone-ok: nothing declared. Reads, driving a card the phone already has, and T's four
-    fixed-choice consent taps (allow a cloud model, Activate, Keep looking, repair policy).
+  * Phone-ok: nothing declared. Reads, driving a card the phone already has, and T's five
+    fixed-choice consent taps (allow a cloud model, Activate, Keep looking, Skip this source,
+    repair policy).
   * Partial: ``from_paired_phone`` inside exactly two routes (intake without a link; answer
     for the model-consent choice only).
 
@@ -249,7 +250,7 @@ PHONE_OK_NI = [
     ("PUT", "/api/ni/items/nope/param", {"name": "x", "value": "y"}),
     ("POST", "/api/ni/items/nope/brief-summary", {"on": True}),
     ("POST", "/api/ni/findings/nope/resolve", None),
-    # T's four fixed-choice consent taps ("yes taps", 2026-10-26 10:46Z)
+    # the five fixed-choice consent taps (T's "yes taps", 2026-10-26 10:46Z; Skip this source since #570)
     ("POST", "/api/ni/items/nope/activate", None),
     ("POST", "/api/ni/items/nope/flow/keep-looking", None),
     ("POST", "/api/ni/items/nope/flow/skip-source", None),

@@ -112,6 +112,17 @@ to know when a release changes behavior.
   Today alone, and stayed so until a fetch brought a forecast that starts today (the 7-day forecasts recorded for
   Nashville, Phoenix, Houston and Salt Lake City all did). A card built then took the smallest size and showed Today
   and Tomorrow only.
+- Neural Interface: a Run a paired phone (or a browser at a LAN address) taps on a card that refreshes on a cloud
+  model draws one unit of the daily phone allowance before the model call, and so does the run the Keep tap starts.
+  Before, nothing on that path drew, so a phone could tap Run on such a card without limit, each tap a call on the
+  owner's cloud model; the docs and SECURITY.md said every run a phone starts was counted. With today's allowance
+  spent, Run says so and works from the Mac, the card is not marked failed and refreshes on its own schedule, and a
+  Keep is still taken. The Mac's own taps and scheduled refreshes are not counted, as before. The docs now also say
+  what the allowance does not count: chat and agent turns from the phone, and a card's scheduled refreshes, whose
+  timing the phone can change.
+- Logging: an access line whose address carries a key (a vault import sends its key as `?key=`) is written with the
+  key redacted. Since the redaction above, such a line was lost instead, with a "Logging error" traceback in its
+  place, because the web server formats its access lines from their parts and the redacted line had none.
 
 ### Added
 - Neural Interface: a card says when its source's free limit won't keep up with it. Held for Keep, it says so under

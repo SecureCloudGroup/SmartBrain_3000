@@ -50,7 +50,41 @@ def test_install_redacts_every_logger_and_quiets_the_http_client(caplog) -> None
         log.warning("sent Authorization: Bearer %s", KEY)
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert KEY not in text and "card-1" in text and text.count(logredact.REDACTED) == 2
-    assert all(r.args == () for r in caplog.records), "the record carries its redacted text, no raw args"
+    fetched, sent = caplog.records
+    # no raw argument is kept: the one that carried the key is redacted in place (the shape a formatter may read),
+    # and a key the format and an argument spell together leaves the redacted text with no arguments
+    assert fetched.args == ("https://finnhub.io/api/v1/quote?symbol=NVDA&token=[redacted]", "card-1")
+    assert sent.args == () and sent.msg == "sent Authorization: Bearer [redacted]"
+
+
+def test_an_access_line_keeps_its_shape_when_its_key_is_redacted() -> None:
+    """Review F1: uvicorn formats every access line by unpacking exactly five arguments, and a vault import sends
+    its key as ``?key=`` (``POST /api/vaults/import``). Redacted to the bare text with no arguments, the line no
+    longer formatted: the log got ``--- Logging error ---`` and a traceback in its place. The arguments keep their
+    shape, the key redacted in the one that held it."""
+    from uvicorn.logging import AccessFormatter
+
+    factory = logredact._redacting_factory(logging.LogRecord)
+    record = factory("uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
+                     ("127.0.0.1:50000", "POST", f"/api/vaults/import?key={KEY}", "1.1", 200), None)
+    line = AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s', use_colors=False).format(record)
+    assert line == '127.0.0.1:50000 - "POST /api/vaults/import?key=[redacted] HTTP/1.1" 200 OK', line
+    assert len(record.args) == 5 and KEY not in repr(record.args)
+    plain = factory("uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
+                    ("127.0.0.1:50000", "GET", "/api/ni/board", "1.1", 200), None)
+    assert plain.args[2] == "/api/ni/board", "a line with nothing to redact is untouched"
+
+
+def test_an_argument_that_is_not_a_string_cannot_keep_a_key() -> None:
+    """A key inside an argument the factory cannot redact in place (an object that prints it) drops the arguments
+    and keeps the redacted text, as before."""
+    class _Url:
+        def __str__(self) -> str:
+            return f"https://h.example/?symbol=NVDA&token={KEY}"
+
+    record = logredact._redacting_factory(logging.LogRecord)(
+        "smartbrain.test", logging.INFO, __file__, 1, "fetched %s", (_Url(),), None)
+    assert record.args == () and record.getMessage() == "fetched https://h.example/?symbol=NVDA&token=[redacted]"
 
 
 def test_the_http_clients_own_request_line_never_reaches_a_handler(caplog) -> None:

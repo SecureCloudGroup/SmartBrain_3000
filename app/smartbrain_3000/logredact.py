@@ -65,11 +65,32 @@ def redact(text: str) -> str:
     return out
 
 
+def _clean_args(record: logging.LogRecord, clean: str) -> tuple | dict | None:
+    """``record.args`` with every string in them redacted, in the same shape, when the record's format with them
+    gives ``clean``; None when it doesn't (a credential split across the format and an argument, or held by an
+    argument that is not a string). A formatter that reads the arguments keeps working: uvicorn's access lines
+    unpack exactly five, and a vault import's ``?key=`` is one of them (review F1: the line was lost, with a
+    traceback in its place)."""
+    args = record.args
+    if isinstance(args, tuple):
+        new: tuple | dict = tuple(redact(a) if isinstance(a, str) else a for a in args)
+    elif isinstance(args, dict):
+        new = {k: redact(v) if isinstance(v, str) else v for k, v in args.items()}
+    else:
+        return None
+    try:
+        return new if str(record.msg) % new == clean else None
+    except Exception:  # a format the redacted arguments no longer fit
+        return None
+
+
 def _redacting_factory(inner):
     """A ``logging`` record factory that formats the record's message once and stores it redacted, and does the same
     for the traceback (``exc_info``: an HTTP client's error names the URL it was sent, key and all) and the stack
-    (``stack_info``) a record carries. A traceback that needed it is kept as its redacted text only (``exc_text``,
-    which every formatter prints as is), so no handler can format the raw exception again."""
+    (``stack_info``) a record carries. A redacted message keeps its arguments' shape when they alone carried the
+    credential (``_clean_args``), else becomes the redacted text with no arguments. A traceback that needed it is
+    kept as its redacted text only (``exc_text``, which every formatter prints as is), so no handler can format the
+    raw exception again."""
     assert callable(inner), "the factory to wrap"
 
     def factory(*args, **kwargs):
@@ -81,7 +102,11 @@ def _redacting_factory(inner):
         if text is not None:
             clean = redact(text)
             if clean != text:
-                record.msg, record.args = clean, ()
+                kept = _clean_args(record, clean) if record.args else None
+                if kept is None:
+                    record.msg, record.args = clean, ()
+                else:
+                    record.args = kept
         if record.exc_info:
             try:
                 trace = logging.Formatter().formatException(record.exc_info)

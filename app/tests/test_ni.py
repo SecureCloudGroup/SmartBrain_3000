@@ -1180,6 +1180,39 @@ def test_busy_local_model_run_leaves_no_failure_streak() -> None:
     assert store.get_first_failure_at(iid) is None
 
 
+def test_only_a_cloud_refresh_a_phone_or_lan_browser_started_draws_the_allowance(monkeypatch) -> None:
+    """Review F3: the refresh step's one cloud call (``_fetch_model``) draws the daily allowance on a run a paired
+    phone or a LAN browser started, once a run, as a build and research draw before theirs. Spent, the run stops
+    before the call and is no failure (no run row, no streak). The scheduler's run (no request) and a refresh on a
+    local model are never counted."""
+    from datetime import UTC, datetime
+
+    from smartbrain_3000 import auth, ni_refresh
+    monkeypatch.setenv(ni_refresh.ENV_DAILY, "1")
+    store, conn, key = _store()
+    secrets, schedules = SecretStore(conn, key), ScheduleStore(conn, key)
+    cloud = _ModelGateway("claudecode/opus", local=False)
+    iid = store.add_item({**_fetching_scene_spec(), "_model_consent": "claudecode/opus"}, _fetching_preview())
+    store.set_state(iid, "live")
+
+    def run(gw, item_id: str, via: str | None) -> dict:
+        with auth.serving_via(via), ni_refresh.paid_scope(False):
+            return nimod.run_item(store, item_id, gateway_mod=gw, secrets_store=secrets, schedules_store=schedules)
+
+    assert run(cloud, iid, auth.LAN_VIA)["status"] == "ok" and cloud.calls == 1, "a LAN browser's run drew the unit"
+    assert not ni_refresh.budget_left(conn, datetime.now(UTC))
+    runs = len(store.list_runs(iid))
+    with pytest.raises(nimod.NIError) as exc:
+        run(cloud, iid, auth.PHONE_VIA)
+    assert exc.value.kind == nimod.PHONE_ALLOWANCE and cloud.calls == 1, "spent: nothing reached the model"
+    assert store.get_item(iid)["consecutive_failures"] == 0 and len(store.list_runs(iid)) == runs
+    assert run(cloud, iid, None)["status"] == "ok" and cloud.calls == 2, "the scheduler's run is not counted"
+    local = _ModelGateway("ollama/x", local=True)
+    other = store.add_item(_fetching_scene_spec(), _fetching_preview())
+    store.set_state(other, "live")
+    assert run(local, other, auth.PHONE_VIA)["status"] == "ok" and local.calls == 1, "a local model costs nothing"
+
+
 def test_record_validation_refuses_outside_commissioning() -> None:
     """C: record_validation refuses (ValueError) unless the item is currently commissioning."""
     store, _, _ = _store()

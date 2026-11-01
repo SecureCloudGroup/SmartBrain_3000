@@ -231,6 +231,9 @@ _RENDER_INTERVAL_FLOOR = 15  # minutes: about two renders a minute serve ~30 car
 # ``host_busy`` (S5a): the card's host is over its request budget or paused by a 429 / 503; the card
 # stays due and the tick asks again, it is never a failure.
 CAPACITY_KINDS: frozenset[str] = frozenset({"render_busy", "render_unavailable", "model_busy", "host_busy"})
+# A refresh a paired phone or a LAN browser started (Run, the run Keep starts) met today's spent allowance for cloud
+# model use (``_draw_phone_allowance``). Like a capacity status, the run never happened: no run row, no streak.
+PHONE_ALLOWANCE = "phone_allowance"
 # S9: the run status of a recipe card whose source still answers but no longer the question it was kept
 # for (wrong place, window, threshold, compare count, or nothing where data was expected). A real failure:
 # ``last_good`` keeps rendering and the streak runs, never a blank or wrong card marked ok.
@@ -6481,8 +6484,8 @@ def run_item(store: NIStore, item_id: str, *, gateway_mod, secrets_store,
                 "values": {name: outputs.get(name) for name in llm_fields},
             }, ok=wrote or not _llm_stages_optional(spec))
     except NIError as exc:
-        if exc.kind in CAPACITY_KINDS:
-            raise  # B3a: busy / unavailable is never a failure — no run row, latest, streak or L1
+        if exc.kind in CAPACITY_KINDS or exc.kind == PHONE_ALLOWANCE:
+            raise  # B3a: busy / unavailable / a phone's spent allowance is never a failure — no run row, streak or L1
         _handle_failure(store, item, exc, started, started_rev=started_rev)
         _seal_last_failure_snapshot(store, item["id"], exc, raw_excerpt)
         _maybe_repair_l1(store, item, gateway_mod, raw_excerpt, exc,
@@ -8838,10 +8841,24 @@ def _card_model(spec: dict, gateway_mod, routes: dict, store: NIStore, item_id: 
     raise NIError("model_consent_required")
 
 
+def _draw_phone_allowance(store: NIStore) -> None:
+    """Before a refresh's cloud model call: a run a paired phone or a LAN browser started (Run, the run Keep
+    starts) draws one unit of the daily ceiling, once a request (``ni_refresh.charge_phone_spend``), as a build and
+    research draw before theirs. The Desktop and the scheduler are never counted. Until 2026-11-01 nothing on this
+    path drew, so a phone could tap Run on a card that refreshes on a cloud model without limit (review F3).
+    Raises ``NIError(PHONE_ALLOWANCE)``, nothing called, when today's allowance is spent."""
+    from . import ni_refresh  # lazy: ni_refresh imports this module
+
+    assert store is not None, "store required"
+    if not ni_refresh.charge_phone_spend(store.conn, datetime.now(UTC)):
+        raise NIError(PHONE_ALLOWANCE)
+
+
 def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore, item_id: str = "") -> dict:
     """Run one chat completion on the card's model (see ``_card_model``); return {'text': ...}.
 
-    A non-local model runs only when ``spec['_model_consent']`` names that exact model.
+    A non-local model runs only when ``spec['_model_consent']`` names that exact model, and, on a run a phone
+    started, only after that run drew its unit of the daily allowance (``_draw_phone_allowance``).
 
     ``gateway_mod.load_routes`` requires the store's cursor (B): the previous
     ``load_routes(None)`` tripped the module's own ``conn is not None`` assertion.
@@ -8861,6 +8878,8 @@ def _fetch_model(spec: dict, source: dict, gateway_mod, store: NIStore, item_id:
     if gateway_mod.is_local(model) and not gateway_mod.local_available():
         # Yield to a foreground chat — the tick's per-item budget makes this cheap to retry.
         raise NIError("model_busy")
+    if not gateway_mod.is_local(model):
+        _draw_phone_allowance(store)
     try:
         data = gateway_mod.chat([{"role": "user", "content": source["instruction"]}], model)
     except gateway_mod.GatewayError as exc:
