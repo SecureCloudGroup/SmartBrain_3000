@@ -25,13 +25,20 @@ cloud model now draw the daily phone allowance, as Allow and Keep looking alread
 bounds only those card runs, so the docs no longer say that what a phone can charge to your key is
 bounded, and they list what it does not count (below).
 
-There is no new held-out safety run for this release. The last one was for 0.27.0, with a local model
-building cards and research on an Anthropic model. Since then, 0.27.3 let Library sources that don't
-describe their answers build and let a Claude Code route run every step, and this release lets sources
-with spaces in their field names build and runs research at once. Those changes turn asks that used to
-decline into cards. So that run does not say how often this release's cards are wrong, and that has
-not been measured. 0.27.3's note said the 0.27.0 numbers still stood; for the same reason, they did
-not.
+**How often cards are wrong.** This release was measured on the 100 sealed held-out asks, with an
+Anthropic model building cards and researching, as a Claude Code route does. It built 58 cards. Checked
+one by one against their asks, 26 answer the ask, 29 do not, and 3 can't be told from what was saved.
+The most common wrong card reads a place with the same name in another country (9 of the 29). The
+others show something other than what was asked (10, and 3 of those say so on the card), another time
+window (8), one region of several (1), or a value that won't stay current (1). Of the other 42 asks, 9
+declined as they should, 24 declined that should have built a card, 8 ended with links, and 1 crashed
+(fixed, below). 0.27.0's run, with a local model building its cards and checked the same way, built 51
+cards: 18 right, 27 wrong and 6 unsure. So this release builds more right cards and about as many wrong
+ones. The notes for 0.27.1 and 0.27.3 said the 0.27.0 safety numbers stood, but those numbers never
+counted wrong cards. They counted a card wrong only when it came from a source the test expected, and
+they checked a place by its name, not by where it is. A card SmartBrain picked or found itself stays a
+preview until you tap **Keep**: before you do, check that it shows the place, the thing and the time you
+asked for.
 
 **Delete your old log.** Earlier versions wrote to `app.log` the full address of every source the app
 fetched. For a source that takes its key in the address, as Alpha Vantage and Finnhub do, that address
